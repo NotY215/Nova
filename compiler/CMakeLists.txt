@@ -1,6 +1,8 @@
 add_library(nova_compiler STATIC
     lexer/Token.cpp
     lexer/Lexer.cpp
+    ast/Ast.cpp
+    parser/Parser.cpp
 )
 target_include_directories(nova_compiler PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

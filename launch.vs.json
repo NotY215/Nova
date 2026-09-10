@@ -6,8 +6,31 @@
       "type": "default",
       "project": "CMakeLists.txt",
       "projectTarget": "novac.exe",
-      "name": "novac (examples\\hello.nova)",
-      "args": [ "${workspaceRoot}\\examples\\hello.nova" ]
+      "name": "novac --dump-ast hello.nova",
+      "args": [
+        "${workspaceRoot}\\examples\\hello.nova",
+        "--dump-ast"
+      ]
+    },
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "novac.exe",
+      "name": "novac --dump-ast expr.nova",
+      "args": [
+        "${workspaceRoot}\\examples\\expr.nova",
+        "--dump-ast"
+      ]
+    },
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "novac.exe",
+      "name": "novac --dump-tokens hello.nova",
+      "args": [
+        "${workspaceRoot}\\examples\\hello.nova",
+        "--dump-tokens"
+      ]
     }
   ]
 }
