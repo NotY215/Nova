@@ -6,6 +6,11 @@
 #include <fstream>
 #include <sstream>
 
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#endif
+
 static std::string readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return {};
@@ -20,6 +25,9 @@ static void usage() {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);   // so the tree glyphs render
+#endif
     if (argc < 2) { usage(); return 1; }
 
     std::string file = argv[1];
@@ -55,8 +63,7 @@ int main(int argc, char** argv) {
     try {
         nova::Parser parser(std::move(tokens));
         nova::Block program = parser.parseProgram();
-        std::printf("Program (%zu statements):\n", program.stmts.size());
-        nova::printBlock(program, 1);
+        nova::printProgram(program);
     }
     catch (const nova::ParseError& e) {
         std::fprintf(stderr, "%s:%d:%d: error: %s\n",

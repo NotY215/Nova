@@ -367,9 +367,22 @@ namespace nova {
             return std::make_unique<NoneLitExpr>(tok.location);
         }
         case TokenType::Identifier: {
+            case TokenType::IntKw:
+            case TokenType::FloatKw:
+            case TokenType::BoolKw:
+            case TokenType::StrKw:
+            case TokenType::CharKw:
+            case TokenType::BytesKw:
+            case TokenType::Ptr:
+            case TokenType::Ref:
+            case TokenType::Unique:
+            case TokenType::Shared:
+            case TokenType::Weak: {
             Token tok = advance();
             return std::make_unique<NameRefExpr>(tok.lexeme, tok.location);
+            }
         }
+
         case TokenType::LParen: {
             Token open = advance();
             ExprPtr inner = parseExpression();

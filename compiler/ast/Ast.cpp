@@ -1,9 +1,12 @@
 #include "Ast.hpp"
 #include <cstdio>
+#include <string>
 
 namespace nova {
 
-    // ---------- operator names ----------
+    // ===========================================================================
+    // Operator names
+    // ===========================================================================
 
     const char* binOpName(BinOp op) {
         switch (op) {
@@ -37,210 +40,276 @@ namespace nova {
         return "?";
     }
 
-    // ---------- helpers ----------
+    // ===========================================================================
+    // Tree-printing helpers
+    // ===========================================================================
 
-    static void indent(int n) {
-        for (int i = 0; i < n; ++i) std::fputs("  ", stdout);
-    }
+    namespace {
 
-    static void printTypeOrNull(const Expr* e) {
-        if (!e) { std::printf("?"); return; }
-        // Only NameRef and simple nesting printed inline for compactness.
-        switch (e->kind) {
-        case ExprKind::NameRef:
-            std::printf("%s", static_cast<const NameRefExpr*>(e)->name.c_str());
-            return;
-        default:
-            std::printf("<type-expr>");
-            return;
+        // UTF-8 box drawing.  Set the console to CP_UTF8 (done in main.cpp) so these
+        // render correctly in Windows Terminal / VS debug console / PowerShell.
+        constexpr const char* TEE = "\xE2\x94\x9C\xE2\x94\x80\xE2\x94\x80 "; // ├──
+        constexpr const char* ELBOW = "\xE2\x94\x94\xE2\x94\x80\xE2\x94\x80 "; // └──
+        constexpr const char* PIPE = "\xE2\x94\x82   ";                       // │
+        constexpr const char* BLANK = "    ";
+
+        void putLabel(const std::string& prefix, bool isLast, const std::string& label) {
+            std::printf("%s%s%s\n",
+                prefix.c_str(),
+                isLast ? ELBOW : TEE,
+                label.c_str());
         }
-    }
 
-    // ---------- expressions ----------
+        std::string childPrefix(const std::string& prefix, bool isLast) {
+            return prefix + (isLast ? BLANK : PIPE);
+        }
 
-    void printExpr(const Expr* e, int depth) {
+    } // namespace
+
+    // Forward declarations (internal linkage)
+    static void prExpr(const Expr* e, const std::string& prefix, bool isLast);
+    static void prStmt(const Stmt* s, const std::string& prefix, bool isLast);
+    static void prBlock(const Block& b, const std::string& prefix);
+
+    // ===========================================================================
+    // Expressions
+    // ===========================================================================
+
+    static void prExpr(const Expr* e, const std::string& prefix, bool isLast) {
         if (!e) return;
-        indent(depth);
+
         switch (e->kind) {
         case ExprKind::IntLit: {
             auto* n = static_cast<const IntLitExpr*>(e);
-            std::printf("Int(%s)\n", n->text.c_str()); break;
+            putLabel(prefix, isLast, "Int(" + n->text + ")");
+            break;
         }
         case ExprKind::FloatLit: {
             auto* n = static_cast<const FloatLitExpr*>(e);
-            std::printf("Float(%s)\n", n->text.c_str()); break;
+            putLabel(prefix, isLast, "Float(" + n->text + ")");
+            break;
         }
         case ExprKind::StringLit: {
             auto* n = static_cast<const StringLitExpr*>(e);
-            std::printf("String(\"%s\")\n", n->value.c_str()); break;
+            putLabel(prefix, isLast, "String(\"" + n->value + "\")");
+            break;
         }
         case ExprKind::CharLit: {
             auto* n = static_cast<const CharLitExpr*>(e);
-            std::printf("Char('%s')\n", n->value.c_str()); break;
+            putLabel(prefix, isLast, "Char('" + n->value + "')");
+            break;
         }
         case ExprKind::BoolLit: {
             auto* n = static_cast<const BoolLitExpr*>(e);
-            std::printf("Bool(%s)\n", n->value ? "true" : "false"); break;
+            putLabel(prefix, isLast, n->value ? "Bool(true)" : "Bool(false)");
+            break;
         }
         case ExprKind::NoneLit:
-            std::printf("None\n"); break;
+            putLabel(prefix, isLast, "None");
+            break;
         case ExprKind::NameRef: {
             auto* n = static_cast<const NameRefExpr*>(e);
-            std::printf("Name(%s)\n", n->name.c_str()); break;
+            putLabel(prefix, isLast, "Name(" + n->name + ")");
+            break;
         }
         case ExprKind::Unary: {
             auto* n = static_cast<const UnaryExpr*>(e);
-            std::printf("Unary(%s)\n", unOpName(n->op));
-            printExpr(n->operand.get(), depth + 1);
+            putLabel(prefix, isLast, std::string("Unary(") + unOpName(n->op) + ")");
+            prExpr(n->operand.get(), childPrefix(prefix, isLast), true);
             break;
         }
         case ExprKind::Binary: {
             auto* n = static_cast<const BinaryExpr*>(e);
-            std::printf("Binary(%s)\n", binOpName(n->op));
-            printExpr(n->lhs.get(), depth + 1);
-            printExpr(n->rhs.get(), depth + 1);
+            putLabel(prefix, isLast, std::string("Binary(") + binOpName(n->op) + ")");
+            std::string cp = childPrefix(prefix, isLast);
+            prExpr(n->lhs.get(), cp, false);
+            prExpr(n->rhs.get(), cp, true);
             break;
         }
         case ExprKind::Grouping: {
             auto* n = static_cast<const GroupingExpr*>(e);
-            std::printf("Group\n");
-            printExpr(n->inner.get(), depth + 1);
+            putLabel(prefix, isLast, "Group");
+            prExpr(n->inner.get(), childPrefix(prefix, isLast), true);
             break;
         }
         case ExprKind::Call: {
             auto* n = static_cast<const CallExpr*>(e);
-            std::printf("Call\n");
-            indent(depth + 1); std::printf("callee:\n");
-            printExpr(n->callee.get(), depth + 2);
-            if (!n->args.empty()) {
-                indent(depth + 1); std::printf("args:\n");
-                for (auto& a : n->args) printExpr(a.get(), depth + 2);
+            putLabel(prefix, isLast, "Call");
+            std::string cp = childPrefix(prefix, isLast);
+            bool hasArgs = !n->args.empty();
+
+            putLabel(cp, !hasArgs, "callee");
+            prExpr(n->callee.get(), childPrefix(cp, !hasArgs), true);
+
+            if (hasArgs) {
+                putLabel(cp, true, "args");
+                std::string ap = childPrefix(cp, true);
+                for (size_t i = 0; i < n->args.size(); ++i) {
+                    prExpr(n->args[i].get(), ap, i + 1 == n->args.size());
+                }
             }
             break;
         }
         case ExprKind::Attr: {
             auto* n = static_cast<const AttrExpr*>(e);
-            std::printf("Attr(.%s)\n", n->name.c_str());
-            printExpr(n->target.get(), depth + 1);
+            putLabel(prefix, isLast, "Attr(." + n->name + ")");
+            prExpr(n->target.get(), childPrefix(prefix, isLast), true);
             break;
         }
         case ExprKind::Index: {
             auto* n = static_cast<const IndexExpr*>(e);
-            std::printf("Index\n");
-            printExpr(n->target.get(), depth + 1);
-            printExpr(n->index.get(), depth + 1);
+            putLabel(prefix, isLast, "Index");
+            std::string cp = childPrefix(prefix, isLast);
+            prExpr(n->target.get(), cp, false);
+            prExpr(n->index.get(), cp, true);
             break;
         }
         }
     }
 
-    // ---------- statements ----------
+    // ===========================================================================
+    // Statements
+    // ===========================================================================
 
-    void printBlock(const Block& b, int depth) {
-        if (b.stmts.empty()) {
-            indent(depth); std::printf("(empty)\n");
-            return;
+    static void prBlock(const Block& b, const std::string& prefix) {
+        if (b.stmts.empty()) return;
+        for (size_t i = 0; i < b.stmts.size(); ++i) {
+            prStmt(b.stmts[i].get(), prefix, i + 1 == b.stmts.size());
         }
-        for (auto& s : b.stmts) printStmt(s.get(), depth);
     }
 
-    void printStmt(const Stmt* s, int depth) {
+    static void prStmt(const Stmt* s, const std::string& prefix, bool isLast) {
         if (!s) return;
+
         switch (s->kind) {
         case StmtKind::Expr: {
             auto* n = static_cast<const ExprStmt*>(s);
-            indent(depth); std::printf("ExprStmt\n");
-            printExpr(n->expr.get(), depth + 1);
+            putLabel(prefix, isLast, "ExprStmt");
+            prExpr(n->expr.get(), childPrefix(prefix, isLast), true);
             break;
         }
         case StmtKind::Assign: {
             auto* n = static_cast<const AssignStmt*>(s);
-            indent(depth); std::printf("Assign\n");
-            indent(depth + 1); std::printf("target:\n");
-            printExpr(n->target.get(), depth + 2);
-            indent(depth + 1); std::printf("value:\n");
-            printExpr(n->value.get(), depth + 2);
+            putLabel(prefix, isLast, "Assign");
+            std::string cp = childPrefix(prefix, isLast);
+            putLabel(cp, false, "target");
+            prExpr(n->target.get(), childPrefix(cp, false), true);
+            putLabel(cp, true, "value");
+            prExpr(n->value.get(), childPrefix(cp, true), true);
             break;
         }
         case StmtKind::AnnotAssign: {
             auto* n = static_cast<const AnnotAssignStmt*>(s);
-            indent(depth); std::printf("AnnotAssign(%s: ", n->name.c_str());
-            printTypeOrNull(n->type.get());
-            std::printf(")\n");
+            std::string label = "AnnotAssign(" + n->name + ": ";
+            // Type is a bare Name for simple cases.
+            if (n->type && n->type->kind == ExprKind::NameRef) {
+                label += static_cast<const NameRefExpr*>(n->type.get())->name;
+            }
+            else {
+                label += "<type>";
+            }
+            label += ")";
+            putLabel(prefix, isLast, label);
             if (n->value) {
-                indent(depth + 1); std::printf("value:\n");
-                printExpr(n->value.get(), depth + 2);
+                putLabel(childPrefix(prefix, isLast), true, "value");
+                prExpr(n->value.get(), childPrefix(childPrefix(prefix, isLast), true), true);
             }
             break;
         }
         case StmtKind::If: {
             auto* n = static_cast<const IfStmt*>(s);
-            indent(depth); std::printf("If\n");
-            indent(depth + 1); std::printf("cond:\n");
-            printExpr(n->cond.get(), depth + 2);
-            indent(depth + 1); std::printf("then:\n");
-            printBlock(n->thenBody, depth + 2);
-            for (auto& e : n->elifs) {
-                indent(depth + 1); std::printf("elif:\n");
-                indent(depth + 2); std::printf("cond:\n");
-                printExpr(e.cond.get(), depth + 3);
-                indent(depth + 2); std::printf("then:\n");
-                printBlock(e.body, depth + 3);
+            putLabel(prefix, isLast, "If");
+            std::string cp = childPrefix(prefix, isLast);
+
+            size_t total = 2 + n->elifs.size() + (n->elseBody ? 1 : 0);
+            size_t idx = 0;
+
+            // cond
+            putLabel(cp, false, "cond");
+            prExpr(n->cond.get(), childPrefix(cp, false), true);
+            ++idx;
+
+            // then
+            bool thenLast = (idx + 1 == total);
+            putLabel(cp, thenLast, "then");
+            prBlock(n->thenBody, childPrefix(cp, thenLast));
+            ++idx;
+
+            // elifs
+            for (auto& ec : n->elifs) {
+                bool eLast = (idx + 1 == total);
+                putLabel(cp, eLast, "elif");
+                std::string ep = childPrefix(cp, eLast);
+                putLabel(ep, false, "cond");
+                prExpr(ec.cond.get(), childPrefix(ep, false), true);
+                putLabel(ep, true, "then");
+                prBlock(ec.body, childPrefix(ep, true));
+                ++idx;
             }
+
+            // else
             if (n->elseBody) {
-                indent(depth + 1); std::printf("else:\n");
-                printBlock(*n->elseBody, depth + 2);
+                putLabel(cp, true, "else");
+                prBlock(*n->elseBody, childPrefix(cp, true));
             }
             break;
         }
         case StmtKind::While: {
             auto* n = static_cast<const WhileStmt*>(s);
-            indent(depth); std::printf("While\n");
-            indent(depth + 1); std::printf("cond:\n");
-            printExpr(n->cond.get(), depth + 2);
-            indent(depth + 1); std::printf("body:\n");
-            printBlock(n->body, depth + 2);
+            putLabel(prefix, isLast, "While");
+            std::string cp = childPrefix(prefix, isLast);
+            putLabel(cp, false, "cond");
+            prExpr(n->cond.get(), childPrefix(cp, false), true);
+            putLabel(cp, true, "body");
+            prBlock(n->body, childPrefix(cp, true));
             break;
         }
         case StmtKind::Def: {
             auto* n = static_cast<const DefStmt*>(s);
-            indent(depth); std::printf("Def(%s)\n", n->name.c_str());
-            indent(depth + 1); std::printf("params:\n");
-            if (n->params.empty()) {
-                indent(depth + 2); std::printf("(none)\n");
-            }
-            else {
-                for (auto& p : n->params) {
-                    indent(depth + 2); std::printf("%s: ", p.name.c_str());
-                    printTypeOrNull(p.type.get());
-                    std::printf("\n");
+            std::string label = "Def " + n->name + "(";
+            for (size_t i = 0; i < n->params.size(); ++i) {
+                if (i) label += ", ";
+                label += n->params[i].name;
+                if (n->params[i].type &&
+                    n->params[i].type->kind == ExprKind::NameRef) {
+                    label += ": ";
+                    label += static_cast<const NameRefExpr*>(
+                        n->params[i].type.get())->name;
                 }
             }
-            if (n->returnType) {
-                indent(depth + 1); std::printf("return: ");
-                printTypeOrNull(n->returnType.get());
-                std::printf("\n");
+            label += ")";
+            if (n->returnType && n->returnType->kind == ExprKind::NameRef) {
+                label += " -> ";
+                label += static_cast<const NameRefExpr*>(n->returnType.get())->name;
             }
-            indent(depth + 1); std::printf("body:\n");
-            printBlock(n->body, depth + 2);
+            putLabel(prefix, isLast, label);
+            if (!n->body.stmts.empty()) {
+                prBlock(n->body, childPrefix(prefix, isLast));
+            }
             break;
         }
         case StmtKind::Return: {
             auto* n = static_cast<const ReturnStmt*>(s);
-            indent(depth); std::printf("Return\n");
-            if (n->value) printExpr(n->value.get(), depth + 1);
+            putLabel(prefix, isLast, "Return");
+            if (n->value) prExpr(n->value.get(), childPrefix(prefix, isLast), true);
             break;
         }
-        case StmtKind::Pass: {
-            indent(depth); std::printf("Pass\n"); break;
+        case StmtKind::Pass:
+            putLabel(prefix, isLast, "Pass"); break;
+        case StmtKind::Break:
+            putLabel(prefix, isLast, "Break"); break;
+        case StmtKind::Continue:
+            putLabel(prefix, isLast, "Continue"); break;
         }
-        case StmtKind::Break: {
-            indent(depth); std::printf("Break\n"); break;
-        }
-        case StmtKind::Continue: {
-            indent(depth); std::printf("Continue\n"); break;
-        }
-        }
+    }
+
+    // ===========================================================================
+    // Public entry point
+    // ===========================================================================
+
+    void printProgram(const Block& program) {
+        std::printf("Program\n");
+        prBlock(program, "");
     }
 
 } // namespace nova

@@ -245,8 +245,6 @@ namespace nova {
     const char* binOpName(BinOp op);
     const char* unOpName(UnOp op);
 
-    void printExpr(const Expr* e, int depth = 0);
-    void printBlock(const Block& b, int depth = 0);
-    void printStmt(const Stmt* s, int depth = 0);
+    void printProgram(const Block& program);
 
 } // namespace nova
