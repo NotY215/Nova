@@ -24,35 +24,32 @@ namespace nova {
             std::unordered_map<std::string, TypePtr> vars;
         };
 
-        std::vector<Scope>                        scopes_;
-        std::unordered_map<std::string, TypePtr>  functions_;
+        std::vector<Scope>                       scopes_;
+        std::unordered_map<std::string, TypePtr> functions_;
+        std::unordered_map<std::string, TypePtr> structs_;
+        std::unordered_map<std::string, const StructStmt*> structDecls_;
 
-        TypePtr currentReturnType_;   // null outside a function
+        TypePtr currentReturnType_;
         int     loopDepth_ = 0;
 
-        // passes
-        void collectSignatures(const Block& program);
-
-        // statements / blocks
-        void checkStmt(const Stmt* s);
-        void checkBlock(const Block& b);
-
-        // expressions
+        void    collectSignatures(const Block& program);   // pass 1
+        void    checkStmt(const Stmt* s);
+        void    checkBlock(const Block& b);
         TypePtr checkExpr(const Expr* e);
 
-        // scopes
         void    pushScope();
         void    popScope();
         void    defineVar(const std::string& name, TypePtr t);
         TypePtr lookupVar(const std::string& name);
 
-        // type-expr → Type
         TypePtr resolveTypeExpr(const Expr* e);
 
-        // diagnostics
-        [[noreturn]] void error(SourceLocation loc, const std::string& msg);
+        // struct-constructor checking: Player(name="x", health=1)
+        TypePtr checkStructConstruction(const StructStmt* decl,
+            const CallExpr* call,
+            const std::string& structName);
 
-        // builtins
+        [[noreturn]] void error(SourceLocation loc, const std::string& msg);
         void installBuiltins();
     };
 

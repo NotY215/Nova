@@ -4,29 +4,22 @@
 namespace nova {
 
     // ===========================================================================
-    // Operator metadata (unchanged from Step 2)
+    // Operator metadata
     // ===========================================================================
 
     static int binPrec(TokenType t) {
         switch (t) {
         case TokenType::Or:         return 1;
         case TokenType::And:        return 2;
-        case TokenType::Eq:
-        case TokenType::NotEq:
-        case TokenType::Lt:
-        case TokenType::Gt:
-        case TokenType::LtEq:
-        case TokenType::GtEq:
-        case TokenType::In:
-        case TokenType::Is:         return 4;
-        case TokenType::Plus:
-        case TokenType::Minus:      return 5;
-        case TokenType::Star:
-        case TokenType::Slash:
-        case TokenType::SlashSlash:
-        case TokenType::Percent:    return 6;
+        case TokenType::Eq:  case TokenType::NotEq:
+        case TokenType::Lt:  case TokenType::Gt:
+        case TokenType::LtEq:case TokenType::GtEq:
+        case TokenType::In:  case TokenType::Is:    return 4;
+        case TokenType::Plus: case TokenType::Minus: return 5;
+        case TokenType::Star: case TokenType::Slash:
+        case TokenType::SlashSlash: case TokenType::Percent: return 6;
         case TokenType::StarStar:   return 8;
-        default:                    return -1;
+        default: return -1;
         }
     }
 
@@ -64,31 +57,21 @@ namespace nova {
         if (i >= tokens_.size()) return tokens_.back();
         return tokens_[i];
     }
-
     const Token& Parser::previous() const { return tokens_[pos_ - 1]; }
     bool Parser::isAtEnd() const { return peek().type == TokenType::EndOfFile; }
     bool Parser::check(TokenType t) const { return peek().type == t; }
-
-    bool Parser::match(TokenType t) {
-        if (check(t)) { advance(); return true; }
-        return false;
-    }
+    bool Parser::match(TokenType t) { if (check(t)) { advance(); return true; } return false; }
 
     const Token& Parser::advance() {
         if (!isAtEnd()) ++pos_;
         return tokens_[pos_ - 1];
     }
-
     const Token& Parser::expect(TokenType t, const char* what) {
         if (check(t)) return advance();
-        throw ParseError(
-            std::string("expected ") + what + ", found '" + peek().lexeme + "'",
-            peek().location);
+        throw ParseError(std::string("expected ") + what +
+            ", found '" + peek().lexeme + "'", peek().location);
     }
-
-    void Parser::skipNewlines() {
-        while (check(TokenType::Newline)) advance();
-    }
+    void Parser::skipNewlines() { while (check(TokenType::Newline)) advance(); }
 
     // ===========================================================================
     // Program / statements
@@ -107,22 +90,22 @@ namespace nova {
     Block Parser::parseBlock() {
         expect(TokenType::Newline, "newline after ':'");
         expect(TokenType::Indent, "indented block");
-
         Block b;
         for (;;) {
             skipNewlines();
             if (isAtEnd() || check(TokenType::Dedent)) break;
             b.stmts.push_back(parseStatement());
         }
-        match(TokenType::Dedent);   // may already be consumed at EOF
+        match(TokenType::Dedent);
         return b;
     }
 
     StmtPtr Parser::parseStatement() {
-        if (check(TokenType::Def))      return parseDef();
-        if (check(TokenType::If))       return parseIf();
-        if (check(TokenType::While))    return parseWhile();
-        if (check(TokenType::Return))   return parseReturn();
+        if (check(TokenType::Def))    return parseDef();
+        if (check(TokenType::Struct)) return parseStruct();
+        if (check(TokenType::If))     return parseIf();
+        if (check(TokenType::While))  return parseWhile();
+        if (check(TokenType::Return)) return parseReturn();
 
         if (check(TokenType::Pass)) {
             Token t = advance();
@@ -143,10 +126,8 @@ namespace nova {
             return std::make_unique<ContinueStmt>(t.location);
         }
 
-        // Annotated assignment: `name : type` [ `=` value ]
-        if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon) {
+        if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon)
             return parseAnnotatedAssign();
-        }
 
         return parseExprOrAssign();
     }
@@ -154,7 +135,6 @@ namespace nova {
     StmtPtr Parser::parseExprOrAssign() {
         SourceLocation start = peek().location;
         ExprPtr expr = parseExpression();
-
         if (match(TokenType::Assign)) {
             ExprPtr value = parseExpression();
             return std::make_unique<AssignStmt>(std::move(expr), std::move(value), start);
@@ -163,34 +143,28 @@ namespace nova {
     }
 
     StmtPtr Parser::parseAnnotatedAssign() {
-        Token name = advance();          // Identifier
-        Token colon = advance();         // ':'
+        Token name = advance();
+        Token colon = advance();
         ExprPtr type = parseExpression();
-
         ExprPtr value = nullptr;
-        if (match(TokenType::Assign)) {
-            value = parseExpression();
-        }
+        if (match(TokenType::Assign)) value = parseExpression();
         return std::make_unique<AnnotAssignStmt>(
             name.lexeme, std::move(type), std::move(value), colon.location);
     }
 
     StmtPtr Parser::parseReturn() {
-        Token t = advance();             // 'return'
+        Token t = advance();
         ExprPtr value = nullptr;
-        if (!check(TokenType::Newline) && !check(TokenType::Dedent) && !isAtEnd()) {
+        if (!check(TokenType::Newline) && !check(TokenType::Dedent) && !isAtEnd())
             value = parseExpression();
-        }
         return std::make_unique<ReturnStmt>(std::move(value), t.location);
     }
 
     StmtPtr Parser::parseIf() {
-        Token ifTok = advance();         // 'if'
+        Token ifTok = advance();
         ExprPtr cond = parseExpression();
         expect(TokenType::Colon, "':' after if condition");
-
         Block thenBody = parseBlock();
-
         auto stmt = std::make_unique<IfStmt>(std::move(cond), std::move(thenBody), ifTok.location);
 
         while (check(TokenType::Elif)) {
@@ -200,18 +174,16 @@ namespace nova {
             Block ebody = parseBlock();
             stmt->elifs.push_back(ElifClause{ std::move(econd), std::move(ebody) });
         }
-
         if (check(TokenType::Else)) {
             advance();
             expect(TokenType::Colon, "':' after else");
             stmt->elseBody = parseBlock();
         }
-
         return stmt;
     }
 
     StmtPtr Parser::parseWhile() {
-        Token wTok = advance();          // 'while'
+        Token wTok = advance();
         ExprPtr cond = parseExpression();
         expect(TokenType::Colon, "':' after while condition");
         Block body = parseBlock();
@@ -220,16 +192,13 @@ namespace nova {
 
     Param Parser::parseParam() {
         Token name = expect(TokenType::Identifier, "parameter name");
-        Param p;
-        p.name = name.lexeme;
-        if (match(TokenType::Colon)) {
-            p.type = parseExpression();
-        }
+        Param p; p.name = name.lexeme;
+        if (match(TokenType::Colon)) p.type = parseExpression();
         return p;
     }
 
     StmtPtr Parser::parseDef() {
-        Token defTok = advance();        // 'def'
+        Token defTok = advance();
         Token name = expect(TokenType::Identifier, "function name");
         expect(TokenType::LParen, "'(' after function name");
 
@@ -237,43 +206,75 @@ namespace nova {
         if (!check(TokenType::RParen)) {
             params.push_back(parseParam());
             while (match(TokenType::Comma)) {
-                if (check(TokenType::RParen)) break;      // trailing comma OK
+                if (check(TokenType::RParen)) break;
                 params.push_back(parseParam());
             }
         }
         expect(TokenType::RParen, "')' to close parameter list");
 
         ExprPtr retType = nullptr;
-        if (match(TokenType::Arrow)) {
-            retType = parseExpression();
-        }
+        if (match(TokenType::Arrow)) retType = parseExpression();
 
         expect(TokenType::Colon, "':' before function body");
         Block body = parseBlock();
 
         return std::make_unique<DefStmt>(
-            name.lexeme, std::move(params), std::move(retType), std::move(body),
-            defTok.location);
+            name.lexeme, std::move(params), std::move(retType),
+            std::move(body), defTok.location);
+    }
+
+    FieldDef Parser::parseFieldDef() {
+        Token name = expect(TokenType::Identifier, "field name");
+        expect(TokenType::Colon, "':' after field name");
+        ExprPtr type = parseExpression();
+
+        FieldDef f;
+        f.name = name.lexeme;
+        f.type = std::move(type);
+        f.loc = name.location;
+
+        if (!check(TokenType::Newline) && !check(TokenType::Dedent) && !isAtEnd())
+            throw ParseError("unexpected token after field type", peek().location);
+        return f;
+    }
+
+    StmtPtr Parser::parseStruct() {
+        Token stTok = advance();
+        Token name = expect(TokenType::Identifier, "struct name");
+        expect(TokenType::Colon, "':' after struct name");
+        expect(TokenType::Newline, "newline after ':'");
+        expect(TokenType::Indent, "indented struct body");
+
+        std::vector<FieldDef> fields;
+        for (;;) {
+            skipNewlines();
+            if (isAtEnd() || check(TokenType::Dedent)) break;
+            fields.push_back(parseFieldDef());
+        }
+        match(TokenType::Dedent);
+
+        if (fields.empty())
+            throw ParseError("struct '" + name.lexeme + "' has no fields", stTok.location);
+
+        return std::make_unique<StructStmt>(
+            name.lexeme, std::move(fields), stTok.location);
     }
 
     // ===========================================================================
-    // Expression grammar (identical to Step 2)
+    // Expression grammar
     // ===========================================================================
 
     ExprPtr Parser::parseExpression() { return parseBinary(1); }
 
     ExprPtr Parser::parseBinary(int minPrec) {
         ExprPtr left = parseUnary();
-
         for (;;) {
             int prec = binPrec(peek().type);
             if (prec < minPrec) break;
-
             Token opTok = advance();
             BinOp op = tokenToBinOp(opTok.type);
             int nextMin = (op == BinOp::Pow) ? prec : prec + 1;
             ExprPtr right = parseBinary(nextMin);
-
             left = std::make_unique<BinaryExpr>(
                 op, std::move(left), std::move(right), opTok.location);
         }
@@ -296,9 +297,24 @@ namespace nova {
         return parsePostfix();
     }
 
+    CallArg Parser::parseCallArg() {
+        CallArg a;
+        a.loc = peek().location;
+
+        // keyword form: identifier '=' expr   (but NOT '==')
+        if (check(TokenType::Identifier) &&
+            peek(1).type == TokenType::Assign) {
+            a.name = advance().lexeme;   // identifier
+            advance();                   // '='
+            a.value = parseExpression();
+            return a;
+        }
+        a.value = parseExpression();
+        return a;
+    }
+
     ExprPtr Parser::parsePostfix() {
         ExprPtr e = parsePrimary();
-
         for (;;) {
             if (match(TokenType::Dot)) {
                 Token name = expect(TokenType::Identifier, "attribute name after '.'");
@@ -306,12 +322,12 @@ namespace nova {
             }
             else if (check(TokenType::LParen)) {
                 Token open = advance();
-                std::vector<ExprPtr> args;
+                std::vector<CallArg> args;
                 if (!check(TokenType::RParen)) {
-                    args.push_back(parseExpression());
+                    args.push_back(parseCallArg());
                     while (match(TokenType::Comma)) {
                         if (check(TokenType::RParen)) break;
-                        args.push_back(parseExpression());
+                        args.push_back(parseCallArg());
                     }
                 }
                 expect(TokenType::RParen, "')' to close argument list");
@@ -330,7 +346,6 @@ namespace nova {
 
     ExprPtr Parser::parsePrimary() {
         const Token& t = peek();
-
         switch (t.type) {
         case TokenType::Int: {
             Token tok = advance();
@@ -366,23 +381,21 @@ namespace nova {
             Token tok = advance();
             return std::make_unique<NoneLitExpr>(tok.location);
         }
-        case TokenType::Identifier: {
-            case TokenType::IntKw:
-            case TokenType::FloatKw:
-            case TokenType::BoolKw:
-            case TokenType::StrKw:
-            case TokenType::CharKw:
-            case TokenType::BytesKw:
-            case TokenType::Ptr:
-            case TokenType::Ref:
-            case TokenType::Unique:
-            case TokenType::Shared:
-            case TokenType::Weak: {
+        case TokenType::Identifier:
+        case TokenType::IntKw:
+        case TokenType::FloatKw:
+        case TokenType::BoolKw:
+        case TokenType::StrKw:
+        case TokenType::CharKw:
+        case TokenType::BytesKw:
+        case TokenType::Ptr:
+        case TokenType::Ref:
+        case TokenType::Unique:
+        case TokenType::Shared:
+        case TokenType::Weak: {
             Token tok = advance();
             return std::make_unique<NameRefExpr>(tok.lexeme, tok.location);
-            }
         }
-
         case TokenType::LParen: {
             Token open = advance();
             ExprPtr inner = parseExpression();
@@ -390,9 +403,8 @@ namespace nova {
             return std::make_unique<GroupingExpr>(std::move(inner), open.location);
         }
         default:
-            throw ParseError(
-                std::string("expected expression, found '") + t.lexeme + "'",
-                t.location);
+            throw ParseError(std::string("expected expression, found '") +
+                t.lexeme + "'", t.location);
         }
     }
 

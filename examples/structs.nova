@@ -1,0 +1,46 @@
+# Basic struct
+struct Player:
+    name: str
+    health: int
+    score: int
+
+# Create with kwargs
+p = Player(name="NotY", health=100, score=0)
+print(p.name)
+print(p.health)
+
+# Modify a field
+p.health = p.health - 25
+print(p.health)
+
+# Create with positional args
+q = Player("Ally", 80, 10)
+print(q.name)
+print(q.score)
+
+# Create inside a function
+def make_player(n: str) -> Player:
+    return Player(name=n, health=100, score=0)
+
+r = make_player("Bob")
+print(r.name)
+print(r.health)
+
+# Nested struct
+struct Team:
+    leader: Player
+    size: int
+
+t = Team(leader=p, size=3)
+print(t.leader.name)
+print(t.leader.health)
+print(t.size)
+
+# Field of a field
+t.leader.health = 42
+print(t.leader.health)
+print(p.health)          # same object: p.health is now 42
+
+# Print the struct itself
+print(p)
+print(q)

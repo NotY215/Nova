@@ -5,6 +5,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace nova {
 
@@ -21,8 +22,8 @@ namespace nova {
 
         void run(const Block& program);
 
-        // Used by native built-ins that need to call back into Nova.
-        Value callValue(const Value& callee, const std::vector<Value>& args,
+        Value callValue(const Value& callee,
+            const std::vector<Value>& args,
             SourceLocation loc);
 
         std::shared_ptr<Environment> globals() const { return globals_; }
@@ -31,17 +32,25 @@ namespace nova {
         std::shared_ptr<Environment> globals_;
         std::shared_ptr<Environment> env_;
 
-        // ---- statements ----
+        // struct name -> original declaration, so we can construct instances.
+        std::unordered_map<std::string, const StructStmt*> structDecls_;
+
         void  exec(const Stmt* s);
         void  execBlock(const Block& b);
 
-        // ---- expressions ----
         Value eval(const Expr* e);
         Value evalBinary(const BinaryExpr* b);
+        Value evalAttr(const AttrExpr* a);
+        Value evalCall(const CallExpr* c);
 
-        // ---- calls ----
+        void  execAssign(const AssignStmt* n);
+
         Value callUser(const std::shared_ptr<Callable>& fn,
             const std::vector<Value>& args,
+            SourceLocation loc);
+
+        Value constructStruct(const std::string& name,
+            const std::vector<std::pair<std::string, Value>>& args,
             SourceLocation loc);
 
         void installBuiltins();

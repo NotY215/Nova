@@ -1432,3 +1432,82 @@ Nova Engine
 **Nova — One language. Multiple levels of power.**
 
 </p>
+
+---
+
+# 💙 Special Thanks
+
+Nova is an independent programming-language project, but the idea and its
+development journey were greatly supported by AI-assisted research,
+discussion, and coding.
+
+### 🐋 DeepSeek
+
+<p align="center">
+  <a href="https://www.deepseek.com/">
+    <img src="https://www.deepseek.com/favicon.ico" alt="DeepSeek" width="80">
+  </a>
+</p>
+
+A **special and major thank you to DeepSeek** for providing substantial
+assistance throughout the development of the Nova concept.
+
+DeepSeek was especially valuable during:
+
+- 🧠 Programming and architecture discussions
+- 💻 Writing and refining code
+- 🔧 Debugging and problem solving
+- 🏗️ Compiler and language-design discussions
+- 📚 Exploring technical concepts
+- 🚀 Turning ideas into practical implementations
+
+A large part of the technical exploration and coding assistance behind Nova
+was made possible with the help of DeepSeek.
+
+**Thank you, DeepSeek, for being a major part of the journey. ❤️**
+
+[Visit DeepSeek →](https://www.deepseek.com/)
+
+---
+
+### 🤖 ChatGPT
+
+<p align="center">
+  <a href="https://chatgpt.com/">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/0/04/ChatGPT_logo.svg" alt="OpenAI" width="80">
+  </a>
+</p>
+
+A special thank you to **ChatGPT by OpenAI** for helping with:
+
+- 💡 Confirming ideas and concepts
+- 🧩 Language-design discussions
+- 📝 Documentation and README refinement
+- 🔍 Reviewing concepts
+- 💭 Brainstorming and exploring possibilities
+
+ChatGPT played a smaller supporting role in the development process, mainly
+helping with confirmation, refinement, and additional perspectives.
+
+**Thank you, ChatGPT, for being part of the Nova journey. ❤️**
+
+[Visit ChatGPT →](https://chatgpt.com/)
+
+---
+
+<p align="center">
+
+### 🌌 Built from an idea. Refined with AI. Created with ambition.
+
+**Nova**
+
+*Python simplicity · Native performance · Low-level control · AI-ready*
+
+</p>
+
+---
+
+> **Disclaimer:** DeepSeek and OpenAI/ChatGPT are acknowledged as AI tools
+> used during the development of this project. This acknowledgement does not
+> imply sponsorship, partnership, endorsement, or affiliation with either
+> organization.

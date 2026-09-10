@@ -41,7 +41,6 @@ namespace nova {
             : Expr(ExprKind::IntLit, l), value(v), text(std::move(t)) {
         }
     };
-
     struct FloatLitExpr : Expr {
         double      value;
         std::string text;
@@ -49,39 +48,33 @@ namespace nova {
             : Expr(ExprKind::FloatLit, l), value(v), text(std::move(t)) {
         }
     };
-
     struct StringLitExpr : Expr {
         std::string value;
         StringLitExpr(std::string v, SourceLocation l)
             : Expr(ExprKind::StringLit, l), value(std::move(v)) {
         }
     };
-
     struct CharLitExpr : Expr {
         std::string value;
         CharLitExpr(std::string v, SourceLocation l)
             : Expr(ExprKind::CharLit, l), value(std::move(v)) {
         }
     };
-
     struct BoolLitExpr : Expr {
         bool value;
         BoolLitExpr(bool v, SourceLocation l)
             : Expr(ExprKind::BoolLit, l), value(v) {
         }
     };
-
     struct NoneLitExpr : Expr {
         NoneLitExpr(SourceLocation l) : Expr(ExprKind::NoneLit, l) {}
     };
-
     struct NameRefExpr : Expr {
         std::string name;
         NameRefExpr(std::string n, SourceLocation l)
             : Expr(ExprKind::NameRef, l), name(std::move(n)) {
         }
     };
-
     struct UnaryExpr : Expr {
         UnOp    op;
         ExprPtr operand;
@@ -89,7 +82,6 @@ namespace nova {
             : Expr(ExprKind::Unary, l), op(o), operand(std::move(e)) {
         }
     };
-
     struct BinaryExpr : Expr {
         BinOp   op;
         ExprPtr lhs, rhs;
@@ -97,7 +89,6 @@ namespace nova {
             : Expr(ExprKind::Binary, l), op(o), lhs(std::move(a)), rhs(std::move(b)) {
         }
     };
-
     struct GroupingExpr : Expr {
         ExprPtr inner;
         GroupingExpr(ExprPtr e, SourceLocation l)
@@ -105,14 +96,20 @@ namespace nova {
         }
     };
 
+    // --- call argument (positional OR keyword) ---
+    struct CallArg {
+        std::string name;        // empty → positional
+        ExprPtr     value;
+        SourceLocation loc;
+    };
+
     struct CallExpr : Expr {
         ExprPtr              callee;
-        std::vector<ExprPtr> args;
-        CallExpr(ExprPtr c, std::vector<ExprPtr> a, SourceLocation l)
+        std::vector<CallArg> args;
+        CallExpr(ExprPtr c, std::vector<CallArg> a, SourceLocation l)
             : Expr(ExprKind::Call, l), callee(std::move(c)), args(std::move(a)) {
         }
     };
-
     struct AttrExpr : Expr {
         ExprPtr     target;
         std::string name;
@@ -120,7 +117,6 @@ namespace nova {
             : Expr(ExprKind::Attr, l), target(std::move(t)), name(std::move(n)) {
         }
     };
-
     struct IndexExpr : Expr {
         ExprPtr target;
         ExprPtr index;
@@ -136,14 +132,12 @@ namespace nova {
     struct Stmt;
     using StmtPtr = std::unique_ptr<Stmt>;
 
-    /// A run of statements. Not polymorphic — just a container.
-    struct Block {
-        std::vector<StmtPtr> stmts;
-    };
+    struct Block { std::vector<StmtPtr> stmts; };
 
     enum class StmtKind {
         Expr, Assign, AnnotAssign,
         If, While, Def, Return,
+        Struct,
         Pass, Break, Continue,
     };
 
@@ -161,8 +155,9 @@ namespace nova {
         }
     };
 
+    // target may be NameRefExpr (var) or AttrExpr (field).
     struct AssignStmt : Stmt {
-        ExprPtr target;   // NameRefExpr, AttrExpr, or IndexExpr (validated later)
+        ExprPtr target;
         ExprPtr value;
         AssignStmt(ExprPtr t, ExprPtr v, SourceLocation l)
             : Stmt(StmtKind::Assign, l), target(std::move(t)), value(std::move(v)) {
@@ -171,24 +166,21 @@ namespace nova {
 
     struct AnnotAssignStmt : Stmt {
         std::string name;
-        ExprPtr     type;    // parsed as expression for now
-        ExprPtr     value;   // may be null: `age: int` alone
+        ExprPtr     type;
+        ExprPtr     value;
         AnnotAssignStmt(std::string n, ExprPtr t, ExprPtr v, SourceLocation l)
             : Stmt(StmtKind::AnnotAssign, l),
             name(std::move(n)), type(std::move(t)), value(std::move(v)) {
         }
     };
 
-    struct ElifClause {
-        ExprPtr cond;
-        Block   body;
-    };
+    struct ElifClause { ExprPtr cond; Block body; };
 
     struct IfStmt : Stmt {
-        ExprPtr                    cond;
-        Block                      thenBody;
-        std::vector<ElifClause>    elifs;
-        std::optional<Block>       elseBody;
+        ExprPtr                 cond;
+        Block                   thenBody;
+        std::vector<ElifClause> elifs;
+        std::optional<Block>    elseBody;
         IfStmt(ExprPtr c, Block t, SourceLocation l)
             : Stmt(StmtKind::If, l), cond(std::move(c)), thenBody(std::move(t)) {
         }
@@ -204,46 +196,53 @@ namespace nova {
 
     struct Param {
         std::string name;
-        ExprPtr     type;   // may be null
+        ExprPtr     type;
     };
 
     struct DefStmt : Stmt {
-        std::string          name;
-        std::vector<Param>   params;
-        ExprPtr              returnType;   // may be null
-        Block                body;
+        std::string        name;
+        std::vector<Param> params;
+        ExprPtr            returnType;
+        Block              body;
         DefStmt(std::string n, std::vector<Param> p, ExprPtr rt, Block b, SourceLocation l)
             : Stmt(StmtKind::Def, l),
-            name(std::move(n)),
-            params(std::move(p)),
-            returnType(std::move(rt)),
-            body(std::move(b)) {
+            name(std::move(n)), params(std::move(p)),
+            returnType(std::move(rt)), body(std::move(b)) {
         }
     };
 
     struct ReturnStmt : Stmt {
-        ExprPtr value;   // may be null: bare `return`
+        ExprPtr value;
         ReturnStmt(ExprPtr v, SourceLocation l)
             : Stmt(StmtKind::Return, l), value(std::move(v)) {
         }
     };
 
-    struct PassStmt : Stmt {
-        PassStmt(SourceLocation l) : Stmt(StmtKind::Pass, l) {}
-    };
-    struct BreakStmt : Stmt {
-        BreakStmt(SourceLocation l) : Stmt(StmtKind::Break, l) {}
-    };
-    struct ContinueStmt : Stmt {
-        ContinueStmt(SourceLocation l) : Stmt(StmtKind::Continue, l) {}
+    // --- struct ---
+    struct FieldDef {
+        std::string    name;
+        ExprPtr        type;
+        SourceLocation loc;
     };
 
+    struct StructStmt : Stmt {
+        std::string            name;
+        std::vector<FieldDef>  fields;
+        StructStmt(std::string n, std::vector<FieldDef> f, SourceLocation l)
+            : Stmt(StmtKind::Struct, l), name(std::move(n)), fields(std::move(f)) {
+        }
+    };
+
+    struct PassStmt : Stmt { PassStmt(SourceLocation l) : Stmt(StmtKind::Pass, l) {} };
+    struct BreakStmt : Stmt { BreakStmt(SourceLocation l) : Stmt(StmtKind::Break, l) {} };
+    struct ContinueStmt : Stmt { ContinueStmt(SourceLocation l) : Stmt(StmtKind::Continue, l) {} };
+
     // ===========================================================================
-    // Printing / naming
+    // Printing
     // ===========================================================================
 
     const char* binOpName(BinOp op);
-    const char* unOpName(UnOp op);
+    const char* unOpName(UnOp  op);
 
     void printProgram(const Block& program);
 

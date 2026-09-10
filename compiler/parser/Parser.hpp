@@ -17,15 +17,12 @@ namespace nova {
     class Parser {
     public:
         explicit Parser(std::vector<Token> tokens);
-
-        /// Parse the whole file into a program block.
         Block parseProgram();
 
     private:
         std::vector<Token> tokens_;
         size_t             pos_ = 0;
 
-        // --- cursor ---
         const Token& peek(int ahead = 0) const;
         const Token& previous() const;
         bool         isAtEnd() const;
@@ -35,23 +32,24 @@ namespace nova {
         const Token& expect(TokenType t, const char* what);
         void         skipNewlines();
 
-        // --- statements ---
         StmtPtr  parseStatement();
         Block    parseBlock();
         StmtPtr  parseDef();
         StmtPtr  parseIf();
         StmtPtr  parseWhile();
         StmtPtr  parseReturn();
+        StmtPtr  parseStruct();
         StmtPtr  parseAnnotatedAssign();
         StmtPtr  parseExprOrAssign();
         Param    parseParam();
+        FieldDef parseFieldDef();
 
-        // --- expression grammar (unchanged from Step 2) ---
         ExprPtr  parseExpression();
         ExprPtr  parseBinary(int minPrec);
         ExprPtr  parseUnary();
         ExprPtr  parsePostfix();
         ExprPtr  parsePrimary();
+        CallArg  parseCallArg();
     };
 
 } // namespace nova

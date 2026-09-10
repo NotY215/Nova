@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -11,28 +12,33 @@ namespace nova {
     struct DefStmt;
     class  Value;
 
-    // Native C++ function exposed to Nova scripts.
+    // ---- user-defined struct instance ----
+    struct StructInstance {
+        std::string typeName;
+        std::vector<std::string>                fieldOrder;   // stable order
+        std::unordered_map<std::string, Value>  fields;
+    };
+
     using NativeFnPtr = Value(*)(const std::vector<Value>&);
 
-    // One uniform Callable covers both native builtins and user-defined `def`s.
-    //   - Native:  nativeFn != nullptr
-    //   - User:    decl != nullptr, closure holds the captured environment
     struct Callable {
-        enum class Kind { Native, User } kind = Kind::Native;
+        enum class Kind { Native, User, StructCtor } kind = Kind::Native;
         std::string                  name;
         NativeFnPtr                  nativeFn = nullptr;
-        const DefStmt* decl = nullptr;
-        std::shared_ptr<Environment> closure;
+        const DefStmt* decl = nullptr;   // for User
+        std::shared_ptr<Environment> closure;              // for User
+        std::shared_ptr<StructInstance> proto;             // for StructCtor: field names/order
     };
 
     class Value {
         using Storage = std::variant<
-            std::monostate,                 // None
+            std::monostate,
             bool,
             long long,
             double,
             std::string,
-            std::shared_ptr<Callable>
+            std::shared_ptr<Callable>,
+            std::shared_ptr<StructInstance>
         >;
 
         Storage data_;
@@ -47,17 +53,17 @@ namespace nova {
         Value(std::string s) : data_(std::move(s)) {}
         Value(const char* s) : data_(std::string(s)) {}
         Value(std::shared_ptr<Callable> c) : data_(std::move(c)) {}
+        Value(std::shared_ptr<StructInstance> s) : data_(std::move(s)) {}
 
-        // ---- type queries ----
-        bool isNone()     const { return std::holds_alternative<std::monostate>(data_); }
-        bool isBool()     const { return std::holds_alternative<bool>(data_); }
-        bool isInt()      const { return std::holds_alternative<long long>(data_); }
-        bool isFloat()    const { return std::holds_alternative<double>(data_); }
-        bool isNumber()   const { return isInt() || isFloat(); }
-        bool isString()   const { return std::holds_alternative<std::string>(data_); }
-        bool isCallable() const { return std::holds_alternative<std::shared_ptr<Callable>>(data_); }
+        bool isNone()      const { return std::holds_alternative<std::monostate>(data_); }
+        bool isBool()      const { return std::holds_alternative<bool>(data_); }
+        bool isInt()       const { return std::holds_alternative<long long>(data_); }
+        bool isFloat()     const { return std::holds_alternative<double>(data_); }
+        bool isNumber()    const { return isInt() || isFloat(); }
+        bool isString()    const { return std::holds_alternative<std::string>(data_); }
+        bool isCallable()  const { return std::holds_alternative<std::shared_ptr<Callable>>(data_); }
+        bool isStruct()    const { return std::holds_alternative<std::shared_ptr<StructInstance>>(data_); }
 
-        // ---- accessors (caller must check type first) ----
         bool               asBool()   const { return std::get<bool>(data_); }
         long long          asInt()    const { return std::get<long long>(data_); }
         double             asFloat()  const { return std::get<double>(data_); }
@@ -65,10 +71,12 @@ namespace nova {
         std::shared_ptr<Callable> asCallable() const {
             return std::get<std::shared_ptr<Callable>>(data_);
         }
+        std::shared_ptr<StructInstance> asStruct() const {
+            return std::get<std::shared_ptr<StructInstance>>(data_);
+        }
 
-        // ---- helpers ----
-        double asDouble() const { return isInt() ? (double)asInt() : asFloat(); }
-        bool   truthy()   const;
+        double      asDouble() const { return isInt() ? (double)asInt() : asFloat(); }
+        bool        truthy()   const;
         std::string toString() const;
         std::string typeName() const;
     };

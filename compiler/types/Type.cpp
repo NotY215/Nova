@@ -2,6 +2,11 @@
 
 namespace nova {
 
+    const StructFieldInfo* Type::findField(const std::string& n) const {
+        for (auto& f : fields) if (f.name == n) return &f;
+        return nullptr;
+    }
+
     std::string Type::toString() const {
         switch (kind) {
         case TypeKind::None:    return "None";
@@ -15,6 +20,7 @@ namespace nova {
         case TypeKind::Unknown: return "?";
         case TypeKind::Error:   return "<error>";
         case TypeKind::Named:   return name;
+        case TypeKind::Struct:  return name;
         case TypeKind::Function: {
             std::string s = "(";
             for (size_t i = 0; i < params.size(); ++i) {
@@ -32,7 +38,8 @@ namespace nova {
     bool Type::equals(const TypePtr& other) const {
         if (!other) return false;
         if (kind != other->kind) return false;
-        if (kind == TypeKind::Named) return name == other->name;
+        if (kind == TypeKind::Named || kind == TypeKind::Struct)
+            return name == other->name;
         if (kind == TypeKind::Function) {
             if (params.size() != other->params.size()) return false;
             for (size_t i = 0; i < params.size(); ++i)
@@ -66,6 +73,12 @@ namespace nova {
             return t;
         }
 
+        TypePtr Struct(std::string name, std::vector<StructFieldInfo> fields) {
+            auto t = std::make_shared<Type>(TypeKind::Struct, std::move(name));
+            t->fields = std::move(fields);
+            return t;
+        }
+
     } // namespace Types
 
     bool isAssignable(const TypePtr& to, const TypePtr& from) {
@@ -74,6 +87,8 @@ namespace nova {
         if (to->kind == TypeKind::Error || from->kind == TypeKind::Error)   return true;
         if (to->kind == TypeKind::Unknown || from->kind == TypeKind::Unknown) return true;
         if (to->kind == TypeKind::Float && from->kind == TypeKind::Int)         return true;
+        if (to->kind == TypeKind::Struct && from->kind == TypeKind::Struct)
+            return to->name == from->name;
         if (to->kind == TypeKind::Named && from->kind == TypeKind::Named)
             return to->name == from->name;
         return to->equals(from);
