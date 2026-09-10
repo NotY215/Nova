@@ -1,6 +1,7 @@
 #include "lexer/Lexer.hpp"
 #include "parser/Parser.hpp"
 #include "ast/Ast.hpp"
+#include "sema/TypeChecker.hpp"
 #include "interp/Interpreter.hpp"
 #include <cstdio>
 #include <cstring>
@@ -22,10 +23,12 @@ static std::string readFile(const std::string& path) {
 
 static void usage() {
     std::fprintf(stderr,
-        "usage: novac <file.nova> [--run | --dump-tokens | --dump-ast]\n"
-        "       --run          execute the program (default)\n"
-        "       --dump-tokens  print the lexer output\n"
-        "       --dump-ast     print the parsed AST\n");
+        "usage: novac <file.nova> [--run | --check | --dump-tokens | --dump-ast | --no-check]\n"
+        "       --run         type-check then execute (default)\n"
+        "       --check       type-check only, do not execute\n"
+        "       --no-check    run without static type checking\n"
+        "       --dump-tokens print lexer output\n"
+        "       --dump-ast    print parsed AST\n");
 }
 
 int main(int argc, char** argv) {
@@ -36,12 +39,15 @@ int main(int argc, char** argv) {
     if (argc < 2) { usage(); return 1; }
 
     std::string file = argv[1];
-    enum class Mode { Run, DumpTokens, DumpAst } mode = Mode::Run;
+    enum class Mode { Run, Check, DumpTokens, DumpAst } mode = Mode::Run;
+    bool skipCheck = false;
 
     for (int i = 2; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--run"))         mode = Mode::Run;
+        else if (!std::strcmp(argv[i], "--check"))       mode = Mode::Check;
         else if (!std::strcmp(argv[i], "--dump-tokens")) mode = Mode::DumpTokens;
         else if (!std::strcmp(argv[i], "--dump-ast"))    mode = Mode::DumpAst;
+        else if (!std::strcmp(argv[i], "--no-check"))    skipCheck = true;
         else { std::fprintf(stderr, "novac: unknown flag '%s'\n", argv[i]); return 1; }
     }
 
@@ -70,7 +76,7 @@ int main(int argc, char** argv) {
         program = parser.parseProgram();
     }
     catch (const nova::ParseError& e) {
-        std::fprintf(stderr, "%s:%d:%d: error: %s\n",
+        std::fprintf(stderr, "%s:%d:%d: parse error: %s\n",
             file.c_str(), e.loc.line, e.loc.column, e.what());
         return 1;
     }
@@ -80,7 +86,25 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Run mode
+    // Type-check (unless skipped)
+    if (!skipCheck) {
+        try {
+            nova::TypeChecker checker;
+            checker.check(program);
+        }
+        catch (const nova::TypeError& e) {
+            std::fprintf(stderr, "%s:%d:%d: type error: %s\n",
+                file.c_str(), e.loc.line, e.loc.column, e.what());
+            return 1;
+        }
+    }
+
+    if (mode == Mode::Check) {
+        std::printf("OK: %s type-checks successfully.\n", file.c_str());
+        return 0;
+    }
+
+    // Execute
     try {
         nova::Interpreter interp;
         interp.run(program);

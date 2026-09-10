@@ -1,0 +1,3 @@
+# Each of these should be caught by the type checker.
+
+x: int = "hello"
