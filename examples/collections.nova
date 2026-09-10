@@ -1,0 +1,121 @@
+# ---- Lists ----
+nums = [1, 2, 3, 4, 5]
+print(nums)
+print(len(nums))
+print(nums[0])
+print(nums[4])
+
+nums.append(6)
+print(nums)
+print(len(nums))
+
+last = nums.pop()
+print(last)
+print(nums)
+
+nums.insert(0, 0)
+print(nums)
+
+nums[0] = 100
+print(nums)
+
+# Negative indexing
+print(nums[-1])
+
+# Slicing isn't implemented yet — skip.
+
+# `in`
+print(3 in nums)
+print(999 in nums)
+print(nums.contains(2))
+
+# List arithmetic
+print([1, 2] + [3, 4])
+print([0] * 3)
+
+# Empty list
+empty = []
+print(empty, len(empty))
+
+# Nested list
+grid = [[1, 2], [3, 4]]
+print(grid[0][1])
+
+# ---- Maps ----
+ages = {"alice": 30, "bob": 25}
+print(ages)
+print(ages["alice"])
+print(len(ages))
+
+ages["carol"] = 40
+print(ages["carol"])
+
+ages.put("dave", 22)
+print(ages["dave"])
+print(ages.contains("dave"))
+print("alice" in ages)
+
+ages.remove("bob")
+print(ages.contains("bob"))
+
+keys = ages.keys()
+print(len(keys))
+
+# Empty map
+emptyMap = {}
+print(emptyMap)
+
+# ---- for loops ----
+total = 0
+for n in nums:
+    total = total + n
+print("sum:", total)
+
+for x in [10, 20, 30]:
+    print(x)
+
+# range
+for i in range(5):
+    print(i)
+
+for i in range(2, 8):
+    print(i)
+
+for i in range(0, 10, 2):
+    print(i)
+
+# for over map keys
+for name in ages:
+    print(name)
+
+# for over string
+for c in "abc":
+    print(c)
+
+# ---- for + break / continue ----
+for n in [1, 2, 3, 4, 5, 6]:
+    if n == 4:
+        break
+    print(n)
+
+for n in [1, 2, 3, 4, 5]:
+    if n % 2 == 0:
+        continue
+    print(n)
+
+# ---- nested collection ----
+matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+rowSum = 0
+for row in matrix:
+    for cell in row:
+        rowSum = rowSum + cell
+print("matrix sum:", rowSum)
+
+# ---- list in a function ----
+def total_of(lst: list<int>) -> int:
+    s = 0
+    for x in lst:
+        s = s + x
+    return s
+
+print(total_of([10, 20, 30, 40]))

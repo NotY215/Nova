@@ -46,6 +46,11 @@ namespace nova {
             const std::string& name);
         void    checkMethodBody(const DefStmt* m, TypePtr cls);
 
+        // collection helpers
+        TypePtr lookupCollectionMethod(const TypePtr& target, const std::string& name,
+            SourceLocation loc);
+        TypePtr commonElementType(const TypePtr& a, const TypePtr& b, SourceLocation loc);
+
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
         void installBuiltins();
     };

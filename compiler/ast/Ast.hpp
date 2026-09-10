@@ -7,11 +7,17 @@
 
 namespace nova {
 
+    // ===========================================================================
+    // Expressions
+    // ===========================================================================
+
     enum class ExprKind {
         IntLit, FloatLit, StringLit, CharLit, BoolLit, NoneLit,
         NameRef,
         Unary, Binary, Grouping,
         Call, Attr, Index,
+        ListLit, MapLit,
+        GenericType,     // "list<int>", "map<str, int>"  (type-expr only)
     };
 
     enum class BinOp {
@@ -85,13 +91,10 @@ namespace nova {
         }
     };
 
-    struct CallArg {
-        std::string name;
-        ExprPtr     value;
-        SourceLocation loc;
-    };
+    struct CallArg { std::string name; ExprPtr value; SourceLocation loc; };
+
     struct CallExpr : Expr {
-        ExprPtr callee;
+        ExprPtr              callee;
         std::vector<CallArg> args;
         CallExpr(ExprPtr c, std::vector<CallArg> a, SourceLocation l)
             : Expr(ExprKind::Call, l), callee(std::move(c)), args(std::move(a)) {
@@ -110,19 +113,39 @@ namespace nova {
         }
     };
 
+    // --- collections ---
+    struct ListLitExpr : Expr {
+        std::vector<ExprPtr> elements;
+        explicit ListLitExpr(SourceLocation l) : Expr(ExprKind::ListLit, l) {}
+    };
+
+    struct MapEntry { ExprPtr key; ExprPtr value; };
+    struct MapLitExpr : Expr {
+        std::vector<MapEntry> entries;
+        explicit MapLitExpr(SourceLocation l) : Expr(ExprKind::MapLit, l) {}
+    };
+
+    // --- generic type expression, used only inside type annotations ---
+    struct GenericTypeExpr : Expr {
+        std::string          name;      // "list", "map", or user-defined
+        std::vector<ExprPtr> typeArgs;  // element types / key+value types
+        GenericTypeExpr(std::string n, SourceLocation l)
+            : Expr(ExprKind::GenericType, l), name(std::move(n)) {
+        }
+    };
+
     // ===========================================================================
     // Statements
     // ===========================================================================
 
     struct Stmt;
     using StmtPtr = std::unique_ptr<Stmt>;
-
     struct Block { std::vector<StmtPtr> stmts; };
 
     enum class StmtKind {
         Expr, Assign, AnnotAssign,
         If, While, Def, Return,
-        Struct, Class,
+        Struct, Class, For,
         Pass, Break, Continue,
     };
 
@@ -188,11 +211,7 @@ namespace nova {
         }
     };
 
-    struct FieldDef {
-        std::string    name;
-        ExprPtr        type;
-        SourceLocation loc;
-    };
+    struct FieldDef { std::string name; ExprPtr type; SourceLocation loc; };
 
     struct StructStmt : Stmt {
         std::string           name;
@@ -203,12 +222,23 @@ namespace nova {
     };
 
     struct ClassStmt : Stmt {
-        std::string name;
-        std::string parentName;   // empty if none
-        std::vector<FieldDef>                  fields;
-        std::vector<std::unique_ptr<DefStmt>>  methods;
+        std::string                           name;
+        std::string                           parentName;
+        std::vector<FieldDef>                 fields;
+        std::vector<std::unique_ptr<DefStmt>> methods;
         ClassStmt(std::string n, std::string p, SourceLocation l)
             : Stmt(StmtKind::Class, l), name(std::move(n)), parentName(std::move(p)) {
+        }
+    };
+
+    // --- for loop ---
+    struct ForStmt : Stmt {
+        std::string targetName;   // loop variable
+        ExprPtr     iterable;     // list, map, or str
+        Block       body;
+        ForStmt(std::string t, ExprPtr it, Block b, SourceLocation l)
+            : Stmt(StmtKind::For, l),
+            targetName(std::move(t)), iterable(std::move(it)), body(std::move(b)) {
         }
     };
 

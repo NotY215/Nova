@@ -35,6 +35,7 @@ namespace nova {
             return p + (last ? BLANK : PIPE);
         }
     }
+
     static void prExpr(const Expr* e, const std::string& p, bool last);
     static void prStmt(const Stmt* s, const std::string& p, bool last);
     static void prBlock(const Block& b, const std::string& p);
@@ -116,6 +117,44 @@ namespace nova {
             prExpr(n->target.get(), cp, false);
             prExpr(n->index.get(), cp, true); break;
         }
+        case ExprKind::ListLit: {
+            auto* n = static_cast<const ListLitExpr*>(e);
+            putLabel(prefix, isLast, "ListLit[" + std::to_string(n->elements.size()) + "]");
+            std::string cp = childPrefix(prefix, isLast);
+            for (size_t i = 0; i < n->elements.size(); ++i)
+                prExpr(n->elements[i].get(), cp, i + 1 == n->elements.size());
+            break;
+        }
+        case ExprKind::MapLit: {
+            auto* n = static_cast<const MapLitExpr*>(e);
+            putLabel(prefix, isLast, "MapLit{" + std::to_string(n->entries.size()) + "}");
+            std::string cp = childPrefix(prefix, isLast);
+            for (size_t i = 0; i < n->entries.size(); ++i) {
+                bool last = (i + 1 == n->entries.size());
+                putLabel(cp, last, "entry");
+                std::string ep = childPrefix(cp, last);
+                putLabel(ep, false, "key");
+                prExpr(n->entries[i].key.get(), childPrefix(ep, false), true);
+                putLabel(ep, true, "value");
+                prExpr(n->entries[i].value.get(), childPrefix(ep, true), true);
+            }
+            break;
+        }
+        case ExprKind::GenericType: {
+            auto* n = static_cast<const GenericTypeExpr*>(e);
+            std::string s = "GenericType(" + n->name + "<";
+            for (size_t i = 0; i < n->typeArgs.size(); ++i) {
+                if (i) s += ", ";
+                if (n->typeArgs[i]->kind == ExprKind::NameRef)
+                    s += static_cast<const NameRefExpr*>(n->typeArgs[i].get())->name;
+                else if (n->typeArgs[i]->kind == ExprKind::GenericType)
+                    s += "...";
+                else s += "?";
+            }
+            s += ">)";
+            putLabel(prefix, isLast, s);
+            break;
+        }
         }
     }
 
@@ -144,16 +183,16 @@ namespace nova {
         }
         case StmtKind::AnnotAssign: {
             auto* n = static_cast<const AnnotAssignStmt*>(s);
-            std::string lbl = "AnnotAssign(" + n->name + ": ";
-            if (n->type && n->type->kind == ExprKind::NameRef)
-                lbl += static_cast<const NameRefExpr*>(n->type.get())->name;
-            else lbl += "<type>";
-            lbl += ")";
+            std::string lbl = "AnnotAssign(" + n->name + ")";
             putLabel(prefix, isLast, lbl);
+            std::string cp = childPrefix(prefix, isLast);
+            putLabel(cp, n->value ? false : true, "type");
+            prExpr(n->type.get(), childPrefix(cp, n->value ? false : true), true);
             if (n->value) {
-                putLabel(childPrefix(prefix, isLast), true, "value");
-                prExpr(n->value.get(), childPrefix(childPrefix(prefix, isLast), true), true);
-            } break;
+                putLabel(cp, true, "value");
+                prExpr(n->value.get(), childPrefix(cp, true), true);
+            }
+            break;
         }
         case StmtKind::If: {
             auto* n = static_cast<const IfStmt*>(s);
@@ -188,6 +227,15 @@ namespace nova {
             putLabel(cp, true, "body");
             prBlock(n->body, childPrefix(cp, true)); break;
         }
+        case StmtKind::For: {
+            auto* n = static_cast<const ForStmt*>(s);
+            putLabel(prefix, isLast, "For " + n->targetName);
+            std::string cp = childPrefix(prefix, isLast);
+            putLabel(cp, false, "iterable");
+            prExpr(n->iterable.get(), childPrefix(cp, false), true);
+            putLabel(cp, true, "body");
+            prBlock(n->body, childPrefix(cp, true)); break;
+        }
         case StmtKind::Def: {
             auto* n = static_cast<const DefStmt*>(s);
             std::string lbl = "Def " + n->name + "(";
@@ -196,10 +244,13 @@ namespace nova {
                 lbl += n->params[i].name;
                 if (n->params[i].type && n->params[i].type->kind == ExprKind::NameRef)
                     lbl += ": " + static_cast<const NameRefExpr*>(n->params[i].type.get())->name;
+                else if (n->params[i].type)
+                    lbl += ": <type>";
             }
             lbl += ")";
             if (n->returnType && n->returnType->kind == ExprKind::NameRef)
                 lbl += " -> " + static_cast<const NameRefExpr*>(n->returnType.get())->name;
+            else if (n->returnType) lbl += " -> <type>";
             putLabel(prefix, isLast, lbl);
             if (!n->body.stmts.empty())
                 prBlock(n->body, childPrefix(prefix, isLast)); break;
@@ -227,16 +278,14 @@ namespace nova {
             if (!n->parentName.empty()) lbl += "(" + n->parentName + ")";
             putLabel(prefix, isLast, lbl);
             std::string cp = childPrefix(prefix, isLast);
-            size_t total = n->fields.size() + n->methods.size();
-            size_t idx = 0;
+            size_t total = n->fields.size() + n->methods.size(), idx = 0;
             for (auto& f : n->fields) {
                 std::string ft = (f.type && f.type->kind == ExprKind::NameRef)
                     ? static_cast<const NameRefExpr*>(f.type.get())->name : "<type>";
                 putLabel(cp, ++idx == total, "field " + f.name + ": " + ft);
             }
-            for (auto& m : n->methods) {
+            for (auto& m : n->methods)
                 putLabel(cp, ++idx == total, "method " + m->name);
-            }
             break;
         }
         case StmtKind::Pass:     putLabel(prefix, isLast, "Pass"); break;

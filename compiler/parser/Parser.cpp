@@ -73,6 +73,7 @@ namespace nova {
         if (check(TokenType::Class))  return parseClass();
         if (check(TokenType::If))     return parseIf();
         if (check(TokenType::While))  return parseWhile();
+        if (check(TokenType::For))    return parseFor();
         if (check(TokenType::Return)) return parseReturn();
 
         if (check(TokenType::Pass)) {
@@ -87,6 +88,7 @@ namespace nova {
             Token t = advance();
             return std::make_unique<ContinueStmt>(t.location);
         }
+        // Annotated assignment: name ':' type
         if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon)
             return parseAnnotatedAssign();
         return parseExprOrAssign();
@@ -102,8 +104,8 @@ namespace nova {
         return std::make_unique<ExprStmt>(std::move(expr), start);
     }
     StmtPtr Parser::parseAnnotatedAssign() {
-        Token name = advance(); advance();
-        ExprPtr type = parseExpression();
+        Token name = advance(); advance();   // name ':'
+        ExprPtr type = parseTypeExpr();
         ExprPtr value = nullptr;
         if (match(TokenType::Assign)) value = parseExpression();
         return std::make_unique<AnnotAssignStmt>(name.lexeme, std::move(type),
@@ -143,10 +145,20 @@ namespace nova {
         Block body = parseBlock();
         return std::make_unique<WhileStmt>(std::move(cond), std::move(body), wTok.location);
     }
+    StmtPtr Parser::parseFor() {
+        Token fTok = advance();
+        Token varName = expect(TokenType::Identifier, "loop variable name");
+        expect(TokenType::In, "'in' after loop variable");
+        ExprPtr iterable = parseExpression();
+        expect(TokenType::Colon, "':' after iterable");
+        Block body = parseBlock();
+        return std::make_unique<ForStmt>(varName.lexeme, std::move(iterable),
+            std::move(body), fTok.location);
+    }
     Param Parser::parseParam() {
         Token name = expect(TokenType::Identifier, "parameter name");
         Param p; p.name = name.lexeme;
-        if (match(TokenType::Colon)) p.type = parseExpression();
+        if (match(TokenType::Colon)) p.type = parseTypeExpr();
         return p;
     }
     std::unique_ptr<DefStmt> Parser::parseDef() {
@@ -163,7 +175,7 @@ namespace nova {
         }
         expect(TokenType::RParen, "')' to close parameter list");
         ExprPtr retType = nullptr;
-        if (match(TokenType::Arrow)) retType = parseExpression();
+        if (match(TokenType::Arrow)) retType = parseTypeExpr();
         expect(TokenType::Colon, "':' before function body");
         Block body = parseBlock();
         return std::make_unique<DefStmt>(name.lexeme, std::move(params),
@@ -174,7 +186,7 @@ namespace nova {
     FieldDef Parser::parseFieldDef() {
         Token name = expect(TokenType::Identifier, "field name");
         expect(TokenType::Colon, "':' after field name");
-        ExprPtr type = parseExpression();
+        ExprPtr type = parseTypeExpr();
         FieldDef f; f.name = name.lexeme; f.type = std::move(type); f.loc = name.location;
         if (!check(TokenType::Newline) && !check(TokenType::Dedent) && !isAtEnd())
             throw ParseError("unexpected token after field type", peek().location);
@@ -220,7 +232,6 @@ namespace nova {
             if (isAtEnd() || check(TokenType::Dedent)) break;
             if (check(TokenType::Def)) {
                 auto m = parseDef();
-                // Enforce `self` as first param
                 if (m->params.empty() || m->params[0].name != "self")
                     throw ParseError("method '" + m->name +
                         "' must have 'self' as its first parameter",
@@ -230,17 +241,13 @@ namespace nova {
             else if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon) {
                 cls->fields.push_back(parseFieldDef());
             }
-            else {
-                throw ParseError("expected field or method in class body",
-                    peek().location);
-            }
+            else throw ParseError("expected field or method in class body", peek().location);
         }
         match(TokenType::Dedent);
 
         if (cls->fields.empty() && cls->methods.empty())
             throw ParseError("class '" + name.lexeme + "' is empty", cTok.location);
 
-        // Detect field/method collisions
         for (auto& f : cls->fields)
             for (auto& m : cls->methods)
                 if (f.name == m->name)
@@ -249,6 +256,59 @@ namespace nova {
 
         return cls;
     }
+
+    // ---------------------------------------------------------------------------
+    // Type expressions (used only in annotations)
+    // ---------------------------------------------------------------------------
+
+    static bool isTypeStart(TokenType t) {
+        switch (t) {
+        case TokenType::Identifier:
+        case TokenType::IntKw:   case TokenType::FloatKw: case TokenType::BoolKw:
+        case TokenType::StrKw:   case TokenType::CharKw:  case TokenType::BytesKw:
+        case TokenType::Ptr:     case TokenType::Ref:
+        case TokenType::Unique:  case TokenType::Shared:  case TokenType::Weak:
+            return true;
+        default: return false;
+        }
+    }
+
+    static bool isPrimitiveTypeName(TokenType t) {
+        switch (t) {
+        case TokenType::IntKw: case TokenType::FloatKw: case TokenType::BoolKw:
+        case TokenType::StrKw: case TokenType::CharKw:  case TokenType::BytesKw:
+        case TokenType::Ptr:   case TokenType::Ref:
+        case TokenType::Unique:case TokenType::Shared:  case TokenType::Weak:
+            return true;
+        default: return false;
+        }
+    }
+
+    ExprPtr Parser::parseTypeExpr() {
+        const Token& t = peek();
+        if (!isTypeStart(t.type))
+            throw ParseError(std::string("expected type name, found '") + t.lexeme + "'",
+                t.location);
+
+        Token name = advance();
+
+        // Primitive keywords never take type arguments.
+        if (isPrimitiveTypeName(name.type) || !check(TokenType::Lt))
+            return std::make_unique<NameRefExpr>(name.lexeme, name.location);
+
+        // Generic: name '<' Type (',' Type)* '>'
+        advance();   // '<'
+        auto node = std::make_unique<GenericTypeExpr>(name.lexeme, name.location);
+        node->typeArgs.push_back(parseTypeExpr());
+        while (match(TokenType::Comma))
+            node->typeArgs.push_back(parseTypeExpr());
+        expect(TokenType::Gt, "'>' to close type argument list");
+        return node;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Expression parsing
+    // ---------------------------------------------------------------------------
 
     ExprPtr Parser::parseExpression() { return parseBinary(1); }
     ExprPtr Parser::parseBinary(int minPrec) {
@@ -320,6 +380,38 @@ namespace nova {
         }
         return e;
     }
+    ExprPtr Parser::parseListLit() {
+        Token open = advance();   // '['
+        auto node = std::make_unique<ListLitExpr>(open.location);
+        if (!check(TokenType::RBracket)) {
+            node->elements.push_back(parseExpression());
+            while (match(TokenType::Comma)) {
+                if (check(TokenType::RBracket)) break;
+                node->elements.push_back(parseExpression());
+            }
+        }
+        expect(TokenType::RBracket, "']' to close list literal");
+        return node;
+    }
+    ExprPtr Parser::parseMapLit() {
+        Token open = advance();   // '{'
+        auto node = std::make_unique<MapLitExpr>(open.location);
+        if (!check(TokenType::RBrace)) {
+            ExprPtr k = parseExpression();
+            expect(TokenType::Colon, "':' between key and value");
+            ExprPtr v = parseExpression();
+            node->entries.push_back({ std::move(k), std::move(v) });
+            while (match(TokenType::Comma)) {
+                if (check(TokenType::RBrace)) break;
+                k = parseExpression();
+                expect(TokenType::Colon, "':' between key and value");
+                v = parseExpression();
+                node->entries.push_back({ std::move(k), std::move(v) });
+            }
+        }
+        expect(TokenType::RBrace, "'}' to close map literal");
+        return node;
+    }
     ExprPtr Parser::parsePrimary() {
         const Token& t = peek();
         switch (t.type) {
@@ -371,6 +463,10 @@ namespace nova {
             expect(TokenType::RParen, "')' to close group");
             return std::make_unique<GroupingExpr>(std::move(inner), open.location);
         }
+        case TokenType::LBracket:
+            return parseListLit();
+        case TokenType::LBrace:
+            return parseMapLit();
         default:
             throw ParseError(std::string("expected expression, found '") +
                 t.lexeme + "'", t.location);

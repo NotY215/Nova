@@ -28,7 +28,6 @@ namespace nova {
         std::shared_ptr<Environment> globals_;
         std::shared_ptr<Environment> env_;
 
-        // Class registry (structs and classes both live here).
         std::unordered_map<std::string, std::shared_ptr<ClassObject>> classes_;
         std::unordered_map<std::string, const ClassStmt*>             classDecls_;
 
@@ -38,22 +37,27 @@ namespace nova {
         Value evalBinary(const BinaryExpr* b);
         Value evalAttr(const AttrExpr* a);
         Value evalCall(const CallExpr* c);
+        Value evalIndex(const IndexExpr* ix);
+        Value evalListLit(const ListLitExpr* n);
+        Value evalMapLit(const MapLitExpr* n);
         void  execAssign(const AssignStmt* n);
+        void  execFor(const ForStmt* n);
 
         Value callUser(const std::shared_ptr<Callable>& fn,
             const std::vector<Value>& args,
             SourceLocation loc);
+        Value callListMethod(const std::shared_ptr<Callable>& fn,
+            const std::vector<Value>& args, SourceLocation loc);
+        Value callMapMethod(const std::shared_ptr<Callable>& fn,
+            const std::vector<Value>& args, SourceLocation loc);
 
-        // register struct/class into classes_
         void registerStruct(const StructStmt* d);
         void registerClass(const ClassStmt* d);
 
-        // instance construction
         Value constructInstance(const std::shared_ptr<ClassObject>& cls,
             const std::vector<std::pair<std::string, Value>>& args,
             SourceLocation loc);
 
-        // method lookup
         std::shared_ptr<Callable> findMethod(const std::shared_ptr<ClassObject>& cls,
             const std::string& name,
             std::shared_ptr<ClassObject>* definingClass);

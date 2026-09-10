@@ -37,6 +37,7 @@ namespace nova {
         std::unique_ptr<DefStmt> parseDef();
         StmtPtr  parseIf();
         StmtPtr  parseWhile();
+        StmtPtr  parseFor();
         StmtPtr  parseReturn();
         StmtPtr  parseStruct();
         StmtPtr  parseClass();
@@ -50,7 +51,13 @@ namespace nova {
         ExprPtr  parseUnary();
         ExprPtr  parsePostfix();
         ExprPtr  parsePrimary();
+        ExprPtr  parseListLit();
+        ExprPtr  parseMapLit();
         CallArg  parseCallArg();
+
+        /// Parse a type annotation. Handles "int", "list<int>", "map<str,int>",
+        /// and nested generics. Returns NameRefExpr or GenericTypeExpr.
+        ExprPtr  parseTypeExpr();
     };
 
 } // namespace nova

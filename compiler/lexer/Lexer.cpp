@@ -244,11 +244,13 @@ namespace nova {
             addAt(TokenType::Invalid, start, "unexpected '!'"); return;
         case '<':
             if (match('=')) { addAt(TokenType::LtEq, start, "<="); return; }
-            if (match('<')) { addAt(TokenType::Shl, start, "<<"); return; }
+            // NOTE: '<<' is NOT combined into a single token. Two '<'s are
+            // emitted so that nested generics like list<list<int>> can be
+            // parsed. Shift operators are not yet implemented.
             addAt(TokenType::Lt, start, "<"); return;
         case '>':
             if (match('=')) { addAt(TokenType::GtEq, start, ">="); return; }
-            if (match('>')) { addAt(TokenType::Shr, start, ">>"); return; }
+            // NOTE: '>>' is NOT combined. See comment above.
             addAt(TokenType::Gt, start, ">"); return;
         case '.':
             if (match('.')) { addAt(TokenType::Invalid, start, "unexpected '..'"); return; }

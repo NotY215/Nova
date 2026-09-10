@@ -12,6 +12,8 @@ namespace nova {
         Any, Unknown, Error,
         Function,
         Struct,   // covers struct AND class
+        List,     // params[0] = element type
+        Map,      // params[0] = key type, params[1] = value type
         Named,
     };
 
@@ -28,8 +30,8 @@ namespace nova {
         TypePtr              returnType;
 
         std::vector<StructFieldInfo>             fields;
-        std::unordered_map<std::string, TypePtr> methods;   // name -> Function type
-        TypePtr                                  parent;    // for classes
+        std::unordered_map<std::string, TypePtr> methods;
+        TypePtr                                  parent;
 
         explicit Type(TypeKind k) : kind(k) {}
         Type(TypeKind k, std::string n) : kind(k), name(std::move(n)) {}
@@ -46,6 +48,8 @@ namespace nova {
         TypePtr Any(); TypePtr Unknown(); TypePtr Error();
         TypePtr Function(std::vector<TypePtr> params, TypePtr ret);
         TypePtr Struct(std::string name, std::vector<StructFieldInfo> fields);
+        TypePtr List(TypePtr elem);
+        TypePtr Map(TypePtr key, TypePtr value);
     }
 
     bool    isAssignable(const TypePtr& to, const TypePtr& from);

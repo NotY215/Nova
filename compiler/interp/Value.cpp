@@ -19,22 +19,50 @@ namespace nova {
         if (isInt())    return asInt() != 0;
         if (isFloat())  return asFloat() != 0.0;
         if (isString()) return !asString().empty();
+        if (isList())   return !asList()->items.empty();
+        if (isMap())    return !asMap()->entries.empty();
         return true;
     }
 
     std::string Value::toString() const {
-        if (isNone()) return "None";
-        if (isBool()) return asBool() ? "true" : "false";
-        if (isInt())  return std::to_string(asInt());
-        if (isFloat())return formatDouble(asFloat());
-        if (isString())return asString();
+        if (isNone())   return "None";
+        if (isBool())   return asBool() ? "true" : "false";
+        if (isInt())    return std::to_string(asInt());
+        if (isFloat())  return formatDouble(asFloat());
+        if (isString()) return asString();
         if (isCallable()) return "<function " + asCallable()->name + ">";
+        if (isClass())  return "<class " + asClass()->name + ">";
+
+        if (isList()) {
+            std::string out = "[";
+            const auto& items = asList()->items;
+            for (size_t i = 0; i < items.size(); ++i) {
+                if (i) out += ", ";
+                if (items[i].isString()) out += "\"" + items[i].asString() + "\"";
+                else                     out += items[i].toString();
+            }
+            out += "]";
+            return out;
+        }
+        if (isMap()) {
+            std::string out = "{";
+            bool first = true;
+            for (auto& [k, v] : asMap()->entries) {
+                if (!first) out += ", ";
+                first = false;
+                out += "\"" + k + "\": ";
+                if (v.isString()) out += "\"" + v.asString() + "\"";
+                else              out += v.toString();
+            }
+            out += "}";
+            return out;
+        }
+
         if (isInstance()) {
             auto s = asInstance();
             std::string out = s->cls ? s->cls->name : "?";
             out += "(";
             bool first = true;
-            // stable order from class field order
             auto emit = [&](const std::string& fn, const Value& v) {
                 if (!first) out += ", ";
                 first = false;
@@ -48,7 +76,6 @@ namespace nova {
                     if (it != s->fields.end()) emit(fn, it->second);
                 }
             }
-            // Any additional fields (dynamically added by __init__)
             for (auto& [fn, v] : s->fields) {
                 if (s->cls) {
                     bool declared = false;
@@ -60,19 +87,20 @@ namespace nova {
             out += ")";
             return out;
         }
-        if (isClass()) return "<class " + asClass()->name + ">";
         return "<unknown>";
     }
 
     std::string Value::typeName() const {
-        if (isNone()) return "None";
-        if (isBool()) return "bool";
-        if (isInt())  return "int";
-        if (isFloat())return "float";
-        if (isString())return "str";
-        if (isCallable())return "function";
+        if (isNone())     return "None";
+        if (isBool())     return "bool";
+        if (isInt())      return "int";
+        if (isFloat())    return "float";
+        if (isString())   return "str";
+        if (isCallable()) return "function";
         if (isInstance()) return asInstance()->cls ? asInstance()->cls->name : "?";
-        if (isClass()) return asClass()->name;
+        if (isClass())    return asClass()->name;
+        if (isList())     return "list";
+        if (isMap())      return "map";
         return "?";
     }
 
