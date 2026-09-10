@@ -3,6 +3,8 @@
 
 namespace nova {
 
+    // NOTE: "self" is intentionally NOT a keyword. The class parser enforces
+    // the naming convention; the lexer treats it as a plain identifier.
     const std::unordered_map<std::string, TokenType>& Lexer::keywords() {
         static const std::unordered_map<std::string, TokenType> kw = {
             {"def", TokenType::Def}, {"return", TokenType::Return},
@@ -12,7 +14,7 @@ namespace nova {
             {"pass", TokenType::Pass},
             {"class", TokenType::Class}, {"struct", TokenType::Struct},
             {"enum", TokenType::Enum}, {"interface", TokenType::Interface},
-            {"self", TokenType::Self}, {"new", TokenType::New}, {"delete", TokenType::Delete},
+            {"new", TokenType::New}, {"delete", TokenType::Delete},
             {"import", TokenType::Import}, {"from", TokenType::From}, {"as", TokenType::As},
             {"try", TokenType::Try}, {"except", TokenType::Except},
             {"finally", TokenType::Finally}, {"with", TokenType::With},
@@ -37,8 +39,6 @@ namespace nova {
     Lexer::Lexer(std::string source) : source_(std::move(source)) {
         indentStack_.push_back(0);
     }
-
-    // ---------- primitives ----------
 
     char Lexer::peek(int ahead) const {
         size_t i = pos_ + static_cast<size_t>(ahead);
@@ -65,11 +65,10 @@ namespace nova {
     void Lexer::add(TokenType type, std::string lexeme) {
         tokens_.push_back(Token{ type, std::move(lexeme), here() });
     }
+
     void Lexer::addAt(TokenType type, SourceLocation loc, std::string lexeme) {
         tokens_.push_back(Token{ type, std::move(lexeme), loc });
     }
-
-    // ---------- main loop ----------
 
     std::vector<Token> Lexer::tokenize() {
         while (!isAtEnd()) {
@@ -80,10 +79,8 @@ namespace nova {
 
             char c = peek();
 
-            // whitespace inside a line
             if (c == ' ' || c == '\t' || c == '\r') { advance(); continue; }
 
-            // newline
             if (c == '\n') {
                 if (bracketDepth_ == 0
                     && !tokens_.empty()
@@ -95,7 +92,6 @@ namespace nova {
                 continue;
             }
 
-
             if (c == '#') { skipComment(); continue; }
 
             if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') { readIdentifier(); continue; }
@@ -105,11 +101,9 @@ namespace nova {
             readOperator();
         }
 
-        // ensure trailing Newline so the parser sees a clean terminator
         if (!tokens_.empty() && tokens_.back().type != TokenType::Newline) {
             add(TokenType::Newline, "\n");
         }
-        // unwind all indents
         while (indentStack_.size() > 1) {
             indentStack_.pop_back();
             add(TokenType::Dedent);
@@ -118,24 +112,20 @@ namespace nova {
         return std::move(tokens_);
     }
 
-    // ---------- line start / indentation ----------
-
     void Lexer::handleLineStart() {
         atLineStart_ = false;
 
-        // measure leading whitespace
         int indent = 0;
         while (!isAtEnd()) {
             char c = peek();
             if (c == ' ') { indent += 1; advance(); }
-            else if (c == '\t') { indent += 4; advance(); }  // tabs → next multiple of 4
+            else if (c == '\t') { indent += 4; advance(); }
             else break;
         }
 
-        // blank line? (only whitespace then newline/EOF) → ignore
-        if (isAtEnd() || peek() == '\n') return;
+        // Blank line?  Accept \n, \r\n, or \r alone.  THIS was the CRLF bug.
+        if (isAtEnd() || peek() == '\n' || peek() == '\r') return;
 
-        // comment-only line? → ignore for indentation
         if (peek() == '#') return;
 
         int current = indentStack_.back();
@@ -153,8 +143,6 @@ namespace nova {
             }
         }
     }
-
-    // ---------- sub-scanners ----------
 
     void Lexer::skipComment() {
         while (!isAtEnd() && peek() != '\n') advance();
@@ -181,20 +169,18 @@ namespace nova {
 
         while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(peek()))) advance();
 
-        // fractional part: only if followed by a digit (so "1.foo" stays int-dot-ident)
         if (peek() == '.' && std::isdigit(static_cast<unsigned char>(peek(1)))) {
             isFloat = true;
             advance();
             while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(peek()))) advance();
         }
 
-        // exponent
         if (peek() == 'e' || peek() == 'E') {
             int ahead = 1;
             if (peek(ahead) == '+' || peek(ahead) == '-') ahead++;
             if (std::isdigit(static_cast<unsigned char>(peek(ahead)))) {
                 isFloat = true;
-                advance();                    // e/E
+                advance();
                 if (peek() == '+' || peek() == '-') advance();
                 while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(peek()))) advance();
             }
@@ -207,12 +193,12 @@ namespace nova {
 
     void Lexer::readString(char quote) {
         SourceLocation start = here();
-        advance();  // consume opening quote
+        advance();
         size_t begin = pos_;
 
         while (!isAtEnd() && peek() != quote) {
             if (peek() == '\\' && peek(1) != '\0') { advance(); advance(); continue; }
-            if (peek() == '\n') break;   // unterminated: stop at EOL
+            if (peek() == '\n') break;
             advance();
         }
 
@@ -222,14 +208,14 @@ namespace nova {
         }
 
         std::string body = source_.substr(begin, pos_ - begin);
-        advance();  // consume closing quote
+        advance();
 
         TokenType type = (quote == '\'') ? TokenType::Char : TokenType::String;
         tokens_.push_back(Token{ type, std::move(body), start });
     }
 
     void Lexer::readOperator() {
-        SourceLocation start = here();   // <-- capture BEFORE advancing
+        SourceLocation start = here();
         char c = advance();
         switch (c) {
         case '+':

@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -10,18 +11,14 @@ namespace nova {
         None, Bool, Int, Float, Str, Char, Bytes,
         Any, Unknown, Error,
         Function,
-        Struct,
+        Struct,   // covers struct AND class
         Named,
     };
 
     class Type;
     using TypePtr = std::shared_ptr<Type>;
 
-    // One declared struct field
-    struct StructFieldInfo {
-        std::string name;
-        TypePtr     type;
-    };
+    struct StructFieldInfo { std::string name; TypePtr type; };
 
     class Type {
     public:
@@ -30,30 +27,23 @@ namespace nova {
         std::vector<TypePtr> params;
         TypePtr              returnType;
 
-        // for Struct
-        std::vector<StructFieldInfo> fields;
+        std::vector<StructFieldInfo>             fields;
+        std::unordered_map<std::string, TypePtr> methods;   // name -> Function type
+        TypePtr                                  parent;    // for classes
 
         explicit Type(TypeKind k) : kind(k) {}
         Type(TypeKind k, std::string n) : kind(k), name(std::move(n)) {}
 
         std::string toString() const;
         bool        equals(const TypePtr& other) const;
-
-        /// For Struct kinds only. Returns nullptr if field not found.
         const StructFieldInfo* findField(const std::string& n) const;
+        TypePtr                findMethod(const std::string& n) const;
     };
 
     namespace Types {
-        TypePtr None();
-        TypePtr Bool();
-        TypePtr Int();
-        TypePtr Float();
-        TypePtr Str();
-        TypePtr Char();
-        TypePtr Bytes();
-        TypePtr Any();
-        TypePtr Unknown();
-        TypePtr Error();
+        TypePtr None(); TypePtr Bool(); TypePtr Int(); TypePtr Float();
+        TypePtr Str(); TypePtr Char(); TypePtr Bytes();
+        TypePtr Any(); TypePtr Unknown(); TypePtr Error();
         TypePtr Function(std::vector<TypePtr> params, TypePtr ret);
         TypePtr Struct(std::string name, std::vector<StructFieldInfo> fields);
     }

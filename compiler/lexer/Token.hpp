@@ -19,7 +19,6 @@ namespace nova {
         Try, Except, Finally, With, Raise,
         Unsafe, Spawn, Wait, Task, Async, Await,
         And, Or, Not, In, Is, Lambda, Yield,
-        // type keywords
         IntKw, FloatKw, BoolKw, StrKw, CharKw, BytesKw,
         Ptr, Ref, Unique, Shared, Weak,
 
@@ -33,11 +32,7 @@ namespace nova {
         Amp, Pipe, Caret, Tilde, Shl, Shr, At,
 
         // --- Structural ---
-        Newline,        // logical end-of-line
-        Indent,         // one level deeper
-        Dedent,         // one level shallower
-        EndOfFile,
-        Invalid,
+        Newline, Indent, Dedent, EndOfFile, Invalid,
     };
 
     struct SourceLocation {
@@ -48,11 +43,10 @@ namespace nova {
 
     struct Token {
         TokenType     type;
-        std::string   lexeme;      // original text
-        SourceLocation location;   // start of the token
+        std::string   lexeme;
+        SourceLocation location;
     };
 
-    /// Human-readable name for diagnostics and the token-dump tool.
     const char* tokenTypeName(TokenType type);
 
 } // namespace nova

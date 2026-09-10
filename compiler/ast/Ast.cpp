@@ -6,34 +6,21 @@ namespace nova {
 
     const char* binOpName(BinOp op) {
         switch (op) {
-        case BinOp::Add:      return "+";
-        case BinOp::Sub:      return "-";
-        case BinOp::Mul:      return "*";
-        case BinOp::Div:      return "/";
-        case BinOp::FloorDiv: return "//";
-        case BinOp::Mod:      return "%";
-        case BinOp::Pow:      return "**";
-        case BinOp::Eq:       return "==";
-        case BinOp::NotEq:    return "!=";
-        case BinOp::Lt:       return "<";
-        case BinOp::Gt:       return ">";
-        case BinOp::LtEq:     return "<=";
-        case BinOp::GtEq:     return ">=";
-        case BinOp::And:      return "and";
-        case BinOp::Or:       return "or";
-        case BinOp::In:       return "in";
-        case BinOp::Is:       return "is";
+        case BinOp::Add: return "+"; case BinOp::Sub: return "-";
+        case BinOp::Mul: return "*"; case BinOp::Div: return "/";
+        case BinOp::FloorDiv: return "//"; case BinOp::Mod: return "%";
+        case BinOp::Pow: return "**"; case BinOp::Eq: return "==";
+        case BinOp::NotEq: return "!="; case BinOp::Lt: return "<";
+        case BinOp::Gt: return ">"; case BinOp::LtEq: return "<=";
+        case BinOp::GtEq: return ">="; case BinOp::And: return "and";
+        case BinOp::Or: return "or"; case BinOp::In: return "in";
+        case BinOp::Is: return "is";
         }
         return "?";
     }
-
     const char* unOpName(UnOp op) {
-        switch (op) {
-        case UnOp::Neg: return "-";
-        case UnOp::Pos: return "+";
-        case UnOp::Not: return "not";
-        }
-        return "?";
+    switch (op) { case UnOp::Neg: return "-"; case UnOp::Pos: return "+"; case UnOp::Not: return "not"; }
+                                return "?";
     }
 
     namespace {
@@ -41,18 +28,15 @@ namespace nova {
         constexpr const char* ELBOW = "\xE2\x94\x94\xE2\x94\x80\xE2\x94\x80 ";
         constexpr const char* PIPE = "\xE2\x94\x82   ";
         constexpr const char* BLANK = "    ";
-
-        void putLabel(const std::string& prefix, bool isLast, const std::string& label) {
-            std::printf("%s%s%s\n", prefix.c_str(),
-                isLast ? ELBOW : TEE, label.c_str());
+        void putLabel(const std::string& p, bool last, const std::string& l) {
+            std::printf("%s%s%s\n", p.c_str(), last ? ELBOW : TEE, l.c_str());
         }
-        std::string childPrefix(const std::string& p, bool isLast) {
-            return p + (isLast ? BLANK : PIPE);
+        std::string childPrefix(const std::string& p, bool last) {
+            return p + (last ? BLANK : PIPE);
         }
-    } // namespace
-
-    static void prExpr(const Expr* e, const std::string& p, bool isLast);
-    static void prStmt(const Stmt* s, const std::string& p, bool isLast);
+    }
+    static void prExpr(const Expr* e, const std::string& p, bool last);
+    static void prStmt(const Stmt* s, const std::string& p, bool last);
     static void prBlock(const Block& b, const std::string& p);
 
     static void prExpr(const Expr* e, const std::string& prefix, bool isLast) {
@@ -78,8 +62,7 @@ namespace nova {
             auto* n = static_cast<const BoolLitExpr*>(e);
             putLabel(prefix, isLast, n->value ? "Bool(true)" : "Bool(false)"); break;
         }
-        case ExprKind::NoneLit:
-            putLabel(prefix, isLast, "None"); break;
+        case ExprKind::NoneLit: putLabel(prefix, isLast, "None"); break;
         case ExprKind::NameRef: {
             auto* n = static_cast<const NameRefExpr*>(e);
             putLabel(prefix, isLast, "Name(" + n->name + ")"); break;
@@ -93,8 +76,7 @@ namespace nova {
             auto* n = static_cast<const BinaryExpr*>(e);
             putLabel(prefix, isLast, std::string("Binary(") + binOpName(n->op) + ")");
             std::string cp = childPrefix(prefix, isLast);
-            prExpr(n->lhs.get(), cp, false);
-            prExpr(n->rhs.get(), cp, true); break;
+            prExpr(n->lhs.get(), cp, false); prExpr(n->rhs.get(), cp, true); break;
         }
         case ExprKind::Grouping: {
             auto* n = static_cast<const GroupingExpr*>(e);
@@ -106,10 +88,8 @@ namespace nova {
             putLabel(prefix, isLast, "Call");
             std::string cp = childPrefix(prefix, isLast);
             bool hasArgs = !n->args.empty();
-
             putLabel(cp, !hasArgs, "callee");
             prExpr(n->callee.get(), childPrefix(cp, !hasArgs), true);
-
             if (hasArgs) {
                 putLabel(cp, true, "args");
                 std::string ap = childPrefix(cp, true);
@@ -120,12 +100,9 @@ namespace nova {
                         putLabel(ap, last, "kw:" + a.name);
                         prExpr(a.value.get(), childPrefix(ap, last), true);
                     }
-                    else {
-                        prExpr(a.value.get(), ap, last);
-                    }
+                    else prExpr(a.value.get(), ap, last);
                 }
-            }
-            break;
+            } break;
         }
         case ExprKind::Attr: {
             auto* n = static_cast<const AttrExpr*>(e);
@@ -142,10 +119,10 @@ namespace nova {
         }
     }
 
-    static void prBlock(const Block& b, const std::string& prefix) {
+    static void prBlock(const Block& b, const std::string& p) {
         if (b.stmts.empty()) return;
         for (size_t i = 0; i < b.stmts.size(); ++i)
-            prStmt(b.stmts[i].get(), prefix, i + 1 == b.stmts.size());
+            prStmt(b.stmts[i].get(), p, i + 1 == b.stmts.size());
     }
 
     static void prStmt(const Stmt* s, const std::string& prefix, bool isLast) {
@@ -175,25 +152,19 @@ namespace nova {
             putLabel(prefix, isLast, lbl);
             if (n->value) {
                 putLabel(childPrefix(prefix, isLast), true, "value");
-                prExpr(n->value.get(),
-                    childPrefix(childPrefix(prefix, isLast), true), true);
-            }
-            break;
+                prExpr(n->value.get(), childPrefix(childPrefix(prefix, isLast), true), true);
+            } break;
         }
         case StmtKind::If: {
             auto* n = static_cast<const IfStmt*>(s);
             putLabel(prefix, isLast, "If");
             std::string cp = childPrefix(prefix, isLast);
-            size_t total = 2 + n->elifs.size() + (n->elseBody ? 1 : 0);
-            size_t idx = 0;
-
+            size_t total = 2 + n->elifs.size() + (n->elseBody ? 1 : 0), idx = 0;
             putLabel(cp, false, "cond");
             prExpr(n->cond.get(), childPrefix(cp, false), true); ++idx;
-
             bool tL = (idx + 1 == total);
             putLabel(cp, tL, "then");
             prBlock(n->thenBody, childPrefix(cp, tL)); ++idx;
-
             for (auto& ec : n->elifs) {
                 bool eL = (idx + 1 == total);
                 putLabel(cp, eL, "elif");
@@ -206,8 +177,7 @@ namespace nova {
             if (n->elseBody) {
                 putLabel(cp, true, "else");
                 prBlock(*n->elseBody, childPrefix(cp, true));
-            }
-            break;
+            } break;
         }
         case StmtKind::While: {
             auto* n = static_cast<const WhileStmt*>(s);
@@ -224,17 +194,12 @@ namespace nova {
             for (size_t i = 0; i < n->params.size(); ++i) {
                 if (i) lbl += ", ";
                 lbl += n->params[i].name;
-                if (n->params[i].type &&
-                    n->params[i].type->kind == ExprKind::NameRef) {
-                    lbl += ": " + static_cast<const NameRefExpr*>(
-                        n->params[i].type.get())->name;
-                }
+                if (n->params[i].type && n->params[i].type->kind == ExprKind::NameRef)
+                    lbl += ": " + static_cast<const NameRefExpr*>(n->params[i].type.get())->name;
             }
             lbl += ")";
-            if (n->returnType && n->returnType->kind == ExprKind::NameRef) {
-                lbl += " -> " + static_cast<const NameRefExpr*>(
-                    n->returnType.get())->name;
-            }
+            if (n->returnType && n->returnType->kind == ExprKind::NameRef)
+                lbl += " -> " + static_cast<const NameRefExpr*>(n->returnType.get())->name;
             putLabel(prefix, isLast, lbl);
             if (!n->body.stmts.empty())
                 prBlock(n->body, childPrefix(prefix, isLast)); break;
@@ -252,14 +217,30 @@ namespace nova {
             for (size_t i = 0; i < n->fields.size(); ++i) {
                 const auto& f = n->fields[i];
                 std::string ft = (f.type && f.type->kind == ExprKind::NameRef)
-                    ? static_cast<const NameRefExpr*>(f.type.get())->name
-                    : "<type>";
+                    ? static_cast<const NameRefExpr*>(f.type.get())->name : "<type>";
                 putLabel(cp, i + 1 == n->fields.size(), f.name + ": " + ft);
+            } break;
+        }
+        case StmtKind::Class: {
+            auto* n = static_cast<const ClassStmt*>(s);
+            std::string lbl = "Class " + n->name;
+            if (!n->parentName.empty()) lbl += "(" + n->parentName + ")";
+            putLabel(prefix, isLast, lbl);
+            std::string cp = childPrefix(prefix, isLast);
+            size_t total = n->fields.size() + n->methods.size();
+            size_t idx = 0;
+            for (auto& f : n->fields) {
+                std::string ft = (f.type && f.type->kind == ExprKind::NameRef)
+                    ? static_cast<const NameRefExpr*>(f.type.get())->name : "<type>";
+                putLabel(cp, ++idx == total, "field " + f.name + ": " + ft);
+            }
+            for (auto& m : n->methods) {
+                putLabel(cp, ++idx == total, "method " + m->name);
             }
             break;
         }
-        case StmtKind::Pass:     putLabel(prefix, isLast, "Pass");     break;
-        case StmtKind::Break:    putLabel(prefix, isLast, "Break");    break;
+        case StmtKind::Pass:     putLabel(prefix, isLast, "Pass"); break;
+        case StmtKind::Break:    putLabel(prefix, isLast, "Break"); break;
         case StmtKind::Continue: putLabel(prefix, isLast, "Continue"); break;
         }
     }

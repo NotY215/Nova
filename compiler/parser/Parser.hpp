@@ -34,11 +34,12 @@ namespace nova {
 
         StmtPtr  parseStatement();
         Block    parseBlock();
-        StmtPtr  parseDef();
+        std::unique_ptr<DefStmt> parseDef();
         StmtPtr  parseIf();
         StmtPtr  parseWhile();
         StmtPtr  parseReturn();
         StmtPtr  parseStruct();
+        StmtPtr  parseClass();
         StmtPtr  parseAnnotatedAssign();
         StmtPtr  parseExprOrAssign();
         Param    parseParam();

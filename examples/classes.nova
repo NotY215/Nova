@@ -1,0 +1,75 @@
+class Player:
+    name: str
+    health: int
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.health = 100
+
+    def damage(self, amount: int) -> None:
+        self.health = self.health - amount
+
+    def describe(self) -> str:
+        return self.name + " has " + str(self.health) + " hp"
+
+class Warrior(Player):
+    rage: int
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.rage = 0
+
+    def damage(self, amount: int) -> None:
+        super().damage(amount)
+        self.rage = self.rage + amount
+
+    def describe(self) -> str:
+        return super().describe() + " [rage " + str(self.rage) + "]"
+
+p = Player("NotY")
+p.damage(20)
+print(p.describe())
+
+w = Warrior("Brutus")
+w.damage(30)
+w.damage(15)
+print(w.describe())
+
+# inherit without override
+class Mage(Player):
+    mana: int
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.mana = 50
+
+m = Mage("Zara")
+m.damage(10)
+print(m.describe())
+print(m.mana)
+
+# subclass of subclass
+class Archmage(Mage):
+    def cast(self) -> str:
+        return self.name + " casts a spell"
+
+a = Archmage("Merlin")
+a.damage(5)
+print(a.describe())
+print(a.cast())
+
+# instance methods can call each other
+class Counter:
+    value: int
+    def __init__(self) -> None:
+        self.value = 0
+    def inc(self) -> None:
+        self.value = self.value + 1
+    def inc_n(self, n: int) -> None:
+        i = 0
+        while i < n:
+            self.inc()
+            i = i + 1
+
+c = Counter()
+c.inc_n(5)
+print(c.value)

@@ -1,1513 +1,787 @@
+<div align="center">
+
+<img src="assets/logo.svg" alt="Nova Logo" width="180"/>
+
 # 🌌 Nova
 
-<p align="center">
-  <img src="assets/logo.svg" alt="Nova Programming Language" width="260">
-</p>
+### Python simplicity. Native performance. Low-level control. AI-ready.
 
-<h1 align="center">Nova</h1>
+**A modern, independent programming language designed to bring the strengths of  
+Python, C++, Java, and C# together into one unified language.**
 
-<p align="center">
-  <strong>Python simplicity. Native performance. Low-level control. AI-ready.</strong>
-</p>
+<br>
 
-<p align="center">
-  A modern general-purpose programming language designed to combine the
-  simplicity of Python with the performance and control of C++, while
-  incorporating the productivity and ecosystem concepts of C# and Java.
-</p>
+[![Status](https://img.shields.io/badge/Status-Early%20Development-orange?style=for-the-badge)](.)
+[![Language](https://img.shields.io/badge/Language-Nova-6C63FF?style=for-the-badge)](.)
+[![Syntax](https://img.shields.io/badge/Syntax-Python--Inspired-3776AB?style=for-the-badge)](docs/syntax.md)
+[![Performance](https://img.shields.io/badge/Performance-Native-00599C?style=for-the-badge)](.)
+[![AI](https://img.shields.io/badge/AI%2FML-Ready-8A2BE2?style=for-the-badge)](docs/ai.md)
+[![Platform](https://img.shields.io/badge/Platform-Cross--Platform-2EA44F?style=for-the-badge)](.)
+[![License](https://img.shields.io/badge/License-See%20LICENSE-lightgrey?style=for-the-badge)](LICENSE)
 
-<p align="center">
+<br>
 
-![Status](https://img.shields.io/badge/Status-Experimental-orange.svg)
-![Language](https://img.shields.io/badge/Language-Nova-6C5CE7.svg)
-![Syntax](https://img.shields.io/badge/Syntax-Python--Inspired-3776AB.svg)
-![Performance](https://img.shields.io/badge/Performance-Native--Compiled-blue.svg)
-![AI](https://img.shields.io/badge/AI-First--Class-purple.svg)
-![Platform](https://img.shields.io/badge/Platform-Cross--Platform-success.svg)
-![License](https://img.shields.io/badge/License-TBD-lightgrey.svg)
+**[📖 Syntax](docs/syntax.md) · [📦 Packages](docs/package.md) · [🤖 AI & ML](docs/ai.md) · [🔭 Vision](docs/vision.md)**
 
-</p>
+</div>
 
 ---
 
-## 🚀 What is Nova?
+# 🌌 What is Nova?
 
-**Nova** is a modern general-purpose programming language designed around a
-simple idea:
+**Nova** is an independent programming language project built around one simple
+idea:
 
-> **Make native programming as approachable as Python without giving up the
-> performance and control expected from systems languages.**
+> **Programming should be easy to write, powerful to run, and capable of
+> giving developers control when they need it.**
 
-Nova combines ideas inspired by:
+Nova aims to combine the most useful characteristics of several major
+programming languages:
 
-- 🐍 **Python** — simplicity, readability, rapid development and AI ecosystem
-- ⚡ **C++** — native performance, memory control and low-level programming
-- ☕ **Java** — portability, structured development and large-scale software
-- 💜 **C#** — modern application development, GUI capabilities and tooling
+- 🐍 **Python** — simplicity, readability, productivity and AI/data-science
+  accessibility
+- ⚡ **C++** — native performance, hardware control and systems-level capability
+- ☕ **Java** — portability, large-scale software concepts and mature
+  application development
+- 🔷 **C#** — modern application development, GUI capabilities and developer
+  productivity
 
-Nova is **not intended to be a direct replacement or clone** of any of these
-languages.
-
-Instead, Nova aims to create a single coherent programming experience from
-the strongest ideas behind them.
-
----
-
-# ✨ The Nova Philosophy
-
-Nova follows four primary principles:
-
-### 1. Simple by default
-
-Writing basic programs should feel almost as easy as Python.
-
-```nova
-print("Hello, Nova!")
-````
-
-### 2. Powerful when needed
-
-Advanced programmers should be able to access:
-
-* pointers
-* references
-* manual memory management
-* native libraries
-* system APIs
-* multithreading
-* SIMD
-* GPU APIs
-* low-level hardware functionality
-
-### 3. Native performance
-
-Nova is designed as a **compiled language**, rather than relying on a
-traditional interpreter for normal execution.
-
-The goal is to allow Nova applications to achieve performance comparable to
-other native compiled languages for suitable workloads.
-
-### 4. One language, multiple levels
-
-Nova should be usable for:
-
-```text
-Simple scripts
-      ↓
-Desktop applications
-      ↓
-Web/network applications
-      ↓
-AI / Machine Learning
-      ↓
-Game development
-      ↓
-High-performance applications
-      ↓
-Systems programming
-      ↓
-Low-level software
-```
+Instead of forcing developers to choose between **easy syntax** and
+**high-level performance**, Nova aims to provide both.
 
 ---
 
-# 🧬 Why Nova?
+# 🎯 The Idea Behind Nova
 
-Modern programming often forces developers to choose between:
+Nova is designed around four major principles:
 
-| Language    | Major Strength                               |
-| ----------- | -------------------------------------------- |
-| 🐍 Python   | Simplicity, AI, data science                 |
-| ⚡ C++       | Performance and low-level control            |
-| ☕ Java      | Portability and large-scale software         |
-| 💜 C#       | Application development and GUI              |
-| 🌌 **Nova** | **A unified combination of these strengths** |
+### 🐍 Simple to Learn
 
-Nova attempts to reduce the gap between:
+Nova's syntax is designed to be approachable, readable and familiar to
+developers coming from Python and other modern languages.
 
-```text
-Easy to write
-      ↕
-Fast to execute
+### ⚡ Fast by Design
 
-High-level
-      ↕
-Low-level
+Nova is intended to be a compiled, native programming language capable of
+delivering performance suitable for demanding applications.
 
-Rapid development
-      ↕
-Hardware control
-```
+### 🧠 Powerful When Needed
+
+Developers should be able to move from high-level application development to
+lower-level memory and system control without having to switch languages.
+
+### 🤖 Ready for Modern Computing
+
+AI, machine learning, data processing, graphics, applications and systems
+development should all be possible within the same language ecosystem.
 
 ---
 
-# 📝 Syntax
+# ✨ What Makes Nova Different?
 
-Nova uses a **Python-inspired syntax**.
+Nova is not intended to simply copy Python, C++, Java or C#.
 
-It is intentionally not 100% identical to Python.
+The goal is to take useful ideas from each ecosystem and combine them into a
+single language with its own identity.
 
-The goal is to keep familiar concepts while allowing Nova to introduce
-features necessary for a compiled, statically typed and low-level language.
+| Capability | Python | C++ | Java | C# | **Nova** |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Easy syntax | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Native performance | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Low-level control | ⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Memory control | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| AI / ML ecosystem | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| GUI development | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Game development | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Systems programming | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Cross-platform potential | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Beginner friendliness | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| High-level productivity | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| AI-native direction | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 
-## Hello World
-
-```nova
-print("Hello, World!")
-```
-
-No:
-
-```cpp
-#include <iostream>
-using namespace std;
-
-int main() {
-    cout << "Hello";
-}
-```
-
-No unnecessary boilerplate.
+> **Nova's goal is not to replace every language. Its goal is to reduce the
+> number of situations where developers need to switch between languages.**
 
 ---
 
-# 📦 Variables
+# 🚀 Core Features
 
-Nova supports simple variable declarations.
+## 🧩 Modern Language Design
 
-```nova
-name = "NotY"
-age = 17
-score = 95.5
-active = true
-```
+Nova is intended to provide:
 
-Explicit types can also be used when required:
+- readable syntax
+- optional static typing
+- type inference
+- object-oriented programming
+- structures and classes
+- generics
+- collections
+- modules
+- error handling
+- modern concurrency
+- asynchronous programming
+- native compilation
+- cross-platform development
 
-```nova
-name: str = "NotY"
-age: int = 17
-score: float64 = 95.5
-```
+The complete language syntax and semantics are maintained separately.
 
-Nova is designed to use **type inference** wherever possible.
+### 📖 Learn the Nova Syntax
 
----
+<div align="center">
 
-# 🔢 Type System
+### [🌟 OPEN `docs/syntax.md` →](docs/syntax.md)
 
-Nova provides common primitive types:
+**Complete syntax, language rules, types, functions, classes, memory concepts,
+control flow and other language features.**
 
-```text
-int
-uint
-int8
-int16
-int32
-int64
-
-uint8
-uint16
-uint32
-uint64
-
-float32
-float64
-
-bool
-char
-str
-bytes
-```
-
-It also supports higher-level types such as:
-
-```text
-list
-array
-map
-set
-tuple
-struct
-class
-enum
-optional
-generic
-pointer
-reference
-```
-
-Example:
-
-```nova
-numbers: list<int> = [10, 20, 30, 40]
-```
-
----
-
-# 🧠 Type Inference
-
-Nova attempts to reduce unnecessary type declarations.
-
-Instead of:
-
-```nova
-int number = 100;
-```
-
-or:
-
-```python
-number: int = 100
-```
-
-Nova allows:
-
-```nova
-number = 100
-```
-
-The compiler can infer:
-
-```text
-number → int
-```
-
-while still maintaining strong type information internally.
-
----
-
-# 🔧 Functions
-
-Functions use Python-inspired syntax.
-
-```nova
-def add(a: int, b: int) -> int:
-    return a + b
-```
-
-Usage:
-
-```nova
-result = add(10, 20)
-
-print(result)
-```
-
----
-
-# 🔀 Conditions
-
-```nova
-if score >= 90:
-    print("Excellent")
-elif score >= 60:
-    print("Good")
-else:
-    print("Needs improvement")
-```
-
-Nova uses indentation-oriented blocks instead of requiring braces for
-ordinary code.
-
----
-
-# 🔁 Loops
-
-```nova
-for number in numbers:
-    print(number)
-```
-
-And:
-
-```nova
-while running:
-    update()
-```
-
----
-
-# 🏗️ Object-Oriented Programming
-
-Nova supports modern object-oriented programming.
-
-```nova
-class Player:
-
-    name: str
-    health: int
-
-    def __init__(self, name: str):
-        self.name = name
-        self.health = 100
-
-    def damage(self, amount: int):
-        self.health -= amount
-```
-
-Usage:
-
-```nova
-player = Player("Nova")
-
-player.damage(20)
-
-print(player.health)
-```
-
-Nova is designed to support:
-
-* Classes
-* Objects
-* Encapsulation
-* Inheritance
-* Polymorphism
-* Interfaces
-* Abstract types
-* Properties
-* Static members
-* Method overriding
-
----
-
-# 🧱 Structs
-
-For lightweight data structures:
-
-```nova
-struct Vector3:
-    x: float32
-    y: float32
-    z: float32
-```
-
-Usage:
-
-```nova
-position = Vector3(
-    x=10,
-    y=20,
-    z=30
-)
-```
-
----
-
-# 🧮 Generics
-
-Nova is designed to support generic programming.
-
-```nova
-def maximum<T>(a: T, b: T) -> T:
-
-    if a > b:
-        return a
-
-    return b
-```
-
-Generic collections:
-
-```nova
-numbers: list<int>
-names: list<str>
-
-scores: map<str, int>
-```
-
----
-
-# 🧠 Memory Management
-
-Memory management is one of Nova's major design goals.
-
-Nova aims to provide both:
-
-### High-level memory management
-
-```nova
-player = Player("Nova")
-```
-
-The programmer does not need to manually manage every allocation.
-
-### Low-level memory control
-
-Advanced programs can explicitly control memory when necessary.
-
-```nova
-ptr = allocate<int>()
-```
-
-and:
-
-```nova
-free(ptr)
-```
-
-Nova is intended to support concepts such as:
-
-* Stack allocation
-* Heap allocation
-* References
-* Pointers
-* Ownership
-* Resource management
-* Smart pointers
-* Deterministic cleanup
-* Custom allocators
-* Memory pools
-* Unsafe operations
-
-The objective is:
-
-> **Easy memory management for beginners, powerful memory control for experts.**
-
----
-
-# ⚠️ Unsafe Operations
-
-Low-level operations should be explicitly identifiable.
-
-Conceptually:
-
-```nova
-unsafe:
-
-    ptr = allocate<int>()
-
-    # low-level memory operations
-
-    free(ptr)
-```
-
-This separates ordinary application programming from operations that can
-directly affect memory and hardware.
+</div>
 
 ---
 
 # ⚡ Native Performance
 
-Nova is designed around native compilation.
+Nova is designed as a **compiled native language** rather than a purely
+interpreted scripting language.
 
-The language is intended for applications where execution speed matters:
+The long-term goal is to provide:
 
-* Game engines
-* Graphics
-* Simulations
-* Scientific computing
-* Servers
-* Desktop applications
-* AI infrastructure
-* System software
-* High-performance applications
+- native executables
+- optimized compilation
+- efficient memory usage
+- low runtime overhead
+- hardware-level capabilities
+- predictable performance
+- support for demanding applications
 
-Nova does **not** promise that every program will automatically be faster than
-C++, Rust, Java or C#.
-
-Performance depends on:
-
-* Algorithms
-* Memory access
-* Compiler optimization
-* Data structures
-* Hardware
-* Runtime behavior
-
-The goal is to provide the compiler and language features necessary for
-**high-performance native software**.
+Nova aims to provide the convenience of a high-level language without making
+performance an afterthought.
 
 ---
 
-# 🧵 Concurrency
+# 🧠 Memory & Resource Control
 
-Nova is designed for modern multicore systems.
+One of Nova's major goals is to bridge the gap between:
 
-Planned concurrency capabilities include:
+**Python-style simplicity**
 
-* Threads
-* Tasks
-* Parallel execution
-* Futures
-* Channels
-* Synchronization
-* Thread-safe collections
-* Parallel loops
+and
 
-Conceptually:
+**C++-style control.**
 
-```nova
-task download(url):
-    ...
+Developers should be able to write ordinary applications without constantly
+thinking about memory management while still having access to more explicit
+resource and memory control when an application requires it.
 
-task1 = spawn download(url1)
-task2 = spawn download(url2)
+This makes Nova suitable for both:
 
-wait(task1)
-wait(task2)
-```
+- everyday application development
+- performance-sensitive and systems-oriented software
 
 ---
 
 # 🤖 AI & Machine Learning
 
-AI is a major target of Nova.
+AI is considered a first-class area of Nova's ecosystem.
 
-Nova is designed to interact with the existing AI ecosystem while eventually
-providing native AI functionality.
+Nova is intended to support:
 
-Potential ecosystem:
+- machine learning
+- deep learning
+- neural networks
+- tensor computation
+- data processing
+- computer vision
+- model inference
+- GPU acceleration
+- scientific computing
+- AI application development
+- interoperability with established AI ecosystems
 
-```text
-nova.ai
-nova.ml
-nova.tensor
-nova.nn
-nova.data
-nova.cuda
-```
+The goal is not to isolate Nova from existing AI technologies.
 
-Example:
+Instead, Nova should be able to work alongside the existing AI ecosystem while
+also providing opportunities for high-performance native AI applications.
 
-```nova
-import nova.ai
+### 🤖 AI Documentation
 
-model = Model()
+<div align="center">
 
-model.train(data)
-```
+### [🧠 OPEN `docs/ai.md` →](docs/ai.md)
 
-Nova aims to work with technologies such as:
+**AI, machine learning, model support, ecosystem integration and Nova's AI
+direction.**
 
-* NumPy
-* PyTorch
-* TensorFlow
-* ONNX
-* OpenCV
-* CUDA
-* GPU acceleration
-* Scientific computing libraries
+</div>
 
 ---
 
-# 🐍 Python Ecosystem
+# 📦 Package Ecosystem
 
-One of Nova's major goals is **Python interoperability**.
+Nova is intended to have its own package ecosystem built around the
+**`nva` package manager**.
 
-Existing Python libraries are extremely valuable, especially in:
+The package ecosystem is intended to make it possible to discover, install,
+manage and distribute reusable Nova libraries and applications.
 
-* AI
-* Machine learning
-* Data science
-* Scientific computing
-* Automation
+The long-term ecosystem can include packages for:
 
-Nova therefore aims to allow compatible Python packages to be used through
-an interoperability layer.
+- AI
+- graphics
+- games
+- networking
+- databases
+- GUI applications
+- mathematics
+- scientific computing
+- multimedia
+- web development
+- system programming
+- developer tools
 
-Example:
+### 📦 Package Documentation
 
-```nova
-import numpy
+<div align="center">
 
-data = numpy.array([1, 2, 3, 4])
+### [📦 OPEN `docs/package.md` →](docs/package.md)
 
-print(data)
-```
+**Complete information about Nova packages, the package ecosystem and package
+management.**
 
-Package installation:
-
-```text
-nva install numpy
-```
-
-The long-term goal is to make Nova capable of using a large portion of the
-Python ecosystem without requiring developers to rewrite every library.
-
-> Python interoperability does not mean Python code magically becomes native
-> Nova code. Python libraries may initially execute through a Python runtime
-> interoperability layer.
+</div>
 
 ---
 
-# 🎨 GUI Development
+# 🖥️ Application Development
 
-Nova is designed to be suitable for desktop GUI applications.
+Nova is intended to be useful beyond command-line programs.
 
-Potential API:
+Its broader ecosystem is designed around multiple categories of software.
 
-```nova
-import nova.gui
+### 🖼️ GUI Applications
 
-window = Window(
-    title="Nova Application",
-    width=800,
-    height=600
-)
-
-button = Button("Click Me")
-
-window.add(button)
-
-window.show()
-```
-
-The goal is to provide:
-
-* Windows support
-* Linux support
-* macOS support
-* Native-looking applications
-* Modern UI controls
-* Events
-* Layouts
-* Graphics
-* Custom widgets
-
----
-
-# 🎮 Game Development
-
-Nova is also designed with game development in mind.
-
-Potential modules:
-
-```text
-nova.game
-nova.graphics
-nova.physics
-nova.audio
-nova.input
-nova.math
-```
-
-Graphics API interoperability is intended to include:
-
-```text
-DirectX
-Vulkan
-OpenGL
-```
-
-This allows Nova to potentially be used for:
-
-* 2D games
-* 3D games
-* Game tools
-* Game editors
-* Rendering systems
-* Simulations
-* Game engines
-
----
-
-# 🔌 C / C++ Interoperability
-
-C and C++ have one of the largest native software ecosystems.
-
-Nova therefore aims to provide strong native interoperability.
-
-Potential capabilities:
-
-```text
-C libraries
-C++ libraries
-DLL
-Shared libraries
-Static libraries
-Native system APIs
-Graphics APIs
-Hardware APIs
-```
-
-This allows existing native software to remain useful instead of forcing
-developers to rewrite mature libraries.
-
----
-
-# ☕ Java Interoperability
-
-Java provides an enormous ecosystem and excellent cross-platform
-application development.
-
-Nova's long-term interoperability goals include access to selected Java
-libraries and applications.
-
-Potential technologies include:
-
-```text
-JNI
-JVM integration
-Generated bindings
-```
-
-Java interoperability is intended to be optional.
-
-A normal Nova program should **not require the JVM** merely to execute.
-
----
-
-# 💜 C# / .NET Interoperability
-
-Nova also aims to interact with the .NET ecosystem.
-
-Potential interoperability includes:
-
-```text
-.NET libraries
-C# components
-Native interfaces
-COM where appropriate
-Generated bindings
-```
-
-This can provide access to mature application-development and GUI ecosystems.
-
----
-
-# 📦 Nova Package Manager
-
-Nova will have its own package ecosystem.
-
-The package manager is called:
-
-```text
-nva
-```
-
-Example:
-
-```text
-nva install numpy
-```
-
-Other examples:
-
-```text
-nva install requests
-nva install opencv
-nva install torch
-nva install nova-gui
-nva install nova-ai
-```
-
-Typical package-management operations include:
-
-```text
-nva install <package>
-nva remove <package>
-nva update
-nva upgrade
-nva search <package>
-nva info <package>
-nva list
-nva publish
-```
-
----
-
-# 📄 Nova Project Files
-
-Nova source files use:
-
-```text
-.nova
-```
-
-Examples:
-
-```text
-main.nova
-game.nova
-ai_model.nova
-application.nova
-```
-
-Project configuration uses:
-
-```text
-nova.toml
-```
-
-Dependency locking can use:
-
-```text
-nova.lock
-```
-
----
-
-# 📚 Standard Library
-
-Nova aims to provide a broad standard library.
-
-### Core
-
-```text
-nova.core
-nova.string
-nova.collections
-nova.math
-```
-
-### System
-
-```text
-nova.io
-nova.fs
-nova.process
-nova.system
-nova.thread
-nova.concurrent
-```
-
-### Networking
-
-```text
-nova.net
-nova.http
-nova.crypto
-nova.json
-```
-
-### Application
-
-```text
-nova.gui
-nova.graphics
-nova.audio
-```
-
-### AI
-
-```text
-nova.ai
-nova.ml
-nova.tensor
-nova.nn
-nova.data
-```
-
-### Game Development
-
-```text
-nova.game
-nova.physics
-nova.input
-```
-
----
-
-# 🌍 Cross-Platform
-
-Nova is designed as a cross-platform language.
-
-Primary targets:
-
-```text
-Windows
-Linux
-macOS
-```
-
-Potential future targets:
-
-```text
-Android
-WebAssembly
-ARM
-Embedded systems
-```
-
-The goal is to keep the language itself platform-independent while providing
-platform-specific APIs through libraries.
-
----
-
-# 🛡️ Safety
-
-Nova aims to provide safer defaults than traditional low-level languages
-without removing low-level capabilities.
-
-The language is designed around:
-
-```text
-Safe by default
-        ↓
-Explicit low-level control
-        ↓
-Explicit unsafe operations
-```
-
-Potential safety mechanisms include:
-
-* Strong typing
-* Bounds checking where appropriate
-* Null/optional handling
-* Resource management
-* Ownership concepts
-* Safe collections
-* Explicit unsafe operations
-
----
-
-# 🔐 Package Security
-
-Nova's package ecosystem is intended to support modern dependency security.
-
-Potential features include:
-
-* Package hashes
-* Lock files
-* Dependency verification
-* Package signing
-* Version constraints
-* Reproducible dependencies
-* Security metadata
-
----
-
-# 🧩 Modules
-
-Nova uses a simple import system.
-
-```nova
-import math
-import nova.gui
-import nova.ai
-```
-
-Specific functionality can be imported:
-
-```nova
-from nova.graphics import Renderer
-```
-
-Local modules can be organized naturally:
-
-```text
-project/
-│
-├── main.nova
-│
-├── player.nova
-├── world.nova
-└── physics.nova
-```
-
----
-
-# 🖥️ Example Nova Program
-
-```nova
-import math
-
-class Player:
-
-    name: str
-    health: int
-
-    def __init__(self, name: str):
-        self.name = name
-        self.health = 100
-
-    def damage(self, amount: int):
-
-        self.health -= amount
-
-        if self.health <= 0:
-            print(self.name + " defeated")
-
-
-player = Player("Nova")
-
-player.damage(25)
-
-print("Health:", player.health)
-```
-
-The goal is for this code to remain:
-
-* Readable like Python
-* Structured like modern C#
-* Strongly typed when required
-* Capable of native compilation
-* Extendable into low-level programming
-
----
-
-# 📊 Nova vs Other Languages
-
-| Feature            | Python |   C++ |  Java |    C# | **Nova** |
-| ------------------ | -----: | ----: | ----: | ----: | -------: |
-| Easy syntax        |  ⭐⭐⭐⭐⭐ |    ⭐⭐ |   ⭐⭐⭐ |  ⭐⭐⭐⭐ |    ⭐⭐⭐⭐⭐ |
-| Native performance |     ⭐⭐ | ⭐⭐⭐⭐⭐ |  ⭐⭐⭐⭐ |  ⭐⭐⭐⭐ |    ⭐⭐⭐⭐⭐ |
-| Low-level control  |      ⭐ | ⭐⭐⭐⭐⭐ |    ⭐⭐ |    ⭐⭐ |    ⭐⭐⭐⭐⭐ |
-| Memory control     |     ⭐⭐ | ⭐⭐⭐⭐⭐ |    ⭐⭐ |   ⭐⭐⭐ |    ⭐⭐⭐⭐⭐ |
-| AI ecosystem       |  ⭐⭐⭐⭐⭐ |   ⭐⭐⭐ |    ⭐⭐ |    ⭐⭐ |   ⭐⭐⭐⭐⭐* |
-| GUI development    |    ⭐⭐⭐ |   ⭐⭐⭐ |  ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |   ⭐⭐⭐⭐⭐* |
-| Game development   |    ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |   ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |   ⭐⭐⭐⭐⭐* |
-| Cross-platform     |  ⭐⭐⭐⭐⭐ |  ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |  ⭐⭐⭐⭐ |    ⭐⭐⭐⭐⭐ |
-| C/C++ interop      |    ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |   ⭐⭐⭐ |   ⭐⭐⭐ |   ⭐⭐⭐⭐⭐* |
-| Python ecosystem   |  ⭐⭐⭐⭐⭐ |    ⭐⭐ |    ⭐⭐ |    ⭐⭐ |   ⭐⭐⭐⭐⭐* |
-| Type safety        |     ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |    ⭐⭐⭐⭐⭐ |
-| Beginner friendly  |  ⭐⭐⭐⭐⭐ |    ⭐⭐ |   ⭐⭐⭐ |  ⭐⭐⭐⭐ |    ⭐⭐⭐⭐⭐ |
-
-`*` = long-term goal / dependent on ecosystem maturity.
-
----
-
-# ✅ Advantages
-
-## 🐍 Python-like simplicity
-
-Nova code is designed to be clean and readable.
-
-```nova
-print("Hello")
-```
-
-instead of requiring large amounts of boilerplate.
-
----
-
-## ⚡ Native performance
-
-Nova is designed for compiled native execution.
-
-This makes it suitable for applications where Python alone may not provide
-enough performance.
-
----
-
-## 🧠 Powerful memory control
-
-Developers can remain at a high level or move down to explicit memory
-management when required.
-
----
-
-## 🤖 AI-friendly
-
-Nova is designed to access the enormous Python AI ecosystem while developing
-its own native AI capabilities.
-
----
-
-## 🎮 Game-development friendly
-
-Native performance, graphics APIs, memory control and multithreading make
-Nova suitable for game-development workloads.
-
----
-
-## 🎨 GUI-friendly
-
-Nova aims to make modern desktop applications significantly easier to write
-than traditional C++ GUI applications.
-
----
-
-## 🔌 Interoperability
-
-Nova is designed to coexist with existing ecosystems rather than isolate
-developers from them.
-
-Target ecosystems include:
-
-```text
-C
-C++
-Python
-Java
-.NET / C#
-```
-
----
-
-## 🌍 Cross-platform
-
-The language is designed to target multiple operating systems without forcing
-developers to rewrite the language itself for each platform.
-
----
-
-# ❌ Disadvantages & Trade-offs
-
-Nova is ambitious, and that creates real trade-offs.
-
-## 1. Complexity
-
-Combining high-level productivity with low-level control is difficult.
-
-A language capable of both:
-
-```text
-print("Hello")
-```
-
-and:
-
-```text
-unsafe:
-    ptr = allocate<int>()
-```
-
-must carefully define how these systems interact.
-
----
-
-## 2. Smaller ecosystem
-
-Established languages already have enormous ecosystems.
-
-Python, C++, Java and C# have decades of libraries, documentation and
-community knowledge.
-
-Nova will initially have far fewer resources.
-
----
-
-## 3. Python compatibility is not free
-
-Supporting Python packages does not automatically make Nova equivalent to
-Python.
-
-Some packages depend heavily on:
-
-* Python internals
-* CPython behavior
-* dynamic runtime features
-* Python-specific extension systems
-
-Compatibility therefore needs a dedicated interoperability layer.
-
----
-
-## 4. Compiler complexity
-
-A language that combines:
-
-* static typing
-* type inference
-* generics
-* memory control
-* native compilation
-* Python interoperability
-* C++ interoperability
-* concurrency
-
-requires a significantly more sophisticated compiler than a basic scripting
-language.
-
----
-
-## 5. Learning advanced Nova
-
-Basic Nova should be easy.
-
-Advanced Nova will not necessarily be easy.
-
-Developers who use:
-
-* pointers
-* memory allocators
-* unsafe code
-* concurrency
-* native APIs
-* GPU programming
-
-will still need to understand advanced computer-science concepts.
-
----
-
-## 6. No language can automatically be the fastest
-
-Nova being compiled does not automatically make every Nova program faster
-than C++.
-
-Good algorithms, efficient memory access, compiler optimization and proper
-architecture still matter.
-
----
-
-# 🎯 Ideal Use Cases
-
-Nova is intended to be useful across a wide range of applications.
-
-### 🤖 Artificial Intelligence
-
-```text
-Machine Learning
-Deep Learning
-Computer Vision
-Data Science
-AI Applications
-Scientific Computing
-```
+Nova aims to support modern desktop application development with native
+performance and reusable application components.
 
 ### 🎮 Game Development
 
-```text
-Game Engines
-3D Games
-2D Games
-Physics
-Rendering
-Game Tools
-Simulations
-```
+Nova is intended to provide the foundations required for:
 
-### 🖥️ Desktop Applications
+- game logic
+- graphics
+- audio
+- input
+- physics
+- mathematics
+- real-time applications
 
-```text
-GUI Applications
-Editors
-Development Tools
-Media Applications
-Utilities
-```
+### 🌐 Networking
 
-### ⚡ High-Performance Software
+Network applications, servers, communication systems and network utilities are
+also part of Nova's broader ecosystem.
 
-```text
-Servers
-Simulations
-Rendering
-Data Processing
-Networking
-Scientific Applications
-```
+### 📊 Data & Scientific Computing
 
-### 🔧 Systems Programming
-
-```text
-System Utilities
-Native Applications
-Hardware Interfaces
-Operating-System Components
-Embedded Software
-```
-
-### 🌐 General Software
-
-```text
-Automation
-Networking
-APIs
-CLI Tools
-Applications
-Libraries
-```
+Nova aims to combine high-level productivity with native performance for
+scientific and data-intensive workloads.
 
 ---
 
-# 🌟 Long-Term Vision
+# 🔗 Multi-Language Interoperability
 
-Nova's ultimate goal is not simply to become:
+Nova is designed with interoperability in mind.
 
-> "Python but faster."
+The long-term ecosystem is intended to work with technologies and libraries
+from established ecosystems such as:
 
-Nor:
+- C
+- C++
+- Python
+- Java
+- C#
+- .NET
+- existing native libraries
+- existing AI/ML frameworks
 
-> "C++ with Python syntax."
+This means Nova does not need to exist as an isolated ecosystem.
 
-The vision is much broader.
-
-Nova aims to become a unified language where developers can move naturally
-between abstraction levels.
-
-```text
-                 NOVA
-                   │
-        ┌──────────┼──────────┐
-        │          │          │
-     Simple      Native       AI
-     Apps       Software    Computing
-        │          │          │
-        ├──────────┼──────────┤
-        │          │          │
-       GUI       Games      Systems
-        │          │          │
-        └──────────┼──────────┘
-                   │
-             Low-Level Code
-```
-
-The programmer chooses the level of control.
+Developers should be able to gradually adopt Nova while continuing to use
+existing technologies where appropriate.
 
 ---
 
-# 🌌 The Nova Goal
+# 🌍 Cross-Platform Direction
 
-Nova wants to make this possible:
+Nova is intended to become a cross-platform language.
 
-```nova
-# Simple application
+The long-term goal includes support for:
 
-print("Hello Nova!")
-```
+- 🪟 Windows
+- 🐧 Linux
+- 🍎 macOS
+- 📱 mobile platforms where practical
+- ☁️ server environments
+- 🖥️ native desktop applications
 
-while still allowing advanced software to reach:
-
-```text
-Native CPU
-    ↓
-Memory
-    ↓
-Threads
-    ↓
-GPU
-    ↓
-Operating System
-    ↓
-Hardware
-```
-
-without forcing every developer to learn low-level programming first.
+Cross-platform support is an important part of Nova's long-term identity.
 
 ---
 
-# 🧭 Design Principles
+# 📄 Nova Files
 
-Nova follows these principles:
+Nova uses its own language and project ecosystem.
 
-1. **Readable code**
-2. **Simple syntax**
-3. **Native performance**
-4. **Strong typing**
-5. **Type inference**
-6. **Memory control**
-7. **Safe defaults**
-8. **Low-level access when required**
-9. **Python interoperability**
-10. **C/C++ interoperability**
-11. **Modern GUI development**
-12. **First-class AI ecosystem**
-13. **Game-development support**
-14. **Cross-platform design**
-15. **Modern concurrency**
-16. **Powerful package management**
-17. **Excellent developer tooling**
-18. **Minimal unnecessary boilerplate**
+| File | Purpose |
+|---|---|
+| `.nova` | Nova source file |
+| `nova.toml` | Nova project/package configuration |
+| `nova.lock` | Dependency lock information |
+
+The `.nova` extension represents the language itself.
 
 ---
 
-# 🔭 Future Possibilities
+# 🧭 Documentation
 
-Nova's long-term ecosystem may eventually include:
+Nova intentionally keeps detailed technical information outside the main
+README.
 
-```text
-Nova Compiler
-Nova Runtime
-Nova Standard Library
-Nova Package Registry
-Nova IDE
-Nova Language Server
-Nova Debugger
-Nova Formatter
-Nova Profiler
-Nova AI Framework
-Nova GUI Framework
-Nova Game Framework
-Nova Engine
-```
+This README provides the **overview**.
 
----
+The dedicated documentation contains the deeper information.
 
-# 🪐 Nova in One Sentence
+<div align="center">
 
-> **Nova is a Python-inspired native programming language designed to combine
-> Python's simplicity, C++'s performance and memory control, Java's
-> portability, and C#'s application-development strengths with first-class
-> AI and modern systems programming capabilities.**
+| Documentation | Description |
+|---|---|
+| 🌟 **[Syntax](docs/syntax.md)** | Complete Nova language syntax and language rules |
+| 📦 **[Packages](docs/package.md)** | Package ecosystem and package management |
+| 🤖 **[AI & ML](docs/ai.md)** | AI, machine learning and AI ecosystem direction |
+| 🔭 **[Vision](docs/vision.md)** | Long-term goals and future direction |
+
+</div>
 
 ---
 
-<p align="center">
+# 🔭 Long-Term Vision
 
-### 🌌 Write simple. Run native. Control everything.
+Nova is intended to grow beyond being just another programming language.
 
-**Nova — One language. Multiple levels of power.**
+The long-term vision is to create an ecosystem where developers can use one
+language for a wide range of software:
 
-</p>
+**Applications · Games · AI · Systems · Graphics · Data · Networking · Tools**
+
+The detailed long-term roadmap and future concepts are intentionally kept in a
+separate document.
+
+### 🔭 Explore the Vision
+
+<div align="center">
+
+### [🌌 OPEN `docs/vision.md` →](docs/vision.md)
+
+**Read the complete long-term vision and future direction of Nova.**
+
+</div>
+
+---
+
+# ❤️ Built Independently
+
+Nova is an **independent project created by a single developer**.
+
+There is currently:
+
+- 👤 **1 independent developer**
+- 💰 **No revenue**
+- 🏢 **No company behind Nova**
+- 💼 **No corporate funding**
+- 🚀 **No commercial organization controlling the project**
+
+Nova is being developed from an idea into a complete programming-language
+ecosystem through independent effort, experimentation, learning and continuous
+development.
+
+There is no large development team behind the project.
+
+There is no corporation funding the language.
+
+There is simply a developer with the ambition to build something new.
+
+> **Nova is being built because the idea is worth building.**
+
+---
+
+# 💪 Why Build Nova?
+
+There are already many excellent programming languages.
+
+So why create another one?
+
+Because there is still a gap between different programming experiences.
+
+Python is extremely productive.
+
+C++ provides enormous control and performance.
+
+Java provides portability and large-scale application capabilities.
+
+C# provides a highly productive modern application-development ecosystem.
+
+Nova explores the question:
+
+> **What if the best parts of these approaches could exist together in one
+> language without making the language unnecessarily complicated?**
+
+That is the experiment behind Nova.
+
+---
+
+# ✅ Pros
+
+### 🟢 Developer-Friendly
+
+Nova aims to be approachable for developers who are familiar with Python-like
+syntax.
+
+### 🟢 Native Performance
+
+Nova is designed around compiled native execution and performance-oriented
+software.
+
+### 🟢 Low-Level Capability
+
+Developers are not permanently trapped inside a high-level abstraction layer.
+
+### 🟢 AI-Oriented
+
+AI and machine learning are considered major parts of the ecosystem rather than
+an afterthought.
+
+### 🟢 Broad Use Cases
+
+Nova aims to cover:
+
+**AI + Games + GUI + Systems + Data + Networking + Applications**
+
+### 🟢 Modern Ecosystem
+
+The language is being designed with packages, tooling, interoperability and
+cross-platform development in mind.
+
+### 🟢 One Language Philosophy
+
+Nova attempts to reduce the need to jump between multiple languages for
+different parts of the same project.
+
+### 🟢 Independent Direction
+
+Because Nova is currently developed independently, its design can be driven by
+a clear language philosophy rather than existing corporate product
+requirements.
+
+---
+
+# ⚠️ Cons
+
+Nova is an ambitious project, and that comes with significant disadvantages.
+
+### 🔴 Early Development
+
+Nova is not a mature programming language.
+
+Its ecosystem and tooling are still developing.
+
+### 🔴 Small Ecosystem
+
+Established languages have enormous ecosystems containing thousands of mature
+libraries and tools.
+
+Nova does not currently have that level of ecosystem support.
+
+### 🔴 Small Development Team
+
+The project currently has only one developer.
+
+This naturally limits development speed and available resources.
+
+### 🔴 No Revenue
+
+Nova currently has no revenue or commercial funding behind it.
+
+Development therefore depends primarily on available personal time and
+resources.
+
+### 🔴 Compatibility Challenges
+
+Interoperability with existing ecosystems is technically complex and requires
+significant engineering effort.
+
+### 🔴 Compiler Complexity
+
+Creating a complete modern programming language, compiler, runtime, package
+ecosystem and development environment is a very large undertaking.
+
+### 🔴 Long Road Ahead
+
+Nova is an ambitious long-term project.
+
+Becoming a mature alternative to established languages will require years of
+development, testing, ecosystem growth and community involvement.
+
+---
+
+# ⚖️ Nova vs Established Languages
+
+| Language | Main Strength | Main Limitation |
+|---|---|---|
+| 🐍 Python | Simplicity, productivity, AI | Performance and low-level control |
+| ⚡ C++ | Performance and control | Complexity |
+| ☕ Java | Portability and large applications | More abstraction and verbosity |
+| 🔷 C# | Application development and productivity | Primarily centered around its ecosystem |
+| 🌌 **Nova** | Simplicity + native performance + control + AI direction | Young ecosystem and early development |
+
+Nova does **not** claim to currently outperform these languages in every area.
+
+Instead, Nova represents an attempt to create a different balance.
+
+---
+
+# 🧑‍💻 Who Is Nova For?
+
+Nova is envisioned for developers who want to build:
+
+- 🤖 AI applications
+- 🧠 Machine-learning software
+- 🎮 Games
+- 🖥️ Desktop applications
+- ⚙️ System utilities
+- 🌐 Network applications
+- 📊 Data-processing applications
+- 🎨 Graphics software
+- 🔬 Scientific applications
+- 🛠️ Developer tools
+- 🚀 Performance-sensitive applications
+
+It is intended to be useful to both newcomers and experienced programmers,
+while still providing a path toward advanced development.
+
+---
+
+# 🌟 The Nova Philosophy
+
+Nova can be summarized in four words:
+
+> **Simple. Fast. Powerful. Open.**
+
+### Simple
+
+Write understandable software.
+
+### Fast
+
+Run native software.
+
+### Powerful
+
+Access advanced capabilities when required.
+
+### Open
+
+Build an independent ecosystem that can evolve with its community.
+
+---
+
+# 🛣️ Current Status
+
+Nova is currently an **early-stage independent programming-language project**.
+
+The project is focused on establishing a strong foundation before attempting to
+become a mature ecosystem.
+
+The current priority is not to claim that Nova has already replaced established
+languages.
+
+The priority is to build Nova properly.
+
+---
+
+# 🌌 The Goal
+
+The ultimate goal is simple:
+
+> **Create a programming language where a developer does not have to sacrifice
+> simplicity to gain power, or sacrifice power to gain simplicity.**
+
+Nova wants to make it possible to move naturally between:
+
+**High-Level Development**
+
+↓  
+
+**Application Development**
+
+↓
+
+**AI / ML**
+
+↓
+
+**Graphics / Games**
+
+↓
+
+**Performance-Critical Software**
+
+↓
+
+**Low-Level Systems**
+
+—all within one language ecosystem.
 
 ---
 
 # 💙 Special Thanks
 
-Nova is an independent programming-language project, but the idea and its
-development journey were greatly supported by AI-assisted research,
-discussion, and coding.
+Nova is an independent project, but its development journey has been supported
+by AI-assisted research, discussion, experimentation and problem solving.
 
-### 🐋 DeepSeek
-
-<p align="center">
-  <a href="https://www.deepseek.com/">
-    <img src="https://www.deepseek.com/favicon.ico" alt="DeepSeek" width="80">
-  </a>
-</p>
-
-A **special and major thank you to DeepSeek** for providing substantial
-assistance throughout the development of the Nova concept.
-
-DeepSeek was especially valuable during:
-
-- 🧠 Programming and architecture discussions
-- 💻 Writing and refining code
-- 🔧 Debugging and problem solving
-- 🏗️ Compiler and language-design discussions
-- 📚 Exploring technical concepts
-- 🚀 Turning ideas into practical implementations
-
-A large part of the technical exploration and coding assistance behind Nova
-was made possible with the help of DeepSeek.
-
-**Thank you, DeepSeek, for being a major part of the journey. ❤️**
-
-[Visit DeepSeek →](https://www.deepseek.com/)
+Two AI systems in particular have contributed to that journey.
 
 ---
 
-### 🤖 ChatGPT
+## 🐋 DeepSeek
 
-<p align="center">
-  <a href="https://chatgpt.com/">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/0/04/ChatGPT_logo.svg" alt="OpenAI" width="80">
-  </a>
-</p>
+<div align="center">
 
-A special thank you to **ChatGPT by OpenAI** for helping with:
+<a href="https://www.deepseek.com/">
+<img src="https://www.deepseek.com/favicon.ico" alt="DeepSeek" width="90"/>
+</a>
 
-- 💡 Confirming ideas and concepts
-- 🧩 Language-design discussions
-- 📝 Documentation and README refinement
-- 🔍 Reviewing concepts
-- 💭 Brainstorming and exploring possibilities
+### **A Major Part of the Journey**
 
-ChatGPT played a smaller supporting role in the development process, mainly
-helping with confirmation, refinement, and additional perspectives.
+</div>
 
-**Thank you, ChatGPT, for being part of the Nova journey. ❤️**
+A **very special and major thank you to DeepSeek**.
 
-[Visit ChatGPT →](https://chatgpt.com/)
+DeepSeek provided substantial assistance throughout the development of the Nova
+concept and its technical exploration.
+
+It was especially valuable for:
+
+- programming assistance
+- architecture discussions
+- technical problem solving
+- debugging
+- language-design exploration
+- compiler-related discussions
+- turning ideas into practical concepts
+- exploring different implementation possibilities
+- helping develop and refine technical ideas
+
+A significant amount of the technical exploration and coding assistance during
+Nova's development was made possible with the help of DeepSeek.
+
+> **Thank you, DeepSeek, for being such a major part of the Nova journey. ❤️**
+
+<div align="center">
+
+### [🐋 Visit DeepSeek →](https://www.deepseek.com/)
+
+</div>
 
 ---
 
-<p align="center">
+## 🤖 ChatGPT
 
-### 🌌 Built from an idea. Refined with AI. Created with ambition.
+<div align="center">
 
-**Nova**
+<a href="https://chatgpt.com/">
+<img src="https://upload.wikimedia.org/wikipedia/commons/0/04/ChatGPT_logo.svg" alt="OpenAI" width="90"/>
+</a>
 
-*Python simplicity · Native performance · Low-level control · AI-ready*
+### **A Supporting Part of the Journey**
 
-</p>
+</div>
+
+A special thank you to **ChatGPT by OpenAI** for contributing to the Nova
+journey through:
+
+- idea confirmation
+- technical discussions
+- language-design discussions
+- documentation refinement
+- concept review
+- brainstorming
+- additional perspectives
+
+ChatGPT played a **smaller supporting role** compared with DeepSeek, primarily
+helping with confirmation, refinement and additional perspectives.
+
+> **Thank you, ChatGPT, for being part of the Nova journey. ❤️**
+
+<div align="center">
+
+### [🤖 Visit ChatGPT →](https://chatgpt.com/)
+
+</div>
 
 ---
 
-> **Disclaimer:** DeepSeek and OpenAI/ChatGPT are acknowledged as AI tools
-> used during the development of this project. This acknowledgement does not
-> imply sponsorship, partnership, endorsement, or affiliation with either
-> organization.
+<div align="center">
+
+### 🐋 DeepSeek · 🤖 ChatGPT · 🌌 Nova
+
+**Different tools. One idea. One journey.**
+
+</div>
+
+---
+
+> **Disclaimer:** DeepSeek and OpenAI/ChatGPT are acknowledged as AI tools used
+> during the development of this independent project. This acknowledgement
+> does not imply sponsorship, partnership, endorsement, ownership or
+> affiliation with DeepSeek or OpenAI.
+
+---
+
+# 🌌 Final Words
+
+Nova started with a simple question:
+
+> **Can one programming language combine the simplicity developers love with
+> the performance and control developers need?**
+
+Nova is an attempt to answer that question.
+
+It is still young.
+
+It is still evolving.
+
+It does not have a corporation behind it.
+
+It does not have a large development team.
+
+It does not have revenue.
+
+It is being built independently, one step at a time.
+
+And that is exactly what makes the project exciting.
+
+<div align="center">
+
+# 🌌 NOVA
+
+### **Write simple. Run native. Control everything.**
+
+**Python simplicity · Native performance · Low-level control · AI-ready**
+
+<br>
+
+[📖 Syntax](docs/syntax.md) ·
+[📦 Packages](docs/package.md) ·
+[🤖 AI & ML](docs/ai.md) ·
+[🔭 Vision](docs/vision.md)
+
+</div>

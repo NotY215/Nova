@@ -20,19 +20,17 @@ namespace nova {
         void check(const Block& program);
 
     private:
-        struct Scope {
-            std::unordered_map<std::string, TypePtr> vars;
-        };
+        struct Scope { std::unordered_map<std::string, TypePtr> vars; };
 
         std::vector<Scope>                       scopes_;
         std::unordered_map<std::string, TypePtr> functions_;
         std::unordered_map<std::string, TypePtr> structs_;
-        std::unordered_map<std::string, const StructStmt*> structDecls_;
 
         TypePtr currentReturnType_;
+        TypePtr currentClass_;
         int     loopDepth_ = 0;
 
-        void    collectSignatures(const Block& program);   // pass 1
+        void    collectSignatures(const Block& program);
         void    checkStmt(const Stmt* s);
         void    checkBlock(const Block& b);
         TypePtr checkExpr(const Expr* e);
@@ -44,10 +42,9 @@ namespace nova {
 
         TypePtr resolveTypeExpr(const Expr* e);
 
-        // struct-constructor checking: Player(name="x", health=1)
-        TypePtr checkStructConstruction(const StructStmt* decl,
-            const CallExpr* call,
-            const std::string& structName);
+        TypePtr checkStructConstruction(const StructStmt* decl, const CallExpr* call,
+            const std::string& name);
+        void    checkMethodBody(const DefStmt* m, TypePtr cls);
 
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
         void installBuiltins();
