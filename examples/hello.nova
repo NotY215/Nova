@@ -1,6 +1,6 @@
 # Nova hello world
 name = "NotY"
-age = 17
+age = 19
 
 def greet(who: str) -> str:
     return "Hello, " + who
