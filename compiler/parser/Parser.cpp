@@ -75,6 +75,8 @@ namespace nova {
         if (check(TokenType::While))  return parseWhile();
         if (check(TokenType::For))    return parseFor();
         if (check(TokenType::Return)) return parseReturn();
+        if (check(TokenType::Try))    return parseTry();
+        if (check(TokenType::Raise))  return parseRaise();
         if (check(TokenType::Import)) return parseImport();
         if (check(TokenType::From))   return parseFromImport();
 
