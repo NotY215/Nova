@@ -22,13 +22,22 @@ namespace vayu {
     void TypeChecker::pushScope() { scopes_.emplace_back(); }
     void TypeChecker::popScope() { scopes_.pop_back(); }
     void TypeChecker::defineVar(const std::string& n, TypePtr t) { scopes_.back().vars[n] = std::move(t); }
-    TypePtr TypeChecker::lookupVar(const std::string& n) {
+
+    TypePtr TypeChecker::lookupUserVar(const std::string& n) {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
             auto f = it->vars.find(n);
             if (f != it->vars.end()) return f->second;
         }
         return nullptr;
     }
+
+    TypePtr TypeChecker::lookupVar(const std::string& n) {
+        if (TypePtr t = lookupUserVar(n)) return t;
+        auto bit = builtins_.find(n);
+        if (bit != builtins_.end()) return bit->second;
+        return nullptr;
+    }
+
     [[noreturn]] void TypeChecker::error(SourceLocation loc, const std::string& msg) {
         throw TypeError(msg, loc);
     }
@@ -41,34 +50,37 @@ namespace vayu {
         auto A = Types::Any();
         auto listAny = Types::List(A);
 
-        defineVar("print", Types::Function({ A }, Types::None()));
-        defineVar("str", Types::Function({ A }, Types::Str()));
-        defineVar("int", Types::Function({ A }, Types::Int()));
-        defineVar("float", Types::Function({ A }, Types::Float()));
-        defineVar("bool", Types::Function({ A }, Types::Bool()));
-        defineVar("len", Types::Function({ A }, Types::Int()));
-        defineVar("type", Types::Function({ A }, Types::Str()));
-        defineVar("abs", Types::Function({ A }, A));
-        defineVar("min", Types::Function({ A, A }, A));
-        defineVar("max", Types::Function({ A, A }, A));
-        defineVar("range", Types::Function({ Types::Int() }, Types::List(Types::Int())));
-        defineVar("ord", Types::Function({ Types::Str() }, Types::Int()));
-        defineVar("chr", Types::Function({ Types::Int() }, Types::Str()));
-        defineVar("list", Types::Function({ A }, listAny));
+        auto B = [&](const char* name, TypePtr t) {
+            builtins_[name] = std::move(t);
+            };
 
-        defineVar("map", Types::Function({ A, listAny }, listAny));
-        defineVar("filter", Types::Function({ A, listAny }, listAny));
-        defineVar("sorted", Types::Function({ listAny }, listAny));
-        defineVar("reduce", Types::Function({ A, listAny }, A));
-        defineVar("any", Types::Function({ listAny }, Types::Bool()));
-        defineVar("all", Types::Function({ listAny }, Types::Bool()));
-        defineVar("sum", Types::Function({ listAny }, A));
+        B("print", Types::Function({ A }, Types::None()));
+        B("str", Types::Function({ A }, Types::Str()));
+        B("int", Types::Function({ A }, Types::Int()));
+        B("float", Types::Function({ A }, Types::Float()));
+        B("bool", Types::Function({ A }, Types::Bool()));
+        B("len", Types::Function({ A }, Types::Int()));
+        B("type", Types::Function({ A }, Types::Str()));
+        B("abs", Types::Function({ A }, A));
+        B("min", Types::Function({ A, A }, A));
+        B("max", Types::Function({ A, A }, A));
+        B("range", Types::Function({ Types::Int() }, Types::List(Types::Int())));
+        B("ord", Types::Function({ Types::Str() }, Types::Int()));
+        B("chr", Types::Function({ Types::Int() }, Types::Str()));
+        B("list", Types::Function({ A }, listAny));
 
-        defineVar("math", Types::Any());
+        B("map", Types::Function({ A, listAny }, listAny));
+        B("filter", Types::Function({ A, listAny }, listAny));
+        B("sorted", Types::Function({ listAny }, listAny));
+        B("reduce", Types::Function({ A, listAny }, A));
+        B("any", Types::Function({ listAny }, Types::Bool()));
+        B("all", Types::Function({ listAny }, Types::Bool()));
+        B("sum", Types::Function({ listAny }, A));
+
+        B("math", Types::Any());
     }
 
     void TypeChecker::installBuiltinExceptions() {
-        // Only the base Exception class declares `message`; subclasses inherit it.
         auto base = Types::Struct("Exception", {});
         base->fields.push_back({ "message", Types::Str() });
         structs_["Exception"] = base;
@@ -167,10 +179,6 @@ namespace vayu {
         collectDefs(program, /*isTopLevel=*/true);
     }
 
-    // Recursively registers every `def` reachable from `block`, regardless of
-    // nesting depth.  Top-level defs are also added to the current scope so
-    // that forward references work; nested defs are only added to `functions_`
-    // (the checkStmt pass handles their scoping).
     void TypeChecker::collectDefs(const Block& block, bool isTopLevel) {
         for (auto& s : block.stmts) {
             switch (s->kind) {
@@ -191,7 +199,6 @@ namespace vayu {
                 functions_[d->name] = sig;
                 if (isTopLevel) defineVar(d->name, sig);
 
-                // Recurse into the body to register nested defs.
                 collectDefs(d->body, /*isTopLevel=*/false);
                 break;
             }
@@ -221,8 +228,6 @@ namespace vayu {
             }
 
             case StmtKind::Class: {
-                // Methods are registered on the class type itself; only their
-                // bodies can contain further nested defs.
                 auto* n = static_cast<const ClassStmt*>(s.get());
                 for (auto& m : n->methods) collectDefs(m->body, false);
                 break;
@@ -297,7 +302,6 @@ namespace vayu {
     TypePtr TypeChecker::lookupCollectionMethod(const TypePtr& target,
         const std::string& name,
         SourceLocation loc) {
-        // ---- str ----
         if (target->kind == TypeKind::Str) {
             if (name == "upper" || name == "lower" || name == "strip" ||
                 name == "lstrip" || name == "rstrip")
@@ -319,7 +323,6 @@ namespace vayu {
             error(loc, "str has no method '" + name + "'");
         }
 
-        // ---- list ----
         if (target->kind == TypeKind::List) {
             TypePtr E = target->params.empty() ? Types::Any() : target->params[0];
             if (name == "append")   return Types::Function({ E }, Types::None());
@@ -332,7 +335,6 @@ namespace vayu {
             error(loc, "list has no method '" + name + "'");
         }
 
-        // ---- map ----
         if (target->kind == TypeKind::Map) {
             TypePtr K = target->params.size() > 0 ? target->params[0] : Types::Str();
             TypePtr V = target->params.size() > 1 ? target->params[1] : Types::Any();
@@ -437,7 +439,9 @@ namespace vayu {
             if (n->target->kind == ExprKind::NameRef) {
                 TypePtr v = checkExpr(n->value.get());
                 const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
-                TypePtr ex = lookupVar(nm->name);
+                // Only look in USER scopes: a fresh assignment should shadow
+                // any builtin (e.g. `sum = 0` overrides the builtin `sum`).
+                TypePtr ex = lookupUserVar(nm->name);
                 if (ex) {
                     if (!isAssignable(ex, v))
                         error(n->loc, "cannot assign " + v->toString() +
@@ -558,10 +562,6 @@ namespace vayu {
                 error(n->loc, "internal: missing signature for '" + n->name + "'");
             TypePtr sig = it->second;
 
-            // Bind the function name in the enclosing scope so that
-            // subsequent statements (including `return <fn>` and recursive
-            // calls) can reference it.  Top-level defs are already bound by
-            // collectDefs; re-binding here is harmless.
             defineVar(n->name, sig);
 
             pushScope();
@@ -905,7 +905,6 @@ namespace vayu {
                         }
                         return ct;
                     }
-                    // field-matching construction (structs + builtin exceptions)
                     std::vector<StructFieldInfo> all;
                     for (TypePtr c = ct; c; c = c->parent)
                         for (auto& f : c->fields) all.push_back(f);
@@ -944,8 +943,6 @@ namespace vayu {
 
             TypePtr callee = checkExpr(n->callee.get());
 
-            // .split / .strip accept 0 or 1 arguments — special-case before
-            // arity checking.
             if (n->callee->kind == ExprKind::Attr) {
                 auto* attr = static_cast<const AttrExpr*>(n->callee.get());
                 if (attr->name == "split" || attr->name == "strip") {

@@ -25,13 +25,14 @@ namespace vayu {
         std::vector<Scope>                       scopes_;
         std::unordered_map<std::string, TypePtr> functions_;
         std::unordered_map<std::string, TypePtr> structs_;
+        std::unordered_map<std::string, TypePtr> builtins_;
 
         TypePtr currentReturnType_;
         TypePtr currentClass_;
         int     loopDepth_ = 0;
 
         void    collectSignatures(const Block& program);
-        void    collectDefs(const Block& block, bool isTopLevel);   // <-- 4B
+        void    collectDefs(const Block& block, bool isTopLevel);
 
         void    checkStmt(const Stmt* s);
         void    checkBlock(const Block& b);
@@ -40,6 +41,13 @@ namespace vayu {
         void    pushScope();
         void    popScope();
         void    defineVar(const std::string& name, TypePtr t);
+
+        /// Look up a name in user scopes only (no builtins fallback).
+        /// Used by assignment, so that `sum = 0` shadows the builtin `sum`.
+        TypePtr lookupUserVar(const std::string& name);
+
+        /// Look up a name in user scopes, then in builtins.
+        /// Used when evaluating a name reference.
         TypePtr lookupVar(const std::string& name);
 
         TypePtr resolveTypeExpr(const Expr* e);

@@ -9,6 +9,7 @@ add_library(vayu_compiler STATIC
     interp/Interpreter.cpp
     bytecode/OpCode.cpp
     bytecode/Chunk.cpp
+    bytecode/Optimizer.cpp        # <-- new
     compile/Compiler.cpp
     vm/VM.cpp
 )

@@ -4,16 +4,27 @@
 #include "sema/TypeChecker.hpp"
 #include "interp/Interpreter.hpp"
 #include "compile/Compiler.hpp"
+#include "bytecode/Optimizer.hpp"
 #include "vm/VM.hpp"
+
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <vector>
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 #endif
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
 
 static std::string readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
@@ -22,17 +33,63 @@ static std::string readFile(const std::string& path) {
     return ss.str();
 }
 
+static std::string sourceDirOf(const std::string& file) {
+    auto slash = file.find_last_of("/\\");
+    if (slash == std::string::npos) return {};
+    return file.substr(0, slash + 1);
+}
+
 static void usage() {
     std::fprintf(stderr,
-        "usage: vayuc <file.vayu> [--run | --check | --dump-tokens | --dump-ast | --dump-bytecode]\n"
-        "       --run            type-check then execute (default)\n"
-        "       --check          type-check only\n"
-        "       --dump-tokens    print lexer output\n"
-        "       --dump-ast       print parsed AST\n"
-        "       --dump-bytecode  compile to bytecode and print disassembly\n"
-        "       --vm             run on the bytecode VM instead of the tree-walker\n"
-        "       --no-check       skip the type checker\n");
+        "usage: vayuc <file.vyu> [mode] [flags]\n"
+        "\n"
+        "Modes (default --run):\n"
+        "  --run              type-check and execute on the tree-walking interpreter\n"
+        "  --vm               execute on the bytecode virtual machine\n"
+        "  --check            type-check only\n"
+        "  --dump-tokens      print the lexer output\n"
+        "  --dump-ast         print the parsed AST\n"
+        "  --dump-bytecode    compile to bytecode and print disassembly\n"
+        "\n"
+        "Flags:\n"
+        "  --no-check         skip the type checker\n"
+        "  --no-opt           disable bytecode optimizer (VM only)\n"
+        "  --bench [N]        run the program N times (default 5), report timings\n");
 }
+
+// ===========================================================================
+// Bench helper
+// ===========================================================================
+
+namespace {
+
+    template <typename RunFn>
+    void runBenchmark(const char* label, int runs, RunFn&& oneRun) {
+        std::vector<double> times;
+        times.reserve((size_t)runs);
+        for (int r = 0; r < runs; ++r) {
+            auto t0 = std::chrono::steady_clock::now();
+            oneRun();
+            auto t1 = std::chrono::steady_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            times.push_back(ms);
+            std::fprintf(stderr, "run %d: %.3f ms\n", r + 1, ms);
+        }
+        double best = *std::min_element(times.begin(), times.end());
+        double avg = 0.0;
+        for (double t : times) avg += t;
+        avg /= (double)times.size();
+
+        std::fprintf(stderr,
+            "[%s] best: %.3f ms   avg: %.3f ms   runs: %d\n",
+            label, best, avg, runs);
+    }
+
+} // namespace
+
+// ===========================================================================
+// main
+// ===========================================================================
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -42,19 +99,41 @@ int main(int argc, char** argv) {
     if (argc < 2) { usage(); return 1; }
 
     std::string file = argv[1];
-    enum class Mode { Run, Check, DumpTokens, DumpAst, DumpBytecode } mode = Mode::Run;
+
+    enum class Mode { Run, Check, DumpTokens, DumpAst, DumpBytecode };
+    Mode mode = Mode::Run;
     bool skipCheck = false;
     bool useVM = false;
+    bool useOpt = true;
+    int  benchRuns = 0;
 
     for (int i = 2; i < argc; ++i) {
-        if (!std::strcmp(argv[i], "--run"))           mode = Mode::Run;
-        else if (!std::strcmp(argv[i], "--check"))         mode = Mode::Check;
-        else if (!std::strcmp(argv[i], "--dump-tokens"))   mode = Mode::DumpTokens;
-        else if (!std::strcmp(argv[i], "--dump-ast"))      mode = Mode::DumpAst;
-        else if (!std::strcmp(argv[i], "--dump-bytecode")) mode = Mode::DumpBytecode;
-        else if (!std::strcmp(argv[i], "--no-check"))      skipCheck = true;
-        else if (!std::strcmp(argv[i], "--vm"))            useVM = true;
-        else { std::fprintf(stderr, "vayuc: unknown flag '%s'\n", argv[i]); return 1; }
+        const char* a = argv[i];
+        if (!std::strcmp(a, "--run"))           mode = Mode::Run;
+        else if (!std::strcmp(a, "--check"))         mode = Mode::Check;
+        else if (!std::strcmp(a, "--dump-tokens"))   mode = Mode::DumpTokens;
+        else if (!std::strcmp(a, "--dump-ast"))      mode = Mode::DumpAst;
+        else if (!std::strcmp(a, "--dump-bytecode")) mode = Mode::DumpBytecode;
+        else if (!std::strcmp(a, "--vm"))            useVM = true;
+        else if (!std::strcmp(a, "--no-check"))      skipCheck = true;
+        else if (!std::strcmp(a, "--no-opt"))        useOpt = false;
+        else if (!std::strcmp(a, "--bench")) {
+            benchRuns = 5;
+            if (i + 1 < argc) {
+                // Optional numeric argument
+                char* end = nullptr;
+                long v = std::strtol(argv[i + 1], &end, 10);
+                if (end && *end == '\0' && v > 0) {
+                    benchRuns = (int)v;
+                    ++i;
+                }
+            }
+        }
+        else {
+            std::fprintf(stderr, "vayuc: unknown flag '%s'\n", a);
+            usage();
+            return 1;
+        }
     }
 
     std::string src = readFile(file);
@@ -63,17 +142,21 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // ---- Lex ----
     vayu::Lexer lexer(std::move(src));
     auto tokens = lexer.tokenize();
 
     if (mode == Mode::DumpTokens) {
-        for (const auto& t : tokens)
+        for (const auto& t : tokens) {
             std::printf("%3d:%-3d  %-14s  %s\n",
                 t.location.line, t.location.column,
-                vayu::tokenTypeName(t.type), t.lexeme.c_str());
+                vayu::tokenTypeName(t.type),
+                t.lexeme.c_str());
+        }
         return 0;
     }
 
+    // ---- Parse ----
     vayu::Block program;
     try {
         vayu::Parser parser(std::move(tokens));
@@ -85,8 +168,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (mode == Mode::DumpAst) { vayu::printProgram(program); return 0; }
+    if (mode == Mode::DumpAst) {
+        vayu::printProgram(program);
+        return 0;
+    }
 
+    // ---- Type check ----
     if (!skipCheck && mode != Mode::DumpBytecode) {
         try {
             vayu::TypeChecker checker;
@@ -104,7 +191,11 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // ---- Bytecode dump mode ----
+    std::string srcDir = sourceDirOf(file);
+
+    // =======================================================================
+    // --dump-bytecode
+    // =======================================================================
     if (mode == Mode::DumpBytecode) {
         auto chunk = std::make_shared<vayu::Chunk>();
         try {
@@ -116,18 +207,26 @@ int main(int argc, char** argv) {
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
+
+        std::printf("--- raw bytecode ---\n");
         vayu::disassemble(*chunk, file.c_str());
+
+        if (useOpt) {
+            vayu::OptStats stats;
+            vayu::optimizeChunk(*chunk, stats);
+            std::printf("--- after optimization "
+                "(folded=%d, notNOT=%d, peep=%d) ---\n",
+                stats.constantsFolded,
+                stats.notNotCollapsed,
+                stats.peepholesApplied);
+            vayu::disassemble(*chunk, file.c_str());
+        }
         return 0;
     }
 
-    // Source directory for module resolution.
-    std::string srcDir;
-    {
-        auto slash = file.find_last_of("/\\");
-        if (slash != std::string::npos) srcDir = file.substr(0, slash + 1);
-    }
-
-    // ---- Run on bytecode VM ----
+    // =======================================================================
+    // --vm
+    // =======================================================================
     if (useVM) {
         auto chunk = std::make_shared<vayu::Chunk>();
         try {
@@ -139,16 +238,52 @@ int main(int argc, char** argv) {
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
+
+        if (useOpt) {
+            vayu::OptStats stats;
+            vayu::optimizeChunk(*chunk, stats);
+            if (std::getenv("VAYU_OPT_VERBOSE")) {
+                std::fprintf(stderr,
+                    "[opt] folded=%d  notNOT=%d  peep=%d\n",
+                    stats.constantsFolded,
+                    stats.notNotCollapsed,
+                    stats.peepholesApplied);
+            }
+        }
+
+        if (benchRuns > 0) {
+            runBenchmark(useOpt ? "vm-opt" : "vm-no-opt", benchRuns, [&]() {
+                vayu::Interpreter interp;
+                interp.setSourceDir(srcDir);
+                interp.registerDeclarations(program);
+                vayu::VM vm(interp.globals());
+                vm.run(chunk);
+                });
+            return 0;
+        }
+
         try {
             vayu::Interpreter interp;
             interp.setSourceDir(srcDir);
-            interp.registerDeclarations(program);   // <-- NEW: register classes/structs
+            interp.registerDeclarations(program);
             vayu::VM vm(interp.globals());
             vm.run(chunk);
+        }
+        catch (const vayu::VayuException& e) {
+            std::fprintf(stderr, "%s:%d:%d: uncaught %s: %s\n",
+                file.c_str(), e.loc.line, e.loc.column,
+                vayu::Interpreter::exceptionTypeName(e.value).c_str(),
+                vayu::Interpreter::exceptionMessage(e.value).c_str());
+            return 1;
         }
         catch (const vayu::VMRuntimeError& e) {
             std::fprintf(stderr, "%s:%d: VM runtime error: %s\n",
                 file.c_str(), e.line, e.what());
+            return 1;
+        }
+        catch (const vayu::RuntimeError& e) {
+            std::fprintf(stderr, "%s:%d:%d: runtime error: %s\n",
+                file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
         catch (const std::exception& e) {
@@ -158,7 +293,18 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // ---- Run on tree-walker (default) ----
+    // =======================================================================
+    // --run  (tree-walking interpreter)
+    // =======================================================================
+    if (benchRuns > 0) {
+        runBenchmark("tree-walk", benchRuns, [&]() {
+            vayu::Interpreter interp;
+            interp.setSourceDir(srcDir);
+            interp.run(program);
+            });
+        return 0;
+    }
+
     try {
         vayu::Interpreter interp;
         interp.setSourceDir(srcDir);
