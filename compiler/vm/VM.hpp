@@ -2,6 +2,7 @@
 #include "bytecode/Chunk.hpp"
 #include "interp/Environment.hpp"
 #include "interp/Value.hpp"
+#include <deque>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -20,7 +21,6 @@ namespace vayu {
         explicit VM(std::shared_ptr<Environment> globals);
         void run(std::shared_ptr<Chunk> entryChunk);
 
-        /// Public entry point for the interpreter's `VMFunctionRunner` hook.
         Value callVMFunctionSync(std::shared_ptr<Callable> fn,
             const std::vector<Value>& args);
 
@@ -43,19 +43,10 @@ namespace vayu {
 
         std::shared_ptr<Environment> globals_;
         std::vector<Value>           stack_;
-        std::vector<CallFrame>       frames_;
+        std::deque<CallFrame>        frames_;    // deque: stable refs across push_back
         std::vector<Handler>         handlers_;
         std::vector<Value>           activeExceptions_;
         int                          currentLine_ = 0;
-
-        CallFrame& frame() { return frames_.back(); }
-        Chunk& chunk() { return *frame().chunk; }
-        std::shared_ptr<Environment>& env() { return frame().env; }
-        size_t& ip() { return frame().ip; }
-
-        void  push(Value v) { stack_.push_back(std::move(v)); }
-        Value pop() { Value v = std::move(stack_.back()); stack_.pop_back(); return v; }
-        Value& top() { return stack_.back(); }
 
         uint8_t readByte();
         int     readU16();
@@ -69,8 +60,6 @@ namespace vayu {
             const std::vector<Value>& args);
         void unwindToHandler(const Value& excValue);
 
-        /// Runs until `frames_.size() == stopAtFrameCount`. Used by both `run`
-        /// (stopAt = 0) and `callVMFunctionSync` (stopAt = entry frame count).
         void runLoop(size_t stopAtFrameCount);
     };
 

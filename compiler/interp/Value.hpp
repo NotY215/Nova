@@ -1,9 +1,9 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 namespace vayu {
@@ -11,7 +11,7 @@ namespace vayu {
     class  Environment;
     struct DefStmt;
     struct LambdaExpr;
-    struct Chunk;          // forward decl for VMFunction
+    struct Chunk;
     class  Value;
     struct ClassObject;
     struct ListValue;
@@ -20,6 +20,12 @@ namespace vayu {
     struct StructInstance;
     struct Callable;
 
+    // ===========================================================================
+    // Value — hand-rolled tagged union.
+    // Drop-in replacement for the previous std::variant-based implementation.
+    // The trivial alternatives (None/Bool/Int/Float) are the fast path: destroy()
+    // and truthy() take a single comparison before the switch.
+    // ===========================================================================
     class Value {
     public:
         using FnPtr = std::shared_ptr<Callable>;
@@ -29,73 +35,122 @@ namespace vayu {
         using MapPtr = std::shared_ptr<MapValue>;
         using ModulePtr = std::shared_ptr<ModuleValue>;
 
-        using Storage = std::variant<
-            std::monostate,
-            bool, long long, double, std::string,
-            FnPtr, InstPtr, ClassPtr, ListPtr, MapPtr, ModulePtr
-        >;
-        Storage data_;
+    private:
+        enum class Tag : uint8_t {
+            None, Bool, Int, Float,           // trivial
+            Str, Callable, Instance, Class,   // non-trivial (require destruction)
+            List, Map, Module
+        };
 
-        Value() : data_(std::monostate{}) {}
-        Value(std::nullptr_t) : data_(std::monostate{}) {}
-        Value(bool b) : data_(b) {}
-        Value(long long i) : data_(i) {}
-        Value(int i) : data_(static_cast<long long>(i)) {}
-        Value(double d) : data_(d) {}
-        Value(std::string s) : data_(std::move(s)) {}
-        Value(const char* s) : data_(std::string(s)) {}
-        Value(FnPtr   c) : data_(std::move(c)) {}
-        Value(InstPtr s) : data_(std::move(s)) {}
-        Value(ClassPtr c) : data_(std::move(c)) {}
-        Value(ListPtr l) : data_(std::move(l)) {}
-        Value(MapPtr  m) : data_(std::move(m)) {}
-        Value(ModulePtr m) : data_(std::move(m)) {}
+        union U {
+            bool      b;
+            long long i;
+            double    f;
+            std::string s;
+            FnPtr       callable;
+            InstPtr     inst;
+            ClassPtr    cls;
+            ListPtr     list;
+            MapPtr      map;
+            ModulePtr   module;
 
-        bool isNone()     const { return std::holds_alternative<std::monostate>(data_); }
-        bool isBool()     const { return std::holds_alternative<bool>(data_); }
-        bool isInt()      const { return std::holds_alternative<long long>(data_); }
-        bool isFloat()    const { return std::holds_alternative<double>(data_); }
-        bool isNumber()   const { return isInt() || isFloat(); }
-        bool isString()   const { return std::holds_alternative<std::string>(data_); }
-        bool isCallable() const { return std::holds_alternative<FnPtr>(data_); }
-        bool isInstance() const { return std::holds_alternative<InstPtr>(data_); }
-        bool isClass()    const { return std::holds_alternative<ClassPtr>(data_); }
-        bool isList()     const { return std::holds_alternative<ListPtr>(data_); }
-        bool isMap()      const { return std::holds_alternative<MapPtr>(data_); }
-        bool isModule()   const { return std::holds_alternative<ModulePtr>(data_); }
+            U() noexcept : i(0) {}
+            ~U() {}
+        };
 
-        bool               asBool()   const { return std::get<bool>(data_); }
-        long long          asInt()    const { return std::get<long long>(data_); }
-        double             asFloat()  const { return std::get<double>(data_); }
-        const std::string& asString() const { return std::get<std::string>(data_); }
-        FnPtr     asCallable() const { return std::get<FnPtr>(data_); }
-        InstPtr   asInstance() const { return std::get<InstPtr>(data_); }
-        ClassPtr  asClass()    const { return std::get<ClassPtr>(data_); }
-        ListPtr   asList()     const { return std::get<ListPtr>(data_); }
-        MapPtr    asMap()      const { return std::get<MapPtr>(data_); }
-        ModulePtr asModule()   const { return std::get<ModulePtr>(data_); }
+        Tag tag_;
+        U   u_;
 
-        double      asDouble() const { return isInt() ? (double)asInt() : asFloat(); }
+        void destroy()  noexcept;
+        void copyFrom(const Value& other);
+        void moveFrom(Value&& other) noexcept;
+
+    public:
+        Value() noexcept : tag_(Tag::None) {}
+        Value(std::nullptr_t) noexcept : tag_(Tag::None) {}
+        Value(bool b) noexcept : tag_(Tag::Bool) { u_.b = b; }
+        Value(long long i) noexcept : tag_(Tag::Int) { u_.i = i; }
+        Value(int i) noexcept : tag_(Tag::Int) { u_.i = (long long)i; }
+        Value(double f) noexcept : tag_(Tag::Float) { u_.f = f; }
+        Value(std::string s);
+        Value(const char* s);
+        Value(FnPtr c)     noexcept;
+        Value(InstPtr s)   noexcept;
+        Value(ClassPtr c)  noexcept;
+        Value(ListPtr l)   noexcept;
+        Value(MapPtr m)    noexcept;
+        Value(ModulePtr m) noexcept;
+
+        Value(const Value& other);
+        Value(Value&& other) noexcept;
+        ~Value();
+        Value& operator=(const Value& other);
+        Value& operator=(Value&& other) noexcept;
+
+        bool isNone()     const noexcept { return tag_ == Tag::None; }
+        bool isBool()     const noexcept { return tag_ == Tag::Bool; }
+        bool isInt()      const noexcept { return tag_ == Tag::Int; }
+        bool isFloat()    const noexcept { return tag_ == Tag::Float; }
+        bool isNumber()   const noexcept { return tag_ == Tag::Int || tag_ == Tag::Float; }
+        bool isString()   const noexcept { return tag_ == Tag::Str; }
+        bool isCallable() const noexcept { return tag_ == Tag::Callable; }
+        bool isInstance() const noexcept { return tag_ == Tag::Instance; }
+        bool isClass()    const noexcept { return tag_ == Tag::Class; }
+        bool isList()     const noexcept { return tag_ == Tag::List; }
+        bool isMap()      const noexcept { return tag_ == Tag::Map; }
+        bool isModule()   const noexcept { return tag_ == Tag::Module; }
+
+        bool               asBool()   const { return u_.b; }
+        long long          asInt()    const { return u_.i; }
+        double             asFloat()  const { return u_.f; }
+        const std::string& asString() const { return u_.s; }
+        FnPtr     asCallable() const { return u_.callable; }
+        InstPtr   asInstance() const { return u_.inst; }
+        ClassPtr  asClass()    const { return u_.cls; }
+        ListPtr   asList()     const { return u_.list; }
+        MapPtr    asMap()      const { return u_.map; }
+        ModulePtr asModule()   const { return u_.module; }
+
+        double asDouble() const noexcept {
+            return tag_ == Tag::Int ? (double)u_.i : u_.f;
+        }
+
         bool        truthy()   const;
         std::string toString() const;
         std::string typeName() const;
     };
 
+    // ===========================================================================
+    // Runtime object types
+    // ===========================================================================
+
     struct StructInstance {
         std::shared_ptr<ClassObject>           cls;
         std::unordered_map<std::string, Value> fields;
     };
-    struct ListValue { std::vector<Value> items; };
-    struct MapValue { std::unordered_map<std::string, Value> entries; };
+
+    struct ListValue {
+        std::vector<Value> items;
+    };
+
+    struct MapValue {
+        std::unordered_map<std::string, Value> entries;
+    };
+
     struct ModuleValue {
         std::string                            name;
         std::unordered_map<std::string, Value> members;
     };
+
     struct ClassObject {
         std::string                  name;
         std::vector<std::string>     fieldOrder;
         std::shared_ptr<ClassObject> parent;
     };
+
+    // ===========================================================================
+    // Callable
+    // ===========================================================================
 
     using NativeFnPtr = Value(*)(const std::vector<Value>&);
 
@@ -110,7 +165,7 @@ namespace vayu {
             MapMethod,
             StringMethod,
             Lambda,
-            VMFunction,       // bytecode-compiled function
+            VMFunction,
         } kind = Kind::Native;
 
         std::string name;

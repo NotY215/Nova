@@ -6,20 +6,26 @@
 
 namespace vayu {
 
-    VM::VM(std::shared_ptr<Environment> globals) : globals_(std::move(globals)) {}
-
-    uint8_t VM::readByte() { return chunk().code[ip()++]; }
-
-    int VM::readU16() {
-        int v = ((int)chunk().code[ip()] << 8) | (int)chunk().code[ip() + 1];
-        ip() += 2;
-        return v;
+    VM::VM(std::shared_ptr<Environment> globals) : globals_(std::move(globals)) {
+        stack_.reserve(256);
     }
 
+    // ===========================================================================
+    // Low-level readers — kept for call sites outside the hot path.
+    // ===========================================================================
+
+    uint8_t VM::readByte() { return frames_.back().chunk->code[frames_.back().ip++]; }
+    int VM::readU16() {
+        auto& f = frames_.back();
+        int v = ((int)f.chunk->code[f.ip] << 8) | (int)f.chunk->code[f.ip + 1];
+        f.ip += 2;
+        return v;
+    }
     int VM::readI16() {
-        int16_t v = (int16_t)(((uint16_t)chunk().code[ip()] << 8) |
-            (uint16_t)chunk().code[ip() + 1]);
-        ip() += 2;
+        auto& f = frames_.back();
+        int16_t v = (int16_t)(((uint16_t)f.chunk->code[f.ip] << 8) |
+            (uint16_t)f.chunk->code[f.ip + 1]);
+        f.ip += 2;
         return (int)v;
     }
 
@@ -27,11 +33,14 @@ namespace vayu {
         throw VMRuntimeError(msg, currentLine_);
     }
 
-    // ---------------------------------------------------------------------------
-
-    // Forward declaration — valueEqualsVM is defined further down but used by
-    // the IN opcode inside VM::run above its definition.
+    // ===========================================================================
+    // Forward declaration — defined below, used inside runLoop for IN.
+    // ===========================================================================
     static bool valueEqualsVM(const Value& a, const Value& b);
+
+    // ===========================================================================
+    // run — installs the VMFunctionRunner hook, then delegates to runLoop
+    // ===========================================================================
 
     void VM::run(std::shared_ptr<Chunk> entryChunk) {
         frames_.clear();
@@ -52,59 +61,98 @@ namespace vayu {
         runLoop(0);
     }
 
+    Value VM::callVMFunctionSync(std::shared_ptr<Callable> fn,
+        const std::vector<Value>& args) {
+        size_t stopAt = frames_.size();
+        callVMFunction(fn, args);
+        runLoop(stopAt);
+        Value v = std::move(stack_.back());
+        stack_.pop_back();
+        return v;
+    }
+
+    // ===========================================================================
+    // runLoop — the hot dispatch loop.
+    //
+    // Top-frame state is cached in locals (chunk / code / constants / ip).
+    // The locals are refreshed only when the frame changes (CALL into VM fn,
+    // RETURN_V, or an exception unwind).
+    // ===========================================================================
+
     void VM::runLoop(size_t stopAtFrameCount) {
+        if (frames_.size() <= stopAtFrameCount) return;
+
+        CallFrame* frame = &frames_.back();
+        Chunk* chunk = frame->chunk.get();
+        const uint8_t* code = chunk->code.data();
+        const size_t    codeSize = chunk->code.size();
+        const Value* constants = chunk->constants.data();
+        size_t          ip = frame->ip;
+
+        auto reload = [&]() {
+            frame = &frames_.back();
+            chunk = frame->chunk.get();
+            code = chunk->code.data();
+            constants = chunk->constants.data();
+            ip = frame->ip;
+            };
+
         while (frames_.size() > stopAtFrameCount) {
-            CallFrame& f = frames_.back();
-            if (f.ip >= f.chunk->code.size())
+            if (ip >= codeSize)
                 runtimeError("bytecode ran off the end without RETURN_V");
 
-            currentLine_ = f.chunk->lines[f.ip];
+            currentLine_ = chunk->lines[ip];
+            OpCode op = static_cast<OpCode>(code[ip++]);
 
             try {
-                OpCode op = static_cast<OpCode>(readByte());
                 switch (op) {
 
-                    // ---- Stack & literals ----
+                    // ---------- Stack & literals ----------
                 case OpCode::CONST: {
-                    int idx = readU16();
-                    push(chunk().constants[idx]);
+                    int idx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    stack_.push_back(constants[idx]);
                     break;
                 }
-                case OpCode::NONE:    push(Value());      break;
-                case OpCode::TRUE_V:  push(Value(true));  break;
-                case OpCode::FALSE_V: push(Value(false)); break;
-                case OpCode::POP:     (void)pop();        break;
-                case OpCode::DUP:     push(top());        break;
+                case OpCode::NONE:    stack_.emplace_back();       break;
+                case OpCode::TRUE_V:  stack_.emplace_back(true);   break;
+                case OpCode::FALSE_V: stack_.emplace_back(false);  break;
+                case OpCode::POP:     stack_.pop_back();           break;
+                case OpCode::DUP:     stack_.push_back(stack_.back()); break;
 
-                    // ---- Variables ----
+                    // ---------- Variables ----------
                 case OpCode::LOAD: {
-                    int idx = readU16();
-                    const std::string& name = chunk().names[idx];
-                    Value* slot = env()->lookup(name);
-                    if (slot) { push(*slot); break; }
+                    int idx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& name = chunk->names[idx];
+                    Value* slot = frame->env->lookup(name);
+                    if (slot) { stack_.push_back(*slot); break; }
+                    // Fallback: class / exception constructors.
                     if (Interpreter::current_) {
                         auto cls = Interpreter::current_->vmLookupClass(name);
-                        if (cls) { push(Value(cls)); break; }
+                        if (cls) {
+                            stack_.emplace_back(std::move(cls));
+                            break;
+                        }
                     }
                     runtimeError("name '" + name + "' is not defined");
                 }
                 case OpCode::STORE: {
-                    int idx = readU16();
-                    const std::string& name = chunk().names[idx];
-                    Value v = pop();
-                    if (!env()->assign(name, v))
+                    int idx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& name = chunk->names[idx];
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    if (!frame->env->assign(name, v))
                         runtimeError("name '" + name + "' is not defined");
                     break;
                 }
                 case OpCode::DEFINE: {
-                    int idx = readU16();
-                    const std::string& name = chunk().names[idx];
-                    Value v = pop();
-                    if (!env()->assign(name, v)) env()->define(name, std::move(v));
+                    int idx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& name = chunk->names[idx];
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    if (!frame->env->assign(name, v))
+                        frame->env->define(name, std::move(v));
                     break;
                 }
 
-                                   // ---- Arithmetic ----
+                                   // ---------- Arithmetic ----------
                 case OpCode::ADD:
                 case OpCode::SUB:
                 case OpCode::MUL:
@@ -116,14 +164,14 @@ namespace vayu {
                     break;
 
                 case OpCode::NEG: {
-                    Value v = pop();
-                    if (v.isInt())        push(Value(-v.asInt()));
-                    else if (v.isFloat()) push(Value(-v.asFloat()));
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    if (v.isInt())        stack_.emplace_back(-v.asInt());
+                    else if (v.isFloat()) stack_.emplace_back(-v.asFloat());
                     else                  runtimeError("cannot negate " + v.typeName());
                     break;
                 }
 
-                                // ---- Comparison / logic ----
+                                // ---------- Comparison / logic ----------
                 case OpCode::EQ: case OpCode::NEQ:
                 case OpCode::LT: case OpCode::GT:
                 case OpCode::LE: case OpCode::GE:
@@ -131,58 +179,66 @@ namespace vayu {
                     break;
 
                 case OpCode::NOT: {
-                    Value v = pop();
-                    push(Value(!v.truthy()));
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    stack_.emplace_back(!v.truthy());
                     break;
                 }
 
-                                // ---- Control flow ----
+                                // ---------- Control flow ----------
                 case OpCode::JUMP: {
-                    int off = readI16();
-                    ip() = (size_t)((int)ip() + off);
+                    int off = (int)(int16_t)((uint16_t(code[ip]) << 8) |
+                        uint16_t(code[ip + 1]));
+                    ip += 2;
+                    ip = (size_t)((int)ip + off);
                     break;
                 }
                 case OpCode::JUMP_IF_FALSE: {
-                    int off = readI16();
-                    Value v = pop();
-                    if (!v.truthy()) ip() = (size_t)((int)ip() + off);
+                    int off = (int)(int16_t)((uint16_t(code[ip]) << 8) |
+                        uint16_t(code[ip + 1]));
+                    ip += 2;
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    if (!v.truthy()) ip = (size_t)((int)ip + off);
                     break;
                 }
                 case OpCode::JUMP_IF_TRUE: {
-                    int off = readI16();
-                    Value v = pop();
-                    if (v.truthy()) ip() = (size_t)((int)ip() + off);
+                    int off = (int)(int16_t)((uint16_t(code[ip]) << 8) |
+                        uint16_t(code[ip + 1]));
+                    ip += 2;
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    if (v.truthy()) ip = (size_t)((int)ip + off);
                     break;
                 }
 
-                                         // ---- Iteration ----
+                                         // ---------- Iteration ----------
                 case OpCode::ITER_NEW: {
-                    Value v = pop();
+                    Value v = std::move(stack_.back()); stack_.pop_back();
                     if (v.isList()) {
-                        push(v);
-                        push(Value(0LL));
+                        stack_.push_back(std::move(v));
+                        stack_.emplace_back(0LL);
                         break;
                     }
                     if (v.isMap()) {
                         auto keys = std::make_shared<ListValue>();
                         for (auto& [k, _] : v.asMap()->entries)
                             keys->items.push_back(Value(k));
-                        push(Value(keys));
-                        push(Value(0LL));
+                        stack_.emplace_back(std::move(keys));
+                        stack_.emplace_back(0LL);
                         break;
                     }
                     if (v.isString()) {
                         auto chars = std::make_shared<ListValue>();
                         for (char c : v.asString())
                             chars->items.push_back(Value(std::string(1, c)));
-                        push(Value(chars));
-                        push(Value(0LL));
+                        stack_.emplace_back(std::move(chars));
+                        stack_.emplace_back(0LL);
                         break;
                     }
                     runtimeError("cannot iterate over " + v.typeName());
                 }
                 case OpCode::ITER_NEXT: {
-                    int off = readI16();
+                    int off = (int)(int16_t)((uint16_t(code[ip]) << 8) |
+                        uint16_t(code[ip + 1]));
+                    ip += 2;
                     size_t idxPos = stack_.size() - 1;
                     size_t iterPos = stack_.size() - 2;
                     Value iterable = stack_[iterPos];
@@ -190,117 +246,128 @@ namespace vayu {
                     if (!iterable.isList()) runtimeError("iterator state corrupted");
                     auto lst = iterable.asList();
                     if (idx < 0 || idx >= (long long)lst->items.size()) {
-                        // Do NOT pop here — the compiler emits POP; POP at the
-                        // loop exit so that `break` uses the same cleanup path.
-                        ip() = (size_t)((int)ip() + off);
+                        // Do NOT pop here — the compiler emits POP; POP at
+                        // the loop exit so `break` uses the same cleanup path.
+                        ip = (size_t)((int)ip + off);
                         break;
                     }
-                    push(lst->items[(size_t)idx]);
+                    stack_.push_back(lst->items[(size_t)idx]);
                     stack_[idxPos] = Value(idx + 1);
                     break;
                 }
 
-                                      // ---- Lists ----
+                                      // ---------- Lists ----------
                 case OpCode::LIST_NEW: {
-                    int count = readU16();
+                    int count = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
                     auto lst = std::make_shared<ListValue>();
                     lst->items.resize((size_t)count);
-                    for (int i = count - 1; i >= 0; --i)
-                        lst->items[(size_t)i] = pop();
-                    push(Value(lst));
+                    for (int i = count - 1; i >= 0; --i) {
+                        lst->items[(size_t)i] = std::move(stack_.back());
+                        stack_.pop_back();
+                    }
+                    stack_.emplace_back(std::move(lst));
                     break;
                 }
 
-                                     // ---- Functions ----
+                                     // ---------- Functions ----------
                 case OpCode::MAKE_FN: {
-                    int idx = readU16();
-                    auto& fnChunk = chunk().functions[(size_t)idx];
+                    int idx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    auto& fnChunk = chunk->functions[(size_t)idx];
                     auto c = std::make_shared<Callable>();
                     c->kind = Callable::Kind::VMFunction;
                     c->name = "<fn>";
                     c->chunk = fnChunk;
                     c->vmParams = fnChunk->paramNames;
-                    c->closure = env();
-                    push(Value(c));
+                    c->closure = frame->env;
+                    stack_.emplace_back(std::move(c));
                     break;
                 }
 
                 case OpCode::CALL: {
-                    int argc = readByte();
+                    int argc = (int)code[ip++];
                     std::vector<Value> args((size_t)argc);
-                    for (int i = argc - 1; i >= 0; --i)
-                        args[(size_t)i] = pop();
-                    Value callee = pop();
+                    for (int i = argc - 1; i >= 0; --i) {
+                        args[(size_t)i] = std::move(stack_.back());
+                        stack_.pop_back();
+                    }
+                    Value callee = std::move(stack_.back()); stack_.pop_back();
 
                     if (!callee.isCallable())
                         runtimeError("cannot call " + callee.typeName() + " value");
 
                     auto fn = callee.asCallable();
                     if (fn->kind == Callable::Kind::VMFunction) {
+                        frame->ip = ip;
                         callVMFunction(fn, args);
+                        reload();
                     }
                     else {
                         if (!Interpreter::current_)
                             runtimeError("VM: no interpreter context for builtin call");
                         Value r = Interpreter::current_->callValue(
                             callee, args, SourceLocation{});
-                        push(std::move(r));
+                        stack_.push_back(std::move(r));
                     }
                     break;
                 }
 
                 case OpCode::RETURN_V: {
-                    Value v = pop();
-                    size_t sBase = frames_.back().stackBase;
-                    size_t hAtEntry = frames_.back().handlersAtEntry;
-                    size_t aAtEntry = frames_.back().activeExcAtEntry;
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    size_t sBase = frame->stackBase;
+                    size_t hAtEntry = frame->handlersAtEntry;
+                    size_t aAtEntry = frame->activeExcAtEntry;
                     frames_.pop_back();
-                    if (stack_.size() > sBase)              stack_.resize(sBase);
-                    if (handlers_.size() > hAtEntry)        handlers_.resize(hAtEntry);
+                    if (stack_.size() > sBase) stack_.resize(sBase);
+                    if (handlers_.size() > hAtEntry) handlers_.resize(hAtEntry);
                     if (activeExceptions_.size() > aAtEntry)
                         activeExceptions_.resize(aAtEntry);
-                    if (!frames_.empty()) push(std::move(v));
+                    stack_.push_back(std::move(v));
+                    if (frames_.size() <= stopAtFrameCount) return;
+                    reload();
                     break;
                 }
 
-                                     // ---- Structs & classes (Phase 4C) ----
+                                     // ---------- Structs & classes ----------
                 case OpCode::NEW_INSTANCE: {
-                    int nameIdx = readU16();
-                    int argc = readByte();
-                    std::string clsName = chunk().names[nameIdx];
+                    int nameIdx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    int argc = (int)code[ip++];
+                    const std::string& clsName = chunk->names[nameIdx];
                     std::vector<Value> args((size_t)argc);
-                    for (int i = argc - 1; i >= 0; --i) args[(size_t)i] = pop();
+                    for (int i = argc - 1; i >= 0; --i) {
+                        args[(size_t)i] = std::move(stack_.back());
+                        stack_.pop_back();
+                    }
                     if (!Interpreter::current_)
                         runtimeError("VM: no interpreter context for instance construction");
                     Value inst = Interpreter::current_->vmNewInst(
                         clsName, args, SourceLocation{});
-                    push(std::move(inst));
+                    stack_.push_back(std::move(inst));
                     break;
                 }
                 case OpCode::ATTR_GET: {
-                    int nameIdx = readU16();
-                    std::string attr = chunk().names[nameIdx];
-                    Value base = pop();
+                    int nameIdx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& attr = chunk->names[nameIdx];
+                    Value base = std::move(stack_.back()); stack_.pop_back();
                     if (!Interpreter::current_)
                         runtimeError("VM: no interpreter context for attribute lookup");
                     Value v = Interpreter::current_->vmGetAttr(
                         base, attr, SourceLocation{});
-                    push(std::move(v));
+                    stack_.push_back(std::move(v));
                     break;
                 }
                 case OpCode::ATTR_SET: {
-                    int nameIdx = readU16();
-                    std::string attr = chunk().names[nameIdx];
-                    Value value = pop();
-                    Value base = pop();
+                    int nameIdx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& attr = chunk->names[nameIdx];
+                    Value value = std::move(stack_.back()); stack_.pop_back();
+                    Value base = std::move(stack_.back()); stack_.pop_back();
                     if (!Interpreter::current_)
                         runtimeError("VM: no interpreter context for attribute write");
                     Interpreter::current_->vmSetAttr(base, attr, value, SourceLocation{});
                     break;
                 }
                 case OpCode::SUPER: {
-                    Value* s = env()->lookup("self");
-                    Value* k = env()->lookup("__class__");
+                    Value* s = frame->env->lookup("self");
+                    Value* k = frame->env->lookup("__class__");
                     if (!s || !k || !s->isInstance() || !k->isClass())
                         runtimeError("super() outside method");
                     auto sup = std::make_shared<Callable>();
@@ -310,14 +377,14 @@ namespace vayu {
                     sup->superParent = k->asClass()->parent;
                     if (!sup->superParent)
                         runtimeError("class '" + k->asClass()->name + "' has no parent");
-                    push(Value(sup));
+                    stack_.emplace_back(std::move(sup));
                     break;
                 }
 
-                                  // ---- Collections (Phase 4D) ----
+                                  // ---------- Collections ----------
                 case OpCode::INDEX_GET: {
-                    Value idx = pop();
-                    Value tgt = pop();
+                    Value idx = std::move(stack_.back()); stack_.pop_back();
+                    Value tgt = std::move(stack_.back()); stack_.pop_back();
                     if (tgt.isList()) {
                         if (!idx.isInt())
                             runtimeError("list index must be int, got " + idx.typeName());
@@ -326,7 +393,7 @@ namespace vayu {
                         if (i < 0) i += (long long)lst->items.size();
                         if (i < 0 || i >= (long long)lst->items.size())
                             runtimeError("list index out of range");
-                        push(lst->items[(size_t)i]);
+                        stack_.push_back(lst->items[(size_t)i]);
                         break;
                     }
                     if (tgt.isMap()) {
@@ -336,7 +403,7 @@ namespace vayu {
                         auto it = m->entries.find(idx.asString());
                         if (it == m->entries.end())
                             runtimeError("map has no key '" + idx.asString() + "'");
-                        push(it->second);
+                        stack_.push_back(it->second);
                         break;
                     }
                     if (tgt.isString()) {
@@ -347,15 +414,15 @@ namespace vayu {
                         if (i < 0) i += (long long)s.size();
                         if (i < 0 || i >= (long long)s.size())
                             runtimeError("string index out of range");
-                        push(Value(std::string(1, s[(size_t)i])));
+                        stack_.emplace_back(std::string(1, s[(size_t)i]));
                         break;
                     }
                     runtimeError("cannot index value of type " + tgt.typeName());
                 }
                 case OpCode::INDEX_SET: {
-                    Value v = pop();
-                    Value idx = pop();
-                    Value tgt = pop();
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    Value idx = std::move(stack_.back()); stack_.pop_back();
+                    Value tgt = std::move(stack_.back()); stack_.pop_back();
                     if (tgt.isList()) {
                         if (!idx.isInt())
                             runtimeError("list index must be int, got " + idx.typeName());
@@ -378,47 +445,49 @@ namespace vayu {
                     runtimeError("cannot index-assign to value of type " + tgt.typeName());
                 }
                 case OpCode::MAP_NEW: {
-                    int count = readU16();
+                    int count = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
                     auto m = std::make_shared<MapValue>();
                     std::vector<std::pair<std::string, Value>> pairs((size_t)count);
                     for (int i = count - 1; i >= 0; --i) {
-                        Value v = pop();
-                        Value k = pop();
+                        Value v = std::move(stack_.back()); stack_.pop_back();
+                        Value k = std::move(stack_.back()); stack_.pop_back();
                         if (!k.isString())
                             runtimeError("map keys must be str, got " + k.typeName());
                         pairs[(size_t)i] = { k.asString(), std::move(v) };
                     }
                     for (auto& [k, v] : pairs) m->entries[k] = std::move(v);
-                    push(Value(m));
+                    stack_.emplace_back(std::move(m));
                     break;
                 }
                 case OpCode::IN: {
-                    Value r = pop();
-                    Value l = pop();
+                    Value r = std::move(stack_.back()); stack_.pop_back();
+                    Value l = std::move(stack_.back()); stack_.pop_back();
                     if (r.isList()) {
                         bool found = false;
                         for (auto& v : r.asList()->items)
                             if (valueEqualsVM(l, v)) { found = true; break; }
-                        push(Value(found));
+                        stack_.emplace_back(found);
                         break;
                     }
                     if (r.isMap()) {
-                        if (!l.isString()) { push(Value(false)); break; }
-                        push(Value(r.asMap()->entries.count(l.asString()) > 0));
+                        if (!l.isString()) { stack_.emplace_back(false); break; }
+                        stack_.emplace_back(r.asMap()->entries.count(l.asString()) > 0);
                         break;
                     }
                     if (r.isString() && l.isString()) {
-                        push(Value(r.asString().find(l.asString()) != std::string::npos));
+                        stack_.emplace_back(r.asString().find(l.asString()) != std::string::npos);
                         break;
                     }
                     runtimeError("'in' requires a list, map, or str on the right");
                 }
 
-                               // ---- Exceptions (Phase 4E) ----
+                               // ---------- Exceptions ----------
                 case OpCode::TRY_BEGIN: {
-                    int off = readI16();
+                    int off = (int)(int16_t)((uint16_t(code[ip]) << 8) |
+                        uint16_t(code[ip + 1]));
+                    ip += 2;
                     Handler h;
-                    h.ip = (size_t)((int)ip() + off);
+                    h.ip = (size_t)((int)ip + off);
                     h.stackSize = stack_.size();
                     h.framesSize = frames_.size();
                     h.activeExcSize = activeExceptions_.size();
@@ -430,12 +499,11 @@ namespace vayu {
                     break;
 
                 case OpCode::RAISE: {
-                    Value v = pop();
+                    Value v = std::move(stack_.back()); stack_.pop_back();
                     if (!v.isInstance()) {
                         if (!Interpreter::current_)
                             runtimeError("VM: no interpreter context for exception creation");
-                        v = Interpreter::current_->vmMakeException("Exception",
-                            v.toString());
+                        v = Interpreter::current_->vmMakeException("Exception", v.toString());
                     }
                     throw VayuException{ v, SourceLocation{} };
                 }
@@ -445,84 +513,90 @@ namespace vayu {
                     throw VayuException{ activeExceptions_.back(), SourceLocation{} };
                 }
                 case OpCode::EXCEPT_PUSH: {
-                    if (stack_.empty())
-                        runtimeError("EXCEPT_PUSH: empty stack");
-                    activeExceptions_.push_back(top());
+                    if (stack_.empty()) runtimeError("EXCEPT_PUSH: empty stack");
+                    activeExceptions_.push_back(stack_.back());
                     break;
                 }
                 case OpCode::EXCEPT_POP:
                     if (!activeExceptions_.empty()) activeExceptions_.pop_back();
                     break;
                 case OpCode::EXCEPT_MATCH: {
-                    int nameIdx = readU16();
-                    std::string clsName = chunk().names[nameIdx];
-                    if (stack_.empty())
-                        runtimeError("EXCEPT_MATCH: empty stack");
-                    Value v = top();
+                    int nameIdx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& clsName = chunk->names[nameIdx];
+                    if (stack_.empty()) runtimeError("EXCEPT_MATCH: empty stack");
                     if (!Interpreter::current_)
                         runtimeError("VM: no interpreter context for exception match");
-                    bool m = Interpreter::current_->vmIsInstanceOf(v, clsName);
-                    push(Value(m));
+                    bool match = Interpreter::current_->vmIsInstanceOf(stack_.back(), clsName);
+                    stack_.emplace_back(match);
                     break;
                 }
-                                         // ---- Modules ---
+
+                                         // ---------- Modules ----------
                 case OpCode::IMPORT: {
-                    int idx = readU16();
-                    const std::string& modName = chunk().names[idx];
+                    int idx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& modName = chunk->names[idx];
                     if (!Interpreter::current_)
                         runtimeError("VM: no interpreter context for module load");
                     Value mod = Interpreter::current_->vmLoadModule(
                         modName, SourceLocation{});
-                    push(std::move(mod));
+                    stack_.push_back(std::move(mod));
                     break;
                 }
                 case OpCode::IMPORT_MEMBER: {
-                    int idx = readU16();
-                    const std::string& member = chunk().names[idx];
-                    if (stack_.empty() || !top().isModule())
+                    int idx = (int(code[ip]) << 8) | int(code[ip + 1]); ip += 2;
+                    const std::string& member = chunk->names[idx];
+                    if (stack_.empty() || !stack_.back().isModule())
                         runtimeError("IMPORT_MEMBER: top of stack is not a module");
-                    auto mod = top().asModule();
+                    auto mod = stack_.back().asModule();
                     auto it = mod->members.find(member);
                     if (it == mod->members.end())
                         runtimeError("module '" + mod->name +
                             "' has no member '" + member + "'");
-                    push(it->second);
+                    stack_.push_back(it->second);
                     break;
                 }
 
-                                         // ---- Misc ----
+                                          // ---------- Misc ----------
                 case OpCode::PRINT: {
-                    Value v = pop();
+                    Value v = std::move(stack_.back()); stack_.pop_back();
                     std::cout << v.toString() << '\n';
                     break;
                 }
                 }
             }
-            catch (VayuException& ne) {
-                unwindToHandler(ne.value);
+            catch (VayuException& e) {
+                if (!frames_.empty() && &frames_.back() == frame)
+                    frame->ip = ip;
+                unwindToHandler(e.value);
+                if (frames_.size() <= stopAtFrameCount) throw;
+                reload();
             }
         }
     }
 
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
+    // Exception unwinding
+    // ===========================================================================
 
     void VM::unwindToHandler(const Value& excValue) {
-        if (handlers_.empty()) {
-            // No handler anywhere in this VM run — repackage and propagate.
+        if (handlers_.empty())
             throw VayuException{ excValue, SourceLocation{} };
-        }
+
         Handler h = handlers_.back();
         handlers_.pop_back();
 
-        if (stack_.size() > h.stackSize)            stack_.resize(h.stackSize);
-        if (frames_.size() > h.framesSize)          frames_.resize(h.framesSize);
+        if (stack_.size() > h.stackSize)             stack_.resize(h.stackSize);
+        if (frames_.size() > h.framesSize)           frames_.resize(h.framesSize);
         if (activeExceptions_.size() > h.activeExcSize)
             activeExceptions_.resize(h.activeExcSize);
 
         stack_.push_back(excValue);
         frames_.back().ip = h.ip;
     }
-    // ---------------------------------------------------------------------------
+
+    // ===========================================================================
+    // Function calls
+    // ===========================================================================
 
     void VM::callVMFunction(const std::shared_ptr<Callable>& fn,
         const std::vector<Value>& args) {
@@ -536,69 +610,60 @@ namespace vayu {
             callEnv->define(fn->vmParams[i], args[i]);
 
         frames_.push_back({ fn->chunk, 0, callEnv,
-                   stack_.size(),
-                   handlers_.size(), activeExceptions_.size() });
-    }
-    Value VM::callVMFunctionSync(std::shared_ptr<Callable> fn,
-        const std::vector<Value>& args) {
-        size_t stopAt = frames_.size();
-        callVMFunction(fn, args);
-        runLoop(stopAt);
-        return pop();
+                           stack_.size(),
+                           handlers_.size(), activeExceptions_.size() });
     }
 
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
     // Arithmetic
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
 
     void VM::doArithmetic(int opcode) {
-        Value r = pop();
-        Value l = pop();
+        Value r = std::move(stack_.back()); stack_.pop_back();
+        Value l = std::move(stack_.back()); stack_.pop_back();
         OpCode op = static_cast<OpCode>(opcode);
 
         switch (op) {
         case OpCode::ADD:
-            if (l.isInt() && r.isInt()) { push(Value(l.asInt() + r.asInt()));       return; }
-            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() + r.asDouble())); return; }
-            if (l.isString() && r.isString()) { push(Value(l.asString() + r.asString())); return; }
+            if (l.isInt() && r.isInt()) { stack_.emplace_back(l.asInt() + r.asInt());         return; }
+            if (l.isNumber() && r.isNumber()) { stack_.emplace_back(l.asDouble() + r.asDouble());   return; }
+            if (l.isString() && r.isString()) { stack_.emplace_back(l.asString() + r.asString());   return; }
             if (l.isList() && r.isList()) {
                 auto out = std::make_shared<ListValue>();
                 out->items = l.asList()->items;
                 for (auto& v : r.asList()->items) out->items.push_back(v);
-                push(Value(out));
+                stack_.emplace_back(std::move(out));
                 return;
             }
             runtimeError("cannot add " + l.typeName() + " and " + r.typeName());
 
         case OpCode::SUB:
-            if (l.isInt() && r.isInt()) { push(Value(l.asInt() - r.asInt()));       return; }
-            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() - r.asDouble())); return; }
+            if (l.isInt() && r.isInt()) { stack_.emplace_back(l.asInt() - r.asInt());         return; }
+            if (l.isNumber() && r.isNumber()) { stack_.emplace_back(l.asDouble() - r.asDouble());   return; }
             runtimeError("cannot subtract " + r.typeName() + " from " + l.typeName());
 
         case OpCode::MUL: {
-            if (l.isInt() && r.isInt()) { push(Value(l.asInt() * r.asInt()));       return; }
-            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() * r.asDouble())); return; }
+            if (l.isInt() && r.isInt()) { stack_.emplace_back(l.asInt() * r.asInt());         return; }
+            if (l.isNumber() && r.isNumber()) { stack_.emplace_back(l.asDouble() * r.asDouble());   return; }
             if (l.isString() && r.isInt()) {
                 std::string o; for (long long i = 0; i < r.asInt(); ++i) o += l.asString();
-                push(Value(std::move(o))); return;
+                stack_.emplace_back(std::move(o)); return;
             }
             if (l.isInt() && r.isString()) {
                 std::string o; for (long long i = 0; i < l.asInt(); ++i) o += r.asString();
-                push(Value(std::move(o))); return;
+                stack_.emplace_back(std::move(o)); return;
             }
             if (l.isList() && r.isInt()) {
                 auto out = std::make_shared<ListValue>();
                 for (long long i = 0; i < r.asInt(); ++i)
                     for (auto& v : l.asList()->items) out->items.push_back(v);
-                push(Value(out));
-                return;
+                stack_.emplace_back(std::move(out)); return;
             }
             if (l.isInt() && r.isList()) {
                 auto out = std::make_shared<ListValue>();
                 for (long long i = 0; i < l.asInt(); ++i)
                     for (auto& v : r.asList()->items) out->items.push_back(v);
-                push(Value(out));
-                return;
+                stack_.emplace_back(std::move(out)); return;
             }
             runtimeError("cannot multiply " + l.typeName() + " by " + r.typeName());
         }
@@ -607,7 +672,7 @@ namespace vayu {
             if (l.isNumber() && r.isNumber()) {
                 double d = r.asDouble();
                 if (d == 0.0) runtimeError("division by zero");
-                push(Value(l.asDouble() / d)); return;
+                stack_.emplace_back(l.asDouble() / d); return;
             }
             runtimeError("cannot divide " + l.typeName() + " by " + r.typeName());
         }
@@ -617,8 +682,8 @@ namespace vayu {
                 double d = r.asDouble();
                 if (d == 0.0) runtimeError("division by zero");
                 double q = std::floor(l.asDouble() / d);
-                if (l.isInt() && r.isInt()) push(Value((long long)q));
-                else                        push(Value(q));
+                if (l.isInt() && r.isInt()) stack_.emplace_back((long long)q);
+                else                        stack_.emplace_back(q);
                 return;
             }
             runtimeError("cannot apply '//' to " + l.typeName() + " and " + r.typeName());
@@ -630,8 +695,8 @@ namespace vayu {
                 if (d == 0.0) runtimeError("modulo by zero");
                 double m = std::fmod(l.asDouble(), d);
                 if (m != 0 && ((m < 0) != (d < 0))) m += d;
-                if (l.isInt() && r.isInt()) push(Value((long long)m));
-                else                        push(Value(m));
+                if (l.isInt() && r.isInt()) stack_.emplace_back((long long)m);
+                else                        stack_.emplace_back(m);
                 return;
             }
             runtimeError("cannot apply '%' to " + l.typeName() + " and " + r.typeName());
@@ -642,9 +707,9 @@ namespace vayu {
                 if (l.isInt() && r.isInt() && r.asInt() >= 0) {
                     long long base = l.asInt(), exp = r.asInt(), acc = 1;
                     while (exp--) acc *= base;
-                    push(Value(acc)); return;
+                    stack_.emplace_back(acc); return;
                 }
-                push(Value(std::pow(l.asDouble(), r.asDouble()))); return;
+                stack_.emplace_back(std::pow(l.asDouble(), r.asDouble())); return;
             }
             runtimeError("cannot apply '**' to " + l.typeName() + " and " + r.typeName());
         }
@@ -653,7 +718,9 @@ namespace vayu {
         }
     }
 
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
+    // Equality helper (used by IN, and by doComparison)
+    // ===========================================================================
 
     static bool valueEqualsVM(const Value& a, const Value& b) {
         if (a.isNumber() && b.isNumber()) return a.asDouble() == b.asDouble();
@@ -662,16 +729,21 @@ namespace vayu {
         if (a.isNone() && b.isNone())   return true;
         if (a.isInstance() && b.isInstance()) return a.asInstance() == b.asInstance();
         if (a.isList() && b.isList()) return a.asList() == b.asList();
+        if (a.isMap() && b.isMap())  return a.asMap() == b.asMap();
         return false;
     }
 
+    // ===========================================================================
+    // Comparison
+    // ===========================================================================
+
     void VM::doComparison(int opcode) {
-        Value r = pop();
-        Value l = pop();
+        Value r = std::move(stack_.back()); stack_.pop_back();
+        Value l = std::move(stack_.back()); stack_.pop_back();
         OpCode op = static_cast<OpCode>(opcode);
 
-        if (op == OpCode::EQ) { push(Value(valueEqualsVM(l, r))); return; }
-        if (op == OpCode::NEQ) { push(Value(!valueEqualsVM(l, r))); return; }
+        if (op == OpCode::EQ) { stack_.emplace_back(valueEqualsVM(l, r)); return; }
+        if (op == OpCode::NEQ) { stack_.emplace_back(!valueEqualsVM(l, r)); return; }
 
         bool res = false;
         if (l.isNumber() && r.isNumber()) {
@@ -697,7 +769,7 @@ namespace vayu {
         else {
             runtimeError("cannot compare " + l.typeName() + " and " + r.typeName());
         }
-        push(Value(res));
+        stack_.emplace_back(res);
     }
 
 } // namespace vayu
