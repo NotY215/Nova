@@ -23,12 +23,7 @@ static std::string readFile(const std::string& path) {
 
 static void usage() {
     std::fprintf(stderr,
-        "usage: novac <file.nova> [--run | --check | --dump-tokens | --dump-ast | --no-check]\n"
-        "       --run         type-check then execute (default)\n"
-        "       --check       type-check only, do not execute\n"
-        "       --no-check    run without static type checking\n"
-        "       --dump-tokens print lexer output\n"
-        "       --dump-ast    print parsed AST\n");
+        "usage: novac <file.nova> [--run | --check | --dump-tokens | --dump-ast | --no-check]\n");
 }
 
 int main(int argc, char** argv) {
@@ -86,7 +81,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Type-check (unless skipped)
     if (!skipCheck) {
         try {
             nova::TypeChecker checker;
@@ -104,10 +98,16 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Execute
     try {
         nova::Interpreter interp;
         interp.run(program);
+    }
+    catch (const nova::NovaException& e) {
+        std::fprintf(stderr, "%s:%d:%d: uncaught %s: %s\n",
+            file.c_str(), e.loc.line, e.loc.column,
+            nova::Interpreter::exceptionTypeName(e.value).c_str(),
+            nova::Interpreter::exceptionMessage(e.value).c_str());
+        return 1;
     }
     catch (const nova::RuntimeError& e) {
         std::fprintf(stderr, "%s:%d:%d: runtime error: %s\n",

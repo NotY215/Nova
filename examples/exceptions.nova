@@ -1,0 +1,127 @@
+try:
+    print("before")
+    raise ValueError("something went wrong")
+    print("never reached")
+except ValueError as e:
+    print("caught:", e.message)
+
+def risky(mode: str) -> None:
+    if mode == "a":
+        raise ValueError("bad value")
+    if mode == "b":
+        raise TypeError("bad type")
+    if mode == "c":
+        raise RuntimeError("runtime error")
+    print("no error")
+
+try:
+    risky("a")
+except ValueError as e:
+    print("ValueError:", e.message)
+except TypeError as e:
+    print("TypeError:", e.message)
+
+try:
+    risky("b")
+except ValueError as e:
+    print("ValueError:", e.message)
+except TypeError as e:
+    print("TypeError:", e.message)
+
+try:
+    risky("c")
+except ValueError as e:
+    print("ValueError:", e.message)
+except TypeError as e:
+    print("TypeError:", e.message)
+except RuntimeError as e:
+    print("RuntimeError:", e.message)
+
+try:
+    raise ValueError("handled by bare except")
+except:
+    print("caught by bare except")
+
+def with_finally() -> None:
+    try:
+        print("try block")
+        raise ValueError("oops")
+    except ValueError:
+        print("handler")
+    finally:
+        print("finally always runs")
+
+with_finally()
+
+def cleanup_test() -> None:
+    try:
+        print("doing work")
+    finally:
+        print("cleanup")
+
+cleanup_test()
+
+try:
+    try:
+        raise ValueError("inner")
+    finally:
+        print("inner finally")
+except ValueError:
+    print("outer caught")
+
+try:
+    raise ValueError("specific")
+except Exception as e:
+    print("caught by base:", e.message)
+
+try:
+    raise ZeroDivisionError("div by zero")
+except Exception as e:
+    print("caught zero div:", e.message)
+
+try:
+    x = 1 / 0
+except Exception as e:
+    print("caught division error")
+
+try:
+    lst = [1, 2, 3]
+    y = lst[99]
+except Exception as e:
+    print("caught index error")
+
+def reraise() -> None:
+    try:
+        raise ValueError("original")
+    except ValueError:
+        print("first catch")
+        raise
+
+try:
+    reraise()
+except ValueError as e:
+    print("caught re-raised:", e.message)
+
+for i in range(5):
+    try:
+        if i == 3:
+            raise ValueError("three!")
+        print("i =", i)
+    except ValueError as e:
+        print("skipping:", e.message)
+
+try:
+    try:
+        raise ValueError("inner")
+    except ValueError as e:
+        print("inner caught:", e.message)
+        raise TypeError("from inner")
+except TypeError as e:
+    print("outer caught:", e.message)
+
+try:
+    raise "plain string error"
+except Exception as e:
+    print("wrapped:", e.message)
+
+print("done")

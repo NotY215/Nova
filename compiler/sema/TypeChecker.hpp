@@ -53,6 +53,7 @@ namespace nova {
 
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
         void installBuiltins();
+        void installBuiltinExceptions();
     };
 
 } // namespace nova

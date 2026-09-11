@@ -14,11 +14,12 @@ namespace nova {
     struct ClassObject;
     struct ListValue;
     struct MapValue;
+    struct ModuleValue;
     struct StructInstance;
     struct Callable;
 
     // ===========================================================================
-    // Value  (tagged union over all runtime types)
+    // Value
     // ===========================================================================
 
     class Value {
@@ -28,11 +29,12 @@ namespace nova {
         using ClassPtr = std::shared_ptr<ClassObject>;
         using ListPtr = std::shared_ptr<ListValue>;
         using MapPtr = std::shared_ptr<MapValue>;
+        using ModulePtr = std::shared_ptr<ModuleValue>;
 
         using Storage = std::variant<
             std::monostate,
             bool, long long, double, std::string,
-            FnPtr, InstPtr, ClassPtr, ListPtr, MapPtr
+            FnPtr, InstPtr, ClassPtr, ListPtr, MapPtr, ModulePtr
         >;
         Storage data_;
 
@@ -49,6 +51,7 @@ namespace nova {
         Value(ClassPtr c) : data_(std::move(c)) {}
         Value(ListPtr l) : data_(std::move(l)) {}
         Value(MapPtr  m) : data_(std::move(m)) {}
+        Value(ModulePtr m) : data_(std::move(m)) {}
 
         bool isNone()     const { return std::holds_alternative<std::monostate>(data_); }
         bool isBool()     const { return std::holds_alternative<bool>(data_); }
@@ -61,16 +64,18 @@ namespace nova {
         bool isClass()    const { return std::holds_alternative<ClassPtr>(data_); }
         bool isList()     const { return std::holds_alternative<ListPtr>(data_); }
         bool isMap()      const { return std::holds_alternative<MapPtr>(data_); }
+        bool isModule()   const { return std::holds_alternative<ModulePtr>(data_); }
 
         bool               asBool()   const { return std::get<bool>(data_); }
         long long          asInt()    const { return std::get<long long>(data_); }
         double             asFloat()  const { return std::get<double>(data_); }
         const std::string& asString() const { return std::get<std::string>(data_); }
-        FnPtr    asCallable() const { return std::get<FnPtr>(data_); }
-        InstPtr  asInstance() const { return std::get<InstPtr>(data_); }
-        ClassPtr asClass()    const { return std::get<ClassPtr>(data_); }
-        ListPtr  asList()     const { return std::get<ListPtr>(data_); }
-        MapPtr   asMap()      const { return std::get<MapPtr>(data_); }
+        FnPtr     asCallable() const { return std::get<FnPtr>(data_); }
+        InstPtr   asInstance() const { return std::get<InstPtr>(data_); }
+        ClassPtr  asClass()    const { return std::get<ClassPtr>(data_); }
+        ListPtr   asList()     const { return std::get<ListPtr>(data_); }
+        MapPtr    asMap()      const { return std::get<MapPtr>(data_); }
+        ModulePtr asModule()   const { return std::get<ModulePtr>(data_); }
 
         double      asDouble() const { return isInt() ? (double)asInt() : asFloat(); }
         bool        truthy()   const;
@@ -95,6 +100,11 @@ namespace nova {
         std::unordered_map<std::string, Value> entries;
     };
 
+    struct ModuleValue {
+        std::string                            name;
+        std::unordered_map<std::string, Value> members;
+    };
+
     struct ClassObject {
         std::string                  name;
         std::vector<std::string>     fieldOrder;
@@ -102,8 +112,7 @@ namespace nova {
     };
 
     // ===========================================================================
-    // Callables (native builtins, user defs, bound methods, class ctors,
-    //            list methods, map methods)
+    // Callables
     // ===========================================================================
 
     using NativeFnPtr = Value(*)(const std::vector<Value>&);
@@ -117,6 +126,7 @@ namespace nova {
             SuperMethod,
             ListMethod,
             MapMethod,
+            StringMethod,
         } kind = Kind::Native;
 
         std::string name;
@@ -137,9 +147,10 @@ namespace nova {
         std::shared_ptr<Callable>       methodFn;
         std::shared_ptr<ClassObject>    superParent;
 
-        // ListMethod / MapMethod
+        // ListMethod / MapMethod / StringMethod
         std::shared_ptr<ListValue> boundList;
         std::shared_ptr<MapValue>  boundMap;
+        std::string                boundStr;
     };
 
 } // namespace nova

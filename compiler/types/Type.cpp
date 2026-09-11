@@ -122,12 +122,26 @@ namespace nova {
         if (to->kind == TypeKind::Named && from->kind == TypeKind::Named)
             return to->name == from->name;
 
-        // Collections: invariant (both element types must match exactly).
-        if (to->kind == TypeKind::List && from->kind == TypeKind::List)
-            return to->params[0]->equals(from->params[0]);
-        if (to->kind == TypeKind::Map && from->kind == TypeKind::Map)
-            return to->params[0]->equals(from->params[0]) &&
-            to->params[1]->equals(from->params[1]);
+        // Collections: element types must match, EXCEPT when either side's
+        // element type is Any (e.g. an empty list literal `[]` starts as
+        // list<any> and unifies with any concrete list type).
+        if (to->kind == TypeKind::List && from->kind == TypeKind::List) {
+            TypePtr a = to->params.empty() ? Types::Any() : to->params[0];
+            TypePtr b = from->params.empty() ? Types::Any() : from->params[0];
+            if (a->kind == TypeKind::Any || b->kind == TypeKind::Any) return true;
+            return a->equals(b);
+        }
+        if (to->kind == TypeKind::Map && from->kind == TypeKind::Map) {
+            TypePtr aK = to->params.size() > 0 ? to->params[0] : Types::Any();
+            TypePtr aV = to->params.size() > 1 ? to->params[1] : Types::Any();
+            TypePtr bK = from->params.size() > 0 ? from->params[0] : Types::Any();
+            TypePtr bV = from->params.size() > 1 ? from->params[1] : Types::Any();
+            bool keyOK = (aK->kind == TypeKind::Any || bK->kind == TypeKind::Any)
+                ? true : aK->equals(bK);
+            bool valOK = (aV->kind == TypeKind::Any || bV->kind == TypeKind::Any)
+                ? true : aV->equals(bV);
+            return keyOK && valOK;
+        }
 
         return to->equals(from);
     }

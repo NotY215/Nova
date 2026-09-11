@@ -137,8 +137,7 @@ namespace nova {
                 prExpr(n->entries[i].key.get(), childPrefix(ep, false), true);
                 putLabel(ep, true, "value");
                 prExpr(n->entries[i].value.get(), childPrefix(ep, true), true);
-            }
-            break;
+            } break;
         }
         case ExprKind::GenericType: {
             auto* n = static_cast<const GenericTypeExpr*>(e);
@@ -147,8 +146,7 @@ namespace nova {
                 if (i) s += ", ";
                 if (n->typeArgs[i]->kind == ExprKind::NameRef)
                     s += static_cast<const NameRefExpr*>(n->typeArgs[i].get())->name;
-                else if (n->typeArgs[i]->kind == ExprKind::GenericType)
-                    s += "...";
+                else if (n->typeArgs[i]->kind == ExprKind::GenericType) s += "...";
                 else s += "?";
             }
             s += ">)";
@@ -244,8 +242,7 @@ namespace nova {
                 lbl += n->params[i].name;
                 if (n->params[i].type && n->params[i].type->kind == ExprKind::NameRef)
                     lbl += ": " + static_cast<const NameRefExpr*>(n->params[i].type.get())->name;
-                else if (n->params[i].type)
-                    lbl += ": <type>";
+                else if (n->params[i].type) lbl += ": <type>";
             }
             lbl += ")";
             if (n->returnType && n->returnType->kind == ExprKind::NameRef)
@@ -286,6 +283,38 @@ namespace nova {
             }
             for (auto& m : n->methods)
                 putLabel(cp, ++idx == total, "method " + m->name);
+            break;
+        }
+        case StmtKind::Try: {
+            auto* n = static_cast<const TryStmt*>(s);
+            putLabel(prefix, isLast, "Try");
+            std::string cp = childPrefix(prefix, isLast);
+            size_t total = 1 + n->handlers.size() + (n->finallyBody ? 1 : 0);
+            size_t idx = 0;
+            bool bodyLast = (idx + 1 == total); ++idx;
+            putLabel(cp, bodyLast, "body");
+            prBlock(n->tryBody, childPrefix(cp, bodyLast));
+            for (auto& h : n->handlers) {
+                bool hl = (idx + 1 == total); ++idx;
+                std::string hdr = "except";
+                if (h.exceptionType && h.exceptionType->kind == ExprKind::NameRef)
+                    hdr += " " + static_cast<const NameRefExpr*>(h.exceptionType.get())->name;
+                else if (h.exceptionType) hdr += " <type>";
+                if (!h.varName.empty()) hdr += " as " + h.varName;
+                putLabel(cp, hl, hdr);
+                prBlock(h.body, childPrefix(cp, hl));
+            }
+            if (n->finallyBody) {
+                putLabel(cp, true, "finally");
+                prBlock(*n->finallyBody, childPrefix(cp, true));
+            }
+            break;
+        }
+        case StmtKind::Raise: {
+            auto* n = static_cast<const RaiseStmt*>(s);
+            putLabel(prefix, isLast, n->exception ? "Raise" : "Raise (re-raise)");
+            if (n->exception)
+                prExpr(n->exception.get(), childPrefix(prefix, isLast), true);
             break;
         }
         case StmtKind::Pass:     putLabel(prefix, isLast, "Pass"); break;

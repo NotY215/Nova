@@ -41,6 +41,8 @@ namespace nova {
         StmtPtr  parseReturn();
         StmtPtr  parseStruct();
         StmtPtr  parseClass();
+        StmtPtr  parseTry();
+        StmtPtr  parseRaise();
         StmtPtr  parseAnnotatedAssign();
         StmtPtr  parseExprOrAssign();
         Param    parseParam();
@@ -54,9 +56,6 @@ namespace nova {
         ExprPtr  parseListLit();
         ExprPtr  parseMapLit();
         CallArg  parseCallArg();
-
-        /// Parse a type annotation. Handles "int", "list<int>", "map<str,int>",
-        /// and nested generics. Returns NameRefExpr or GenericTypeExpr.
         ExprPtr  parseTypeExpr();
     };
 

@@ -17,7 +17,7 @@ namespace nova {
         Unary, Binary, Grouping,
         Call, Attr, Index,
         ListLit, MapLit,
-        GenericType,     // "list<int>", "map<str, int>"  (type-expr only)
+        GenericType,
     };
 
     enum class BinOp {
@@ -113,7 +113,6 @@ namespace nova {
         }
     };
 
-    // --- collections ---
     struct ListLitExpr : Expr {
         std::vector<ExprPtr> elements;
         explicit ListLitExpr(SourceLocation l) : Expr(ExprKind::ListLit, l) {}
@@ -125,10 +124,9 @@ namespace nova {
         explicit MapLitExpr(SourceLocation l) : Expr(ExprKind::MapLit, l) {}
     };
 
-    // --- generic type expression, used only inside type annotations ---
     struct GenericTypeExpr : Expr {
-        std::string          name;      // "list", "map", or user-defined
-        std::vector<ExprPtr> typeArgs;  // element types / key+value types
+        std::string          name;
+        std::vector<ExprPtr> typeArgs;
         GenericTypeExpr(std::string n, SourceLocation l)
             : Expr(ExprKind::GenericType, l), name(std::move(n)) {
         }
@@ -146,6 +144,7 @@ namespace nova {
         Expr, Assign, AnnotAssign,
         If, While, Def, Return,
         Struct, Class, For,
+        Try, Raise,
         Pass, Break, Continue,
     };
 
@@ -231,14 +230,36 @@ namespace nova {
         }
     };
 
-    // --- for loop ---
     struct ForStmt : Stmt {
-        std::string targetName;   // loop variable
-        ExprPtr     iterable;     // list, map, or str
+        std::string targetName;
+        ExprPtr     iterable;
         Block       body;
         ForStmt(std::string t, ExprPtr it, Block b, SourceLocation l)
             : Stmt(StmtKind::For, l),
             targetName(std::move(t)), iterable(std::move(it)), body(std::move(b)) {
+        }
+    };
+
+    // --- try / except / finally ---
+    struct ExceptClause {
+        ExprPtr     exceptionType;   // may be null (bare `except:`)
+        std::string varName;         // empty if no `as e`
+        Block       body;
+    };
+
+    struct TryStmt : Stmt {
+        Block                     tryBody;
+        std::vector<ExceptClause> handlers;
+        std::optional<Block>      finallyBody;
+        TryStmt(Block tb, SourceLocation l)
+            : Stmt(StmtKind::Try, l), tryBody(std::move(tb)) {
+        }
+    };
+
+    struct RaiseStmt : Stmt {
+        ExprPtr exception;   // may be null (bare `raise` = re-raise)
+        RaiseStmt(ExprPtr e, SourceLocation l)
+            : Stmt(StmtKind::Raise, l), exception(std::move(e)) {
         }
     };
 

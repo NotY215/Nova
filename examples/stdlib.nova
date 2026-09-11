@@ -1,0 +1,88 @@
+# ---- String methods ----
+s = "  Hello, World  "
+print(s.strip())                    # Hello, World
+print(s.strip().lower())            # hello, world
+print(s.strip().upper())            # HELLO, WORLD
+
+print("a,b,c".split(","))           # ["a", "b", "c"]
+print("one two three".split())      # ["one", "two", "three"]
+print("-".join(["x", "y", "z"]))    # x-y-z
+print("hello".replace("l", "L"))    # heLLo
+print("hello world".find("world"))  # 6
+print("hello world".find("xyz"))    # -1
+print("hello".contains("ell"))      # true
+print("file.txt".starts_with("file"))  # true
+print("file.txt".ends_with(".txt"))    # true
+
+print("12345".is_digit())           # true
+print("abcde".is_alpha())           # true
+print("   ".is_space())             # true
+print("abc".char_at(1))             # b
+
+print("hello"[0])                   # h
+print("hello"[-1])                  # o
+print(len("hello"))                 # 5
+
+# ---- ord / chr ----
+print(ord("A"))                     # 65
+print(chr(66))                      # B
+print(chr(ord("A") + 1))            # B
+
+# ---- list(string) ----
+print(list("abc"))                  # ["a", "b", "c"]
+
+# ---- math module ----
+print(math.sqrt(16))                # 4.0
+print(math.floor(3.7))              # 3
+print(math.ceil(3.2))               # 4
+print(abs(-5))                      # 5
+
+print(math.sin(0))                  # 0.0
+print(math.cos(0))                  # 1.0
+print(math.exp(0))                  # 1.0
+print(math.log(math.e))             # 1.0 (approximately)
+print(math.log10(100))              # 2.0
+print(math.log2(8))                 # 3.0
+
+# ---- pi / e ----
+print(math.pi > 3.14)               # true
+print(math.e > 2.71)                # true
+print(math.pi < 3.15)               # true
+
+# ---- chained: practical example ----
+text = "The quick brown fox jumps over the lazy dog"
+words = text.lower().split()
+print(len(words))                   # 9
+print(words[0])                     # the
+print(words[-1])                    # dog
+
+# word count
+counts = {}
+for w in words:
+    if w in counts:
+        counts[w] = counts[w] + 1
+    else:
+        counts[w] = 1
+print(counts["the"])                # 2
+
+# ---- reversing a string with slicing-like loop ----
+rev = ""
+for c in "nova":
+    rev = c + rev
+print(rev)                          # avon
+
+# ---- building a string from numbers ----
+parts = []
+for i in range(5):
+    parts.append(str(i * i))
+print(",".join(parts))              # 0,1,4,9,16
+
+# ---- using methods on a class field ----
+class Person:
+    name: str
+    def __init__(self, name: str) -> None:
+        self.name = name
+    def greeting(self) -> str:
+        return "Hello, " + self.name.upper() + "!"
+
+print(Person("alice").greeting())   # Hello, ALICE!

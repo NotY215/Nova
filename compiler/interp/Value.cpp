@@ -21,7 +21,7 @@ namespace nova {
         if (isString()) return !asString().empty();
         if (isList())   return !asList()->items.empty();
         if (isMap())    return !asMap()->entries.empty();
-        return true;
+        return true;   // modules, classes, functions, instances always truthy
     }
 
     std::string Value::toString() const {
@@ -32,6 +32,7 @@ namespace nova {
         if (isString()) return asString();
         if (isCallable()) return "<function " + asCallable()->name + ">";
         if (isClass())  return "<class " + asClass()->name + ">";
+        if (isModule()) return "<module " + asModule()->name + ">";
 
         if (isList()) {
             std::string out = "[";
@@ -57,7 +58,6 @@ namespace nova {
             out += "}";
             return out;
         }
-
         if (isInstance()) {
             auto s = asInstance();
             std::string out = s->cls ? s->cls->name : "?";
@@ -101,6 +101,7 @@ namespace nova {
         if (isClass())    return asClass()->name;
         if (isList())     return "list";
         if (isMap())      return "map";
+        if (isModule())   return "module";
         return "?";
     }
 
