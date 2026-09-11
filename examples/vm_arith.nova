@@ -1,0 +1,40 @@
+print(1 + 2)
+print(10 - 3)
+print(4 * 5)
+print(7 / 2)
+print(7 // 2)
+print(7 % 3)
+print(2 ** 10)
+print(-5)
+print(- -5)
+
+print(1 + 2 * 3)
+print((1 + 2) * 3)
+
+print(2 < 3)
+print(2 > 3)
+print(2 <= 2)
+print(3 >= 4)
+print(1 == 1)
+print(1 != 2)
+
+print(true and false)
+print(true or false)
+print(not true)
+print(not false)
+
+print(1 < 5 and 5 < 10)
+print(1 > 5 or 5 < 10)
+
+print("hello" + " " + "world")
+print("ha" * 3)
+
+a = 10
+b = 20
+c = a + b
+print(c)
+
+a = a + 5
+print(a)
+
+print(2 ** 3 ** 2)

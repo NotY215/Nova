@@ -3,6 +3,8 @@
 #include "ast/Ast.hpp"
 #include "sema/TypeChecker.hpp"
 #include "interp/Interpreter.hpp"
+#include "compile/Compiler.hpp"
+#include "vm/VM.hpp"
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -16,14 +18,20 @@
 static std::string readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return {};
-    std::stringstream ss;
-    ss << in.rdbuf();
+    std::stringstream ss; ss << in.rdbuf();
     return ss.str();
 }
 
 static void usage() {
     std::fprintf(stderr,
-        "usage: novac <file.nova> [--run | --check | --dump-tokens | --dump-ast | --no-check]\n");
+        "usage: novac <file.nova> [--run | --check | --dump-tokens | --dump-ast | --dump-bytecode]\n"
+        "       --run            type-check then execute (default)\n"
+        "       --check          type-check only\n"
+        "       --dump-tokens    print lexer output\n"
+        "       --dump-ast       print parsed AST\n"
+        "       --dump-bytecode  compile to bytecode and print disassembly\n"
+        "       --vm             run on the bytecode VM instead of the tree-walker\n"
+        "       --no-check       skip the type checker\n");
 }
 
 int main(int argc, char** argv) {
@@ -34,15 +42,18 @@ int main(int argc, char** argv) {
     if (argc < 2) { usage(); return 1; }
 
     std::string file = argv[1];
-    enum class Mode { Run, Check, DumpTokens, DumpAst } mode = Mode::Run;
+    enum class Mode { Run, Check, DumpTokens, DumpAst, DumpBytecode } mode = Mode::Run;
     bool skipCheck = false;
+    bool useVM = false;
 
     for (int i = 2; i < argc; ++i) {
-        if (!std::strcmp(argv[i], "--run"))         mode = Mode::Run;
-        else if (!std::strcmp(argv[i], "--check"))       mode = Mode::Check;
-        else if (!std::strcmp(argv[i], "--dump-tokens")) mode = Mode::DumpTokens;
-        else if (!std::strcmp(argv[i], "--dump-ast"))    mode = Mode::DumpAst;
-        else if (!std::strcmp(argv[i], "--no-check"))    skipCheck = true;
+        if (!std::strcmp(argv[i], "--run"))           mode = Mode::Run;
+        else if (!std::strcmp(argv[i], "--check"))         mode = Mode::Check;
+        else if (!std::strcmp(argv[i], "--dump-tokens"))   mode = Mode::DumpTokens;
+        else if (!std::strcmp(argv[i], "--dump-ast"))      mode = Mode::DumpAst;
+        else if (!std::strcmp(argv[i], "--dump-bytecode")) mode = Mode::DumpBytecode;
+        else if (!std::strcmp(argv[i], "--no-check"))      skipCheck = true;
+        else if (!std::strcmp(argv[i], "--vm"))            useVM = true;
         else { std::fprintf(stderr, "novac: unknown flag '%s'\n", argv[i]); return 1; }
     }
 
@@ -56,12 +67,10 @@ int main(int argc, char** argv) {
     auto tokens = lexer.tokenize();
 
     if (mode == Mode::DumpTokens) {
-        for (const auto& t : tokens) {
+        for (const auto& t : tokens)
             std::printf("%3d:%-3d  %-14s  %s\n",
                 t.location.line, t.location.column,
-                nova::tokenTypeName(t.type),
-                t.lexeme.c_str());
-        }
+                nova::tokenTypeName(t.type), t.lexeme.c_str());
         return 0;
     }
 
@@ -76,12 +85,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (mode == Mode::DumpAst) {
-        nova::printProgram(program);
-        return 0;
-    }
+    if (mode == Mode::DumpAst) { nova::printProgram(program); return 0; }
 
-    if (!skipCheck) {
+    if (!skipCheck && mode != Mode::DumpBytecode) {
         try {
             nova::TypeChecker checker;
             checker.check(program);
@@ -98,14 +104,60 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // Determine the source directory so that `import foo` finds `foo.nova`
-    // alongside the main file.
+    // ---- Bytecode dump mode ----
+    if (mode == Mode::DumpBytecode) {
+        nova::Chunk chunk;
+        try {
+            nova::Compiler c;
+            c.compile(program, chunk);
+        }
+        catch (const nova::CompileError& e) {
+            std::fprintf(stderr, "%s:%d:%d: compile error: %s\n",
+                file.c_str(), e.loc.line, e.loc.column, e.what());
+            return 1;
+        }
+        nova::disassemble(chunk, file.c_str());
+        return 0;
+    }
+
+    // Source directory for module resolution.
     std::string srcDir;
     {
         auto slash = file.find_last_of("/\\");
         if (slash != std::string::npos) srcDir = file.substr(0, slash + 1);
     }
 
+    // ---- Run on bytecode VM ----
+    if (useVM) {
+        nova::Chunk chunk;
+        try {
+            nova::Compiler c;
+            c.compile(program, chunk);
+        }
+        catch (const nova::CompileError& e) {
+            std::fprintf(stderr, "%s:%d:%d: VM compile error: %s\n",
+                file.c_str(), e.loc.line, e.loc.column, e.what());
+            return 1;
+        }
+        try {
+            nova::Interpreter interp;
+            interp.setSourceDir(srcDir);
+            nova::VM vm(interp.globals());
+            vm.run(chunk);
+        }
+        catch (const nova::VMRuntimeError& e) {
+            std::fprintf(stderr, "%s:%d: VM runtime error: %s\n",
+                file.c_str(), e.line, e.what());
+            return 1;
+        }
+        catch (const std::exception& e) {
+            std::fprintf(stderr, "%s: VM error: %s\n", file.c_str(), e.what());
+            return 1;
+        }
+        return 0;
+    }
+
+    // ---- Run on tree-walker (default) ----
     try {
         nova::Interpreter interp;
         interp.setSourceDir(srcDir);

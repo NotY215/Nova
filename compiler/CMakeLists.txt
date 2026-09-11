@@ -7,6 +7,10 @@ add_library(nova_compiler STATIC
     sema/TypeChecker.cpp
     interp/Value.cpp
     interp/Interpreter.cpp
+    bytecode/OpCode.cpp
+    bytecode/Chunk.cpp
+    compile/Compiler.cpp
+    vm/VM.cpp
 )
 target_include_directories(nova_compiler PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
