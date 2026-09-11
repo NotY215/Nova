@@ -63,6 +63,105 @@ namespace vayu {
         execBlock(program);
     }
 
+    void Interpreter::registerDeclarations(const Block& program) {
+        for (auto& s : program.stmts) {
+            if (s->kind == StmtKind::Struct)
+                registerStruct(static_cast<const StructStmt*>(s.get()));
+            if (s->kind == StmtKind::Class)
+                registerClass(static_cast<const ClassStmt*>(s.get()));
+        }
+    }
+
+    Value Interpreter::vmGetAttr(const Value& base, const std::string& name,
+        SourceLocation loc) {
+        // super-proxy branch (mirrors evalAttr)
+        if (base.isCallable() &&
+            base.asCallable()->kind == Callable::Kind::SuperMethod) {
+            auto sp = base.asCallable();
+            std::shared_ptr<ClassObject> dummy;
+            auto m = findMethod(sp->superParent, name, &dummy);
+            if (!m)
+                throw RuntimeError("parent class has no method '" + name + "'", loc);
+            auto bm = std::make_shared<Callable>();
+            bm->kind = Callable::Kind::BoundMethod;
+            bm->name = name;
+            bm->boundSelf = sp->boundSelf;
+            bm->methodFn = m;
+            bm->definingClass = dummy;
+            return Value(bm);
+        }
+        if (base.isModule()) {
+            auto mod = base.asModule();
+            auto it = mod->members.find(name);
+            if (it == mod->members.end())
+                throw RuntimeError("module '" + mod->name + "' has no member '" +
+                    name + "'", loc);
+            return it->second;
+        }
+        if (base.isString()) {
+            auto c = std::make_shared<Callable>();
+            c->kind = Callable::Kind::StringMethod;
+            c->name = name;
+            c->boundStr = base.asString();
+            return Value(c);
+        }
+        if (base.isList()) {
+            auto c = std::make_shared<Callable>();
+            c->kind = Callable::Kind::ListMethod;
+            c->name = name;
+            c->boundList = base.asList();
+            return Value(c);
+        }
+        if (base.isMap()) {
+            auto c = std::make_shared<Callable>();
+            c->kind = Callable::Kind::MapMethod;
+            c->name = name;
+            c->boundMap = base.asMap();
+            return Value(c);
+        }
+        if (!base.isInstance())
+            throw RuntimeError("cannot read '" + name + "' on value of type " +
+                base.typeName(), loc);
+        auto si = base.asInstance();
+        auto fit = si->fields.find(name);
+        if (fit != si->fields.end()) return fit->second;
+        if (si->cls) {
+            std::shared_ptr<ClassObject> defCls;
+            auto m = findMethod(si->cls, name, &defCls);
+            if (m) {
+                auto bm = std::make_shared<Callable>();
+                bm->kind = Callable::Kind::BoundMethod;
+                bm->name = name;
+                bm->boundSelf = si;
+                bm->methodFn = m;
+                bm->definingClass = defCls;
+                return Value(bm);
+            }
+        }
+        throw RuntimeError("type '" + (si->cls ? si->cls->name : "?") +
+            "' has no field or method '" + name + "'", loc);
+    }
+
+    void Interpreter::vmSetAttr(const Value& base, const std::string& name,
+        const Value& v, SourceLocation loc) {
+        if (!base.isInstance())
+            throw RuntimeError("cannot set field '" + name + "' on value of type " +
+                base.typeName(), loc);
+        base.asInstance()->fields[name] = v;
+    }
+
+    Value Interpreter::vmNewInst(const std::string& className,
+        const std::vector<Value>& args,
+        SourceLocation loc) {
+        auto it = classes_.find(className);
+        if (it == classes_.end())
+            throw RuntimeError("unknown struct or class '" + className + "'", loc);
+        std::vector<std::pair<std::string, Value>> kwargs;
+        kwargs.reserve(args.size());
+        for (auto& a : args) kwargs.emplace_back("", a);
+        return constructInstance(it->second, kwargs, loc);
+    }
+
     void Interpreter::registerStruct(const StructStmt* d) {
         auto c = std::make_shared<ClassObject>();
         c->name = d->name;

@@ -3,6 +3,9 @@
 #include "bytecode/Chunk.hpp"
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace vayu {
 
@@ -18,21 +21,45 @@ namespace vayu {
         void compile(const Block& program, Chunk& out);
 
     private:
-        Chunk* chunk_ = nullptr;
+        struct ClassInfo {
+            std::string              parentName;
+            std::vector<std::string> ownFields;      // declared directly
+            std::vector<std::string> allFields;      // own + inherited
+            std::vector<std::string> initParams;     // excludes `self`
+            bool                     hasInit = false;
+        };
 
+        Chunk* chunk_ = nullptr;
+        std::unordered_map<std::string, ClassInfo> classInfo_;
+
+        // declaration pre-pass
+        void collectDeclarations(const Block& program);
+        void resolveAllFields();
+        std::vector<std::string> resolveFields(const std::string& name,
+            std::unordered_set<std::string>& visiting);
+
+        // statements
         void compileStmt(const Stmt* s);
         void compileBlock(const Block& b);
-        void compileExpr(const Expr* e);
-
         void compileIf(const IfStmt* n);
         void compileWhile(const WhileStmt* n);
         void compileFor(const ForStmt* n);
         void compileDef(const DefStmt* n);
         void compileReturn(const ReturnStmt* n);
 
+        // expressions
+        void compileExpr(const Expr* e);
+        void compileAttrGet(const AttrExpr* a, int line);
+        void compileCall(const CallExpr* c, int line);
+        void compileAssignAttr(const AttrExpr* target, const Expr* value, int line);
+
+        // helpers
         size_t emitJump(OpCode op, int line);
         void   patchJump(size_t operandPos, size_t target);
         void   emitLoop(size_t loopStart, int line);
+        void   emitNameU16(OpCode op, const std::string& name, int line);
+        void   emitNameU16WithCount(OpCode op, const std::string& name,
+            uint8_t count, int line);
 
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
     };

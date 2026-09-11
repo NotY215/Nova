@@ -39,6 +39,12 @@ namespace vayu {
 // ---- Lists ----
 LIST_NEW,           // <count:u16>    pop count elems, push list
 
+// ---- Structs & classes (Phase 4C) ----
+NEW_INSTANCE,       // <nameIdx:u16> <argc:u8>   pop argc, push instance
+ATTR_GET,           // <nameIdx:u16>              pop base, push attr
+ATTR_SET,           // <nameIdx:u16>              pop value, pop base
+SUPER,              // (no operands)              push super proxy
+
 // ---- Functions ----
 MAKE_FN,            // <idx:u16>      push Callable for functions[idx],
 //                closure = current env

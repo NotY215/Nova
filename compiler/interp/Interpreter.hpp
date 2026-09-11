@@ -32,6 +32,19 @@ namespace vayu {
         Value callValue(const Value& callee, const std::vector<Value>& args,
             SourceLocation loc);
         std::shared_ptr<Environment> globals() const { return globals_; }
+        /// Register top-level struct / class declarations without executing
+        /// the program.  Called by the driver before running on the VM.
+        void registerDeclarations(const Block& program);
+
+        // ---- Phase 4C: hooks for the bytecode VM ----
+        // These mirror the logic of the tree-walking evaluator's attr lookup,
+        // instance construction, and method dispatch, but operate on
+        // pre-evaluated values.
+        Value vmGetAttr(const Value& base, const std::string& name, SourceLocation loc);
+        void  vmSetAttr(const Value& base, const std::string& name,
+            const Value& v, SourceLocation loc);
+        Value vmNewInst(const std::string& className,
+            const std::vector<Value>& args, SourceLocation loc);
 
         /// Directory to search first when resolving module imports.
         /// Should include a trailing separator.  Empty means "current directory".

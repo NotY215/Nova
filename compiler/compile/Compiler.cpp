@@ -2,8 +2,14 @@
 
 namespace vayu {
 
+    // ===========================================================================
+    // Entry
+    // ===========================================================================
+
     void Compiler::compile(const Block& program, Chunk& out) {
         chunk_ = &out;
+        collectDeclarations(program);
+        resolveAllFields();
         compileBlock(program);
         chunk_->emitOp(OpCode::NONE, 0);
         chunk_->emitOp(OpCode::RETURN_V, 0);
@@ -13,6 +19,62 @@ namespace vayu {
     [[noreturn]] void Compiler::error(SourceLocation loc, const std::string& msg) {
         throw CompileError(msg, loc);
     }
+
+    // ===========================================================================
+    // Declaration pre-pass
+    // ===========================================================================
+
+    void Compiler::collectDeclarations(const Block& program) {
+        for (auto& s : program.stmts) {
+            if (s->kind == StmtKind::Struct) {
+                auto* d = static_cast<const StructStmt*>(s.get());
+                ClassInfo info;
+                for (auto& f : d->fields) info.ownFields.push_back(f.name);
+                classInfo_[d->name] = std::move(info);
+            }
+            else if (s->kind == StmtKind::Class) {
+                auto* d = static_cast<const ClassStmt*>(s.get());
+                ClassInfo info;
+                info.parentName = d->parentName;
+                for (auto& f : d->fields) info.ownFields.push_back(f.name);
+                for (auto& m : d->methods) {
+                    if (m->name == "__init__") {
+                        info.hasInit = true;
+                        for (size_t i = 1; i < m->params.size(); ++i)
+                            info.initParams.push_back(m->params[i].name);
+                        break;
+                    }
+                }
+                classInfo_[d->name] = std::move(info);
+            }
+        }
+    }
+
+    std::vector<std::string> Compiler::resolveFields(
+        const std::string& name, std::unordered_set<std::string>& visiting) {
+        auto it = classInfo_.find(name);
+        if (it == classInfo_.end()) return {};
+        if (visiting.count(name)) return {};   // cycle; type checker catches this
+        visiting.insert(name);
+        std::vector<std::string> result;
+        if (!it->second.parentName.empty()) {
+            result = resolveFields(it->second.parentName, visiting);
+        }
+        for (auto& f : it->second.ownFields) result.push_back(f);
+        visiting.erase(name);
+        return result;
+    }
+
+    void Compiler::resolveAllFields() {
+        for (auto& [name, info] : classInfo_) {
+            std::unordered_set<std::string> visiting;
+            info.allFields = resolveFields(name, visiting);
+        }
+    }
+
+    // ===========================================================================
+    // Emit helpers
+    // ===========================================================================
 
     size_t Compiler::emitJump(OpCode op, int line) {
         chunk_->emitOp(op, line);
@@ -32,9 +94,25 @@ namespace vayu {
         chunk_->patchJump(pos, (int)loopStart, line);
     }
 
-    // ---------------------------------------------------------------------------
+    void Compiler::emitNameU16(OpCode op, const std::string& name, int line) {
+        chunk_->emitOp(op, line);
+        int idx = chunk_->addName(name);
+        chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
+        chunk_->emit((uint8_t)(idx & 0xFF), line);
+    }
+
+    void Compiler::emitNameU16WithCount(OpCode op, const std::string& name,
+        uint8_t count, int line) {
+        chunk_->emitOp(op, line);
+        int idx = chunk_->addName(name);
+        chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
+        chunk_->emit((uint8_t)(idx & 0xFF), line);
+        chunk_->emit(count, line);
+    }
+
+    // ===========================================================================
     // Statements
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
 
     void Compiler::compileBlock(const Block& b) {
         for (auto& s : b.stmts) compileStmt(s.get());
@@ -54,26 +132,26 @@ namespace vayu {
 
         case StmtKind::Assign: {
             auto* n = static_cast<const AssignStmt*>(s);
-            if (n->target->kind != ExprKind::NameRef)
-                error(n->target->loc,
-                    "VM mode: only simple-name assignment is supported in 4B");
-            const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
-            compileExpr(n->value.get());
-            chunk_->emitOp(OpCode::DEFINE, line);
-            int idx = chunk_->addName(nm->name);
-            chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
-            chunk_->emit((uint8_t)(idx & 0xFF), line);
-            return;
+            if (n->target->kind == ExprKind::NameRef) {
+                const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
+                compileExpr(n->value.get());
+                emitNameU16(OpCode::DEFINE, nm->name, line);
+                return;
+            }
+            if (n->target->kind == ExprKind::Attr) {
+                compileAssignAttr(static_cast<const AttrExpr*>(n->target.get()),
+                    n->value.get(), line);
+                return;
+            }
+            error(n->target->loc,
+                "VM mode: unsupported assignment target");
         }
 
         case StmtKind::AnnotAssign: {
             auto* n = static_cast<const AnnotAssignStmt*>(s);
             if (n->value) compileExpr(n->value.get());
             else          chunk_->emitOp(OpCode::NONE, line);
-            chunk_->emitOp(OpCode::DEFINE, line);
-            int idx = chunk_->addName(n->name);
-            chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
-            chunk_->emit((uint8_t)(idx & 0xFF), line);
+            emitNameU16(OpCode::DEFINE, n->name, line);
             return;
         }
 
@@ -83,36 +161,43 @@ namespace vayu {
         case StmtKind::Def:    compileDef(static_cast<const DefStmt*>(s));    return;
         case StmtKind::Return: compileReturn(static_cast<const ReturnStmt*>(s)); return;
 
-        case StmtKind::Pass:
-            return;
+        case StmtKind::Pass: return;
 
         case StmtKind::Break:
             error(s->loc, "VM mode: break not yet implemented");
-
         case StmtKind::Continue:
             error(s->loc, "VM mode: continue not yet implemented");
 
         case StmtKind::Struct:
         case StmtKind::Class:
-            error(s->loc, "VM mode: classes and structs arrive in 4E");
+            // Registered at compile time via classInfo_; runtime does not
+            // need to execute anything for a declaration.
+            return;
 
         case StmtKind::Try:
         case StmtKind::Raise:
-            error(s->loc, "VM mode: exceptions arrive in 4G");
+            error(s->loc, "VM mode: exceptions arrive in a later sub-phase");
 
         case StmtKind::Import:
         case StmtKind::FromImport:
-            error(s->loc, "VM mode: modules arrive in 4H");
+            error(s->loc, "VM mode: modules not yet supported");
         }
     }
 
-    // ---------------------------------------------------------------------------
+    void Compiler::compileAssignAttr(const AttrExpr* target, const Expr* value,
+        int line) {
+        // Stack layout: [obj, value] then ATTR_SET pops value, pops obj
+        compileExpr(target->target.get());
+        compileExpr(value);
+        emitNameU16(OpCode::ATTR_SET, target->name, line);
+    }
+
+    // ===========================================================================
     // Functions
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
 
     void Compiler::compileDef(const DefStmt* n) {
         int line = n->loc.line;
-
         auto fnChunk = std::make_shared<Chunk>();
         for (auto& p : n->params) fnChunk->paramNames.push_back(p.name);
 
@@ -120,8 +205,6 @@ namespace vayu {
         chunk_ = fnChunk.get();
 
         for (auto& st : n->body.stmts) compileStmt(st.get());
-
-        // Implicit fallthrough return
         chunk_->emitOp(OpCode::NONE, line);
         chunk_->emitOp(OpCode::RETURN_V, line);
 
@@ -131,12 +214,7 @@ namespace vayu {
         chunk_->emitOp(OpCode::MAKE_FN, line);
         chunk_->emit((uint8_t)((fnIdx >> 8) & 0xFF), line);
         chunk_->emit((uint8_t)(fnIdx & 0xFF), line);
-
-        // Bind to name in current scope
-        chunk_->emitOp(OpCode::DEFINE, line);
-        int nameIdx = chunk_->addName(n->name);
-        chunk_->emit((uint8_t)((nameIdx >> 8) & 0xFF), line);
-        chunk_->emit((uint8_t)(nameIdx & 0xFF), line);
+        emitNameU16(OpCode::DEFINE, n->name, line);
     }
 
     void Compiler::compileReturn(const ReturnStmt* n) {
@@ -146,9 +224,9 @@ namespace vayu {
         chunk_->emitOp(OpCode::RETURN_V, line);
     }
 
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
     // Control flow
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
 
     void Compiler::compileIf(const IfStmt* n) {
         int line = n->loc.line;
@@ -177,7 +255,6 @@ namespace vayu {
     void Compiler::compileWhile(const WhileStmt* n) {
         int line = n->loc.line;
         size_t loopStart = chunk_->here();
-
         compileExpr(n->cond.get());
         size_t exitJump = emitJump(OpCode::JUMP_IF_FALSE, line);
         compileBlock(n->body);
@@ -196,19 +273,125 @@ namespace vayu {
         chunk_->emit(0, line);
         chunk_->emit(0, line);
 
-        chunk_->emitOp(OpCode::DEFINE, line);
-        int nameIdx = chunk_->addName(n->targetName);
-        chunk_->emit((uint8_t)((nameIdx >> 8) & 0xFF), line);
-        chunk_->emit((uint8_t)(nameIdx & 0xFF), line);
+        emitNameU16(OpCode::DEFINE, n->targetName, line);
 
         compileBlock(n->body);
         emitLoop(loopStart, line);
         patchJump(iterOperandPos, chunk_->here());
     }
 
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
     // Expressions
-    // ---------------------------------------------------------------------------
+    // ===========================================================================
+
+    void Compiler::compileAttrGet(const AttrExpr* a, int line) {
+        compileExpr(a->target.get());
+        emitNameU16(OpCode::ATTR_GET, a->name, line);
+    }
+
+    void Compiler::compileCall(const CallExpr* c, int line) {
+        // ---- super() special case ----
+        if (c->callee->kind == ExprKind::NameRef) {
+            const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
+            if (nm->name == "super") {
+                if (!c->args.empty())
+                    error(c->loc, "super() takes no arguments");
+                chunk_->emitOp(OpCode::SUPER, line);
+                return;
+            }
+        }
+
+        // ---- struct / class construction ----
+        if (c->callee->kind == ExprKind::NameRef) {
+            const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
+            auto ci = classInfo_.find(nm->name);
+            if (ci != classInfo_.end()) {
+                const ClassInfo& info = ci->second;
+
+                if (info.hasInit) {
+                    // __init__ path: positional args only, in init-param order.
+                    for (auto& a : c->args) {
+                        if (!a.name.empty())
+                            error(a.loc, "VM mode: keyword arguments for class '" +
+                                nm->name + "' (with __init__) are not yet supported");
+                    }
+                    if (c->args.size() != info.initParams.size())
+                        error(c->loc, "class '" + nm->name + "' constructor expects " +
+                            std::to_string(info.initParams.size()) +
+                            " argument(s), got " +
+                            std::to_string(c->args.size()));
+                    for (auto& a : c->args) compileExpr(a.value.get());
+                    emitNameU16WithCount(OpCode::NEW_INSTANCE, nm->name,
+                        (uint8_t)c->args.size(), line);
+                    return;
+                }
+
+                // struct / class without __init__: reorder to field order.
+                std::vector<int> argForField(info.allFields.size(), -1);
+                size_t positional = 0;
+                for (size_t i = 0; i < c->args.size(); ++i) {
+                    const auto& a = c->args[i];
+                    if (a.name.empty()) {
+                        if (positional >= info.allFields.size())
+                            error(a.loc, "too many positional arguments for '" + nm->name + "'");
+                        argForField[positional] = (int)i;
+                        ++positional;
+                    }
+                    else {
+                        int fi = -1;
+                        for (size_t j = 0; j < info.allFields.size(); ++j)
+                            if (info.allFields[j] == a.name) { fi = (int)j; break; }
+                        if (fi < 0)
+                            error(a.loc, "'" + nm->name + "' has no field '" + a.name + "'");
+                        if (argForField[fi] != -1)
+                            error(a.loc, "field '" + a.name + "' given twice");
+                        argForField[fi] = (int)i;
+                    }
+                }
+                for (size_t j = 0; j < info.allFields.size(); ++j) {
+                    if (argForField[j] == -1)
+                        error(c->loc, "'" + nm->name + "' is missing value for field '" +
+                            info.allFields[j] + "'");
+                    compileExpr(c->args[argForField[j]].value.get());
+                }
+                emitNameU16WithCount(OpCode::NEW_INSTANCE, nm->name,
+                    (uint8_t)info.allFields.size(), line);
+                return;
+            }
+        }
+
+        // ---- method call: obj.method(args) ----
+        if (c->callee->kind == ExprKind::Attr) {
+            auto* attr = static_cast<const AttrExpr*>(c->callee.get());
+            // push obj then bound method (or field value, if user misuses it)
+            compileExpr(attr->target.get());
+            emitNameU16(OpCode::ATTR_GET, attr->name, line);
+            // push args
+            for (auto& a : c->args) {
+                if (!a.name.empty())
+                    error(a.loc, "VM mode: keyword arguments for method calls are not yet supported");
+                compileExpr(a.value.get());
+            }
+            chunk_->emitOp(OpCode::CALL, line);
+            chunk_->emit((uint8_t)c->args.size(), line);
+            return;
+        }
+
+        // ---- plain-name call ----
+        if (c->callee->kind == ExprKind::NameRef) {
+            compileExpr(c->callee.get());
+            for (auto& a : c->args) {
+                if (!a.name.empty())
+                    error(a.loc, "VM mode: keyword arguments are not yet supported");
+                compileExpr(a.value.get());
+            }
+            chunk_->emitOp(OpCode::CALL, line);
+            chunk_->emit((uint8_t)c->args.size(), line);
+            return;
+        }
+
+        error(c->loc, "VM mode: unsupported call target");
+    }
 
     void Compiler::compileExpr(const Expr* e) {
         if (!e) return;
@@ -250,10 +433,7 @@ namespace vayu {
 
         case ExprKind::NameRef: {
             auto* n = static_cast<const NameRefExpr*>(e);
-            int idx = chunk_->addName(n->name);
-            chunk_->emitOp(OpCode::LOAD, line);
-            chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
-            chunk_->emit((uint8_t)(idx & 0xFF), line);
+            emitNameU16(OpCode::LOAD, n->name, line);
             return;
         }
 
@@ -321,25 +501,13 @@ namespace vayu {
             return;
         }
 
-        case ExprKind::Call: {
-            auto* n = static_cast<const CallExpr*>(e);
-            if (n->callee->kind != ExprKind::NameRef &&
-                n->callee->kind != ExprKind::Attr)
-                error(e->loc, "VM mode: only plain-name calls are supported in 4B");
-            if (n->callee->kind == ExprKind::Attr)
-                error(e->loc, "VM mode: method calls arrive in 4E/4F");
-
-            // [callee, arg0, arg1, ..., argN-1]
-            compileExpr(n->callee.get());
-            for (auto& a : n->args) {
-                if (!a.name.empty())
-                    error(a.loc, "VM mode: keyword arguments not supported");
-                compileExpr(a.value.get());
-            }
-            chunk_->emitOp(OpCode::CALL, line);
-            chunk_->emit((uint8_t)n->args.size(), line);
+        case ExprKind::Call:
+            compileCall(static_cast<const CallExpr*>(e), line);
             return;
-        }
+
+        case ExprKind::Attr:
+            compileAttrGet(static_cast<const AttrExpr*>(e), line);
+            return;
 
         case ExprKind::ListLit: {
             auto* n = static_cast<const ListLitExpr*>(e);
@@ -351,7 +519,6 @@ namespace vayu {
             return;
         }
 
-        case ExprKind::Attr:
         case ExprKind::Index:
         case ExprKind::MapLit:
         case ExprKind::Lambda:

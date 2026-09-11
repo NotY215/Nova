@@ -1,0 +1,88 @@
+# ---- Structs ----
+struct Point:
+    x: int
+    y: int
+
+p = Point(3, 4)
+print(p.x)
+print(p.y)
+
+p.x = 10
+print(p.x)
+
+q = Point(y=7, x=2)
+print(q.x)
+print(q.y)
+
+# ---- Nested structs ----
+struct Line:
+    start: Point
+    end: Point
+
+l = Line(p, q)
+print(l.start.x)
+print(l.end.y)
+
+# ---- Class with __init__ ----
+class Counter:
+    value: int
+
+    def __init__(self, start: int) -> None:
+        self.value = start
+
+    def inc(self) -> None:
+        self.value = self.value + 1
+
+    def current(self) -> int:
+        return self.value
+
+c = Counter(10)
+print(c.current())
+c.inc()
+c.inc()
+c.inc()
+print(c.current())
+
+# ---- Inheritance ----
+class Base:
+    n: int
+
+    def __init__(self) -> None:
+        self.n = 100
+
+    def hello(self) -> str:
+        return "base"
+
+class Derived(Base):
+    extra: int
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.extra = 42
+
+    def hello(self) -> str:
+        return "derived from " + super().hello()
+
+d = Derived()
+print(d.n)
+print(d.extra)
+print(d.hello())
+
+# ---- Method calling other methods ----
+class Adder:
+    total: int
+
+    def __init__(self) -> None:
+        self.total = 0
+
+    def add(self, n: int) -> None:
+        self.total = self.total + n
+
+    def addTwice(self, n: int) -> None:
+        self.add(n)
+        self.add(n)
+
+a = Adder()
+a.addTwice(5)
+a.addTwice(10)
+print(a.total)

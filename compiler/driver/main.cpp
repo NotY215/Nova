@@ -142,6 +142,7 @@ int main(int argc, char** argv) {
         try {
             vayu::Interpreter interp;
             interp.setSourceDir(srcDir);
+            interp.registerDeclarations(program);   // <-- NEW: register classes/structs
             vayu::VM vm(interp.globals());
             vm.run(chunk);
         }

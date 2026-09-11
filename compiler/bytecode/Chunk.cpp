@@ -101,6 +101,18 @@ namespace vayu {
                 std::printf(" %d", idx);
                 break;
             }
+            case OpCode::NEW_INSTANCE: {
+                int ni = chunk.readU16(i); i += 2;
+                int ac = chunk.code[i];    i += 1;
+                std::printf(" %d (%s) argc=%d", ni, chunk.names[ni].c_str(), ac);
+                break;
+            }
+            case OpCode::ATTR_GET:
+            case OpCode::ATTR_SET: {
+                int ni = chunk.readU16(i); i += 2;
+                std::printf(" %d (%s)", ni, chunk.names[ni].c_str());
+                break;
+            }
             case OpCode::CALL: {
                 std::printf(" %d", chunk.code[i]); ++i;
                 break;

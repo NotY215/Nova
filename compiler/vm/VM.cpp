@@ -216,6 +216,60 @@ namespace vayu {
                 break;
             }
 
+                                 // ---- Structs & classes (Phase 4C) ----
+            case OpCode::NEW_INSTANCE: {
+                int nameIdx = readU16();
+                int argc = readByte();
+                std::string clsName = chunk().names[nameIdx];
+                std::vector<Value> args((size_t)argc);
+                for (int i = argc - 1; i >= 0; --i) args[(size_t)i] = pop();
+                if (!Interpreter::current_)
+                    runtimeError("VM: no interpreter context for instance construction");
+                Value inst = Interpreter::current_->vmNewInst(
+                    clsName, args, SourceLocation{});
+                push(std::move(inst));
+                break;
+            }
+
+            case OpCode::ATTR_GET: {
+                int nameIdx = readU16();
+                std::string attr = chunk().names[nameIdx];
+                Value base = pop();
+                if (!Interpreter::current_)
+                    runtimeError("VM: no interpreter context for attribute lookup");
+                Value v = Interpreter::current_->vmGetAttr(
+                    base, attr, SourceLocation{});
+                push(std::move(v));
+                break;
+            }
+
+            case OpCode::ATTR_SET: {
+                int nameIdx = readU16();
+                std::string attr = chunk().names[nameIdx];
+                Value value = pop();
+                Value base = pop();
+                if (!Interpreter::current_)
+                    runtimeError("VM: no interpreter context for attribute write");
+                Interpreter::current_->vmSetAttr(base, attr, value, SourceLocation{});
+                break;
+            }
+
+            case OpCode::SUPER: {
+                Value* s = env()->lookup("self");
+                Value* k = env()->lookup("__class__");
+                if (!s || !k || !s->isInstance() || !k->isClass())
+                    runtimeError("super() outside method");
+                auto sup = std::make_shared<Callable>();
+                sup->kind = Callable::Kind::SuperMethod;
+                sup->name = "super";
+                sup->boundSelf = s->asInstance();
+                sup->superParent = k->asClass()->parent;
+                if (!sup->superParent)
+                    runtimeError("class '" + k->asClass()->name + "' has no parent");
+                push(Value(sup));
+                break;
+            }
+
                                  // ---- Misc ----
             case OpCode::PRINT: {
                 Value v = pop();

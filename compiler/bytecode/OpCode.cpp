@@ -29,6 +29,10 @@ namespace vayu {
         case OpCode::GE:       return "GE";
         case OpCode::NOT:      return "NOT";
         case OpCode::JUMP:           return "JUMP";
+        case OpCode::NEW_INSTANCE: return "NEW_INSTANCE";
+        case OpCode::ATTR_GET:     return "ATTR_GET";
+        case OpCode::ATTR_SET:     return "ATTR_SET";
+        case OpCode::SUPER:        return "SUPER";
         case OpCode::JUMP_IF_FALSE:  return "JUMP_IF_FALSE";
         case OpCode::JUMP_IF_TRUE:   return "JUMP_IF_TRUE";
         case OpCode::ITER_NEW:       return "ITER_NEW";
