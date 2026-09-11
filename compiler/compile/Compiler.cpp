@@ -54,12 +54,11 @@ namespace vayu {
         const std::string& name, std::unordered_set<std::string>& visiting) {
         auto it = classInfo_.find(name);
         if (it == classInfo_.end()) return {};
-        if (visiting.count(name)) return {};   // cycle; type checker catches this
+        if (visiting.count(name)) return {};
         visiting.insert(name);
         std::vector<std::string> result;
-        if (!it->second.parentName.empty()) {
+        if (!it->second.parentName.empty())
             result = resolveFields(it->second.parentName, visiting);
-        }
         for (auto& f : it->second.ownFields) result.push_back(f);
         visiting.erase(name);
         return result;
@@ -100,7 +99,6 @@ namespace vayu {
         chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
         chunk_->emit((uint8_t)(idx & 0xFF), line);
     }
-
     void Compiler::emitNameU16WithCount(OpCode op, const std::string& name,
         uint8_t count, int line) {
         chunk_->emitOp(op, line);
@@ -132,6 +130,7 @@ namespace vayu {
 
         case StmtKind::Assign: {
             auto* n = static_cast<const AssignStmt*>(s);
+
             if (n->target->kind == ExprKind::NameRef) {
                 const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
                 compileExpr(n->value.get());
@@ -143,8 +142,16 @@ namespace vayu {
                     n->value.get(), line);
                 return;
             }
-            error(n->target->loc,
-                "VM mode: unsupported assignment target");
+            if (n->target->kind == ExprKind::Index) {
+                auto* ix = static_cast<const IndexExpr*>(n->target.get());
+                // Stack: [target, index, value]
+                compileExpr(ix->target.get());
+                compileExpr(ix->index.get());
+                compileExpr(n->value.get());
+                chunk_->emitOp(OpCode::INDEX_SET, line);
+                return;
+            }
+            error(n->target->loc, "VM mode: unsupported assignment target");
         }
 
         case StmtKind::AnnotAssign: {
@@ -170,9 +177,7 @@ namespace vayu {
 
         case StmtKind::Struct:
         case StmtKind::Class:
-            // Registered at compile time via classInfo_; runtime does not
-            // need to execute anything for a declaration.
-            return;
+            return;   // registered at compile time
 
         case StmtKind::Try:
         case StmtKind::Raise:
@@ -186,7 +191,6 @@ namespace vayu {
 
     void Compiler::compileAssignAttr(const AttrExpr* target, const Expr* value,
         int line) {
-        // Stack layout: [obj, value] then ATTR_SET pops value, pops obj
         compileExpr(target->target.get());
         compileExpr(value);
         emitNameU16(OpCode::ATTR_SET, target->name, line);
@@ -290,7 +294,7 @@ namespace vayu {
     }
 
     void Compiler::compileCall(const CallExpr* c, int line) {
-        // ---- super() special case ----
+        // super()
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             if (nm->name == "super") {
@@ -301,7 +305,7 @@ namespace vayu {
             }
         }
 
-        // ---- struct / class construction ----
+        // struct / class construction
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             auto ci = classInfo_.find(nm->name);
@@ -309,12 +313,9 @@ namespace vayu {
                 const ClassInfo& info = ci->second;
 
                 if (info.hasInit) {
-                    // __init__ path: positional args only, in init-param order.
-                    for (auto& a : c->args) {
+                    for (auto& a : c->args)
                         if (!a.name.empty())
-                            error(a.loc, "VM mode: keyword arguments for class '" +
-                                nm->name + "' (with __init__) are not yet supported");
-                    }
+                            error(a.loc, "VM mode: keyword args for class with __init__ unsupported");
                     if (c->args.size() != info.initParams.size())
                         error(c->loc, "class '" + nm->name + "' constructor expects " +
                             std::to_string(info.initParams.size()) +
@@ -326,7 +327,6 @@ namespace vayu {
                     return;
                 }
 
-                // struct / class without __init__: reorder to field order.
                 std::vector<int> argForField(info.allFields.size(), -1);
                 size_t positional = 0;
                 for (size_t i = 0; i < c->args.size(); ++i) {
@@ -334,17 +334,14 @@ namespace vayu {
                     if (a.name.empty()) {
                         if (positional >= info.allFields.size())
                             error(a.loc, "too many positional arguments for '" + nm->name + "'");
-                        argForField[positional] = (int)i;
-                        ++positional;
+                        argForField[positional] = (int)i; ++positional;
                     }
                     else {
                         int fi = -1;
                         for (size_t j = 0; j < info.allFields.size(); ++j)
                             if (info.allFields[j] == a.name) { fi = (int)j; break; }
-                        if (fi < 0)
-                            error(a.loc, "'" + nm->name + "' has no field '" + a.name + "'");
-                        if (argForField[fi] != -1)
-                            error(a.loc, "field '" + a.name + "' given twice");
+                        if (fi < 0) error(a.loc, "'" + nm->name + "' has no field '" + a.name + "'");
+                        if (argForField[fi] != -1) error(a.loc, "field '" + a.name + "' given twice");
                         argForField[fi] = (int)i;
                     }
                 }
@@ -360,16 +357,14 @@ namespace vayu {
             }
         }
 
-        // ---- method call: obj.method(args) ----
+        // method call: obj.method(args)
         if (c->callee->kind == ExprKind::Attr) {
             auto* attr = static_cast<const AttrExpr*>(c->callee.get());
-            // push obj then bound method (or field value, if user misuses it)
             compileExpr(attr->target.get());
             emitNameU16(OpCode::ATTR_GET, attr->name, line);
-            // push args
             for (auto& a : c->args) {
                 if (!a.name.empty())
-                    error(a.loc, "VM mode: keyword arguments for method calls are not yet supported");
+                    error(a.loc, "VM mode: keyword args for method calls unsupported");
                 compileExpr(a.value.get());
             }
             chunk_->emitOp(OpCode::CALL, line);
@@ -377,12 +372,12 @@ namespace vayu {
             return;
         }
 
-        // ---- plain-name call ----
+        // plain-name call
         if (c->callee->kind == ExprKind::NameRef) {
             compileExpr(c->callee.get());
             for (auto& a : c->args) {
                 if (!a.name.empty())
-                    error(a.loc, "VM mode: keyword arguments are not yet supported");
+                    error(a.loc, "VM mode: keyword arguments not yet supported");
                 compileExpr(a.value.get());
             }
             chunk_->emitOp(OpCode::CALL, line);
@@ -490,10 +485,9 @@ namespace vayu {
             case BinOp::Gt:       chunk_->emitOp(OpCode::GT, line); break;
             case BinOp::LtEq:     chunk_->emitOp(OpCode::LE, line); break;
             case BinOp::GtEq:     chunk_->emitOp(OpCode::GE, line); break;
-            case BinOp::In:
+            case BinOp::In:       chunk_->emitOp(OpCode::IN, line); break;
             case BinOp::Is:
-                error(e->loc, std::string("VM mode: operator '") +
-                    binOpName(n->op) + "' not yet implemented");
+                error(e->loc, "VM mode: operator 'is' not yet implemented");
             case BinOp::And:
             case BinOp::Or:
                 return;
@@ -509,6 +503,14 @@ namespace vayu {
             compileAttrGet(static_cast<const AttrExpr*>(e), line);
             return;
 
+        case ExprKind::Index: {
+            auto* n = static_cast<const IndexExpr*>(e);
+            compileExpr(n->target.get());
+            compileExpr(n->index.get());
+            chunk_->emitOp(OpCode::INDEX_GET, line);
+            return;
+        }
+
         case ExprKind::ListLit: {
             auto* n = static_cast<const ListLitExpr*>(e);
             for (auto& el : n->elements) compileExpr(el.get());
@@ -519,8 +521,19 @@ namespace vayu {
             return;
         }
 
-        case ExprKind::Index:
-        case ExprKind::MapLit:
+        case ExprKind::MapLit: {
+            auto* n = static_cast<const MapLitExpr*>(e);
+            for (auto& entry : n->entries) {
+                compileExpr(entry.key.get());
+                compileExpr(entry.value.get());
+            }
+            chunk_->emitOp(OpCode::MAP_NEW, line);
+            int cnt = (int)n->entries.size();
+            chunk_->emit((uint8_t)((cnt >> 8) & 0xFF), line);
+            chunk_->emit((uint8_t)(cnt & 0xFF), line);
+            return;
+        }
+
         case ExprKind::Lambda:
         case ExprKind::GenericType:
             error(e->loc, "VM mode: this expression is not yet supported");

@@ -44,7 +44,11 @@ NEW_INSTANCE,       // <nameIdx:u16> <argc:u8>   pop argc, push instance
 ATTR_GET,           // <nameIdx:u16>              pop base, push attr
 ATTR_SET,           // <nameIdx:u16>              pop value, pop base
 SUPER,              // (no operands)              push super proxy
-
+// ---- Collections (Phase 4D) ----
+INDEX_GET,          // [target, index] -> value
+INDEX_SET,          // [target, index, value] -> ()
+MAP_NEW,            // <count:u16>   pop count*2 elems -> map
+IN,                 // [lhs, rhs] -> bool
 // ---- Functions ----
 MAKE_FN,            // <idx:u16>      push Callable for functions[idx],
 //                closure = current env

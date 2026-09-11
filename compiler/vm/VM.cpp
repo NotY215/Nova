@@ -29,6 +29,10 @@ namespace vayu {
 
     // ---------------------------------------------------------------------------
 
+    // Forward declaration — valueEqualsVM is defined further down but used by
+    // the IN opcode inside VM::run above its definition.
+    static bool valueEqualsVM(const Value& a, const Value& b);
+
     void VM::run(std::shared_ptr<Chunk> entryChunk) {
         frames_.clear();
         stack_.clear();
@@ -135,10 +139,29 @@ namespace vayu {
                                      // ---- Iteration ----
             case OpCode::ITER_NEW: {
                 Value v = pop();
-                if (!v.isList()) runtimeError("cannot iterate over " + v.typeName());
-                push(v);
-                push(Value(0LL));
-                break;
+                if (v.isList()) {
+                    push(v);
+                    push(Value(0LL));
+                    break;
+                }
+                if (v.isMap()) {
+                    // Iterate keys — snapshot into a list.
+                    auto keys = std::make_shared<ListValue>();
+                    for (auto& [k, _] : v.asMap()->entries)
+                        keys->items.push_back(Value(k));
+                    push(Value(keys));
+                    push(Value(0LL));
+                    break;
+                }
+                if (v.isString()) {
+                    auto chars = std::make_shared<ListValue>();
+                    for (char c : v.asString())
+                        chars->items.push_back(Value(std::string(1, c)));
+                    push(Value(chars));
+                    push(Value(0LL));
+                    break;
+                }
+                runtimeError("cannot iterate over " + v.typeName());
             }
             case OpCode::ITER_NEXT: {
                 int off = readI16();
@@ -216,7 +239,7 @@ namespace vayu {
                 break;
             }
 
-                                 // ---- Structs & classes (Phase 4C) ----
+                                 // ---- Structs & classes ----
             case OpCode::NEW_INSTANCE: {
                 int nameIdx = readU16();
                 int argc = readByte();
@@ -269,6 +292,108 @@ namespace vayu {
                 push(Value(sup));
                 break;
             }
+                              // ---- Collections ----
+            case OpCode::INDEX_GET: {
+                Value idx = pop();
+                Value tgt = pop();
+                if (tgt.isList()) {
+                    if (!idx.isInt())
+                        runtimeError("list index must be int, got " + idx.typeName());
+                    auto lst = tgt.asList();
+                    long long i = idx.asInt();
+                    if (i < 0) i += (long long)lst->items.size();
+                    if (i < 0 || i >= (long long)lst->items.size())
+                        runtimeError("list index out of range");
+                    push(lst->items[(size_t)i]);
+                    break;
+                }
+                if (tgt.isMap()) {
+                    if (!idx.isString())
+                        runtimeError("map key must be str, got " + idx.typeName());
+                    auto m = tgt.asMap();
+                    auto it = m->entries.find(idx.asString());
+                    if (it == m->entries.end())
+                        runtimeError("map has no key '" + idx.asString() + "'");
+                    push(it->second);
+                    break;
+                }
+                if (tgt.isString()) {
+                    if (!idx.isInt())
+                        runtimeError("str index must be int, got " + idx.typeName());
+                    const std::string& s = tgt.asString();
+                    long long i = idx.asInt();
+                    if (i < 0) i += (long long)s.size();
+                    if (i < 0 || i >= (long long)s.size())
+                        runtimeError("string index out of range");
+                    push(Value(std::string(1, s[(size_t)i])));
+                    break;
+                }
+                runtimeError("cannot index value of type " + tgt.typeName());
+            }
+
+            case OpCode::INDEX_SET: {
+                Value v = pop();
+                Value idx = pop();
+                Value tgt = pop();
+                if (tgt.isList()) {
+                    if (!idx.isInt())
+                        runtimeError("list index must be int, got " + idx.typeName());
+                    auto lst = tgt.asList();
+                    long long i = idx.asInt();
+                    if (i < 0) i += (long long)lst->items.size();
+                    if (i < 0 || i >= (long long)lst->items.size())
+                        runtimeError("list index out of range");
+                    lst->items[(size_t)i] = std::move(v);
+                    break;
+                }
+                if (tgt.isMap()) {
+                    if (!idx.isString())
+                        runtimeError("map key must be str, got " + idx.typeName());
+                    tgt.asMap()->entries[idx.asString()] = std::move(v);
+                    break;
+                }
+                if (tgt.isString())
+                    runtimeError("strings are immutable");
+                runtimeError("cannot index-assign to value of type " + tgt.typeName());
+            }
+
+            case OpCode::MAP_NEW: {
+                int count = readU16();
+                auto m = std::make_shared<MapValue>();
+                std::vector<std::pair<std::string, Value>> pairs((size_t)count);
+                for (int i = count - 1; i >= 0; --i) {
+                    Value v = pop();
+                    Value k = pop();
+                    if (!k.isString())
+                        runtimeError("map keys must be str, got " + k.typeName());
+                    pairs[(size_t)i] = { k.asString(), std::move(v) };
+                }
+                for (auto& [k, v] : pairs) m->entries[k] = std::move(v);
+                push(Value(m));
+                break;
+            }
+
+            case OpCode::IN: {
+                Value r = pop();
+                Value l = pop();
+                if (r.isList()) {
+                    bool found = false;
+                    for (auto& v : r.asList()->items)
+                        if (valueEqualsVM(l, v)) { found = true; break; }
+                    push(Value(found));
+                    break;
+                }
+                if (r.isMap()) {
+                    if (!l.isString()) { push(Value(false)); break; }
+                    push(Value(r.asMap()->entries.count(l.asString()) > 0));
+                    break;
+                }
+                if (r.isString() && l.isString()) {
+                    push(Value(r.asString().find(l.asString()) != std::string::npos));
+                    break;
+                }
+                runtimeError("'in' requires a list, map, or str on the right");
+            }
 
                                  // ---- Misc ----
             case OpCode::PRINT: {
@@ -310,6 +435,13 @@ namespace vayu {
             if (l.isInt() && r.isInt()) { push(Value(l.asInt() + r.asInt()));       return; }
             if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() + r.asDouble())); return; }
             if (l.isString() && r.isString()) { push(Value(l.asString() + r.asString())); return; }
+            if (l.isList() && r.isList()) {
+                auto out = std::make_shared<ListValue>();
+                out->items = l.asList()->items;
+                for (auto& v : r.asList()->items) out->items.push_back(v);
+                push(Value(out));
+                return;
+            }
             runtimeError("cannot add " + l.typeName() + " and " + r.typeName());
 
         case OpCode::SUB:
@@ -327,6 +459,20 @@ namespace vayu {
             if (l.isInt() && r.isString()) {
                 std::string o; for (long long i = 0; i < l.asInt(); ++i) o += r.asString();
                 push(Value(std::move(o))); return;
+            }
+            if (l.isList() && r.isInt()) {
+                auto out = std::make_shared<ListValue>();
+                for (long long i = 0; i < r.asInt(); ++i)
+                    for (auto& v : l.asList()->items) out->items.push_back(v);
+                push(Value(out));
+                return;
+            }
+            if (l.isInt() && r.isList()) {
+                auto out = std::make_shared<ListValue>();
+                for (long long i = 0; i < l.asInt(); ++i)
+                    for (auto& v : r.asList()->items) out->items.push_back(v);
+                push(Value(out));
+                return;
             }
             runtimeError("cannot multiply " + l.typeName() + " by " + r.typeName());
         }

@@ -1,0 +1,114 @@
+# ---- List literal + indexing ----
+nums = [10, 20, 30, 40, 50]
+print(nums[0])
+print(nums[4])
+print(nums[-1])
+print(nums[-2])
+
+nums[0] = 100
+print(nums[0])
+print(nums)
+
+# ---- List methods ----
+nums.append(60)
+print(len(nums))
+print(nums[5])
+
+last = nums.pop()
+print(last)
+print(len(nums))
+
+print(nums.contains(30))
+print(nums.index(30))
+
+nums.insert(0, 5)
+print(nums[0])
+
+nums.remove(20)
+print(nums.contains(20))
+
+# ---- List concat + repeat ----
+a = [1, 2, 3]
+b = [4, 5]
+c = a + b
+print(c)
+d = [0] * 3
+print(d)
+
+# ---- Map literal + indexing ----
+ages = {"alice": 30, "bob": 25}
+print(ages["alice"])
+print(ages["bob"])
+
+ages["carol"] = 40
+print(ages["carol"])
+
+ages.put("dave", 22)
+print(ages["dave"])
+
+print(len(ages))
+print(ages.contains("carol"))
+
+ages.remove("bob")
+print(ages.contains("bob"))
+
+# ---- in operator ----
+print(3 in [1, 2, 3, 4])
+print(99 in [1, 2, 3, 4])
+print("alice" in ages)
+print("bob" in ages)
+print("ell" in "hello")
+print("xyz" in "hello")
+
+# ---- String indexing ----
+s = "vayu"
+print(s[0])
+print(s[1])
+print(s[-1])
+
+# ---- String methods that return collections ----
+words = "the quick brown fox".split()
+print(words[0])
+print(words[3])
+print(len(words))
+
+parts = "a,b,c,d".split(",")
+print(parts)
+print(parts[1])
+
+joined = "-".join(["x", "y", "z"])
+print(joined)
+
+# ---- Nested collections ----
+matrix = [[1, 2], [3, 4], [5, 6]]
+print(matrix[0][1])
+print(matrix[2][0])
+
+grid = {"row1": [10, 20], "row2": [30, 40]}
+print(grid["row1"][1])
+print(grid["row2"][0])
+
+# ---- for over list ----
+total = 0
+for n in [5, 10, 15, 20]:
+    total = total + n
+print(total)
+
+# ---- for over map keys ----
+count = 0
+for k in ages:
+    count = count + 1
+print(count)
+
+# ---- for over string ----
+letters = ""
+for ch in "abc":
+    letters = letters + ch + "."
+print(letters)
+
+# ---- map values/keys ----
+ks = ages.keys()
+print(len(ks))
+
+vs = ages.values()
+print(len(vs))

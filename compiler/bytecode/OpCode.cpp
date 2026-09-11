@@ -29,6 +29,10 @@ namespace vayu {
         case OpCode::GE:       return "GE";
         case OpCode::NOT:      return "NOT";
         case OpCode::JUMP:           return "JUMP";
+        case OpCode::INDEX_GET: return "INDEX_GET";
+        case OpCode::INDEX_SET: return "INDEX_SET";
+        case OpCode::MAP_NEW:   return "MAP_NEW";
+        case OpCode::IN:        return "IN";
         case OpCode::NEW_INSTANCE: return "NEW_INSTANCE";
         case OpCode::ATTR_GET:     return "ATTR_GET";
         case OpCode::ATTR_SET:     return "ATTR_SET";

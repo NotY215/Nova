@@ -113,6 +113,11 @@ namespace vayu {
                 std::printf(" %d (%s)", ni, chunk.names[ni].c_str());
                 break;
             }
+            case OpCode::MAP_NEW: {
+                int cnt = chunk.readU16(i); i += 2;
+                std::printf(" %d", cnt);
+                break;
+            }
             case OpCode::CALL: {
                 std::printf(" %d", chunk.code[i]); ++i;
                 break;
