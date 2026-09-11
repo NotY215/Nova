@@ -2,7 +2,7 @@
 #include <cmath>
 #include <sstream>
 
-namespace nova {
+namespace vayu {
 
     static std::string formatDouble(double d) {
         if (std::isnan(d)) return "nan";
@@ -21,7 +21,7 @@ namespace nova {
         if (isString()) return !asString().empty();
         if (isList())   return !asList()->items.empty();
         if (isMap())    return !asMap()->entries.empty();
-        return true;   // modules, classes, functions, instances always truthy
+        return true;
     }
 
     std::string Value::toString() const {
@@ -105,4 +105,4 @@ namespace nova {
         return "?";
     }
 
-} // namespace nova
+} // namespace vayu

@@ -2,7 +2,7 @@
 #include <string>
 #include <cstddef>
 
-namespace nova {
+namespace vayu {
 
     enum class TokenType {
         // --- Literals ---
@@ -49,4 +49,4 @@ namespace nova {
 
     const char* tokenTypeName(TokenType type);
 
-} // namespace nova
+} // namespace vayu

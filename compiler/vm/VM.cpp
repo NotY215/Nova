@@ -4,22 +4,22 @@
 #include <cmath>
 #include <iostream>
 
-namespace nova {
+namespace vayu {
 
     VM::VM(std::shared_ptr<Environment> globals) : globals_(std::move(globals)) {}
 
-    uint8_t VM::readByte() { return chunk_->code[ip_++]; }
+    uint8_t VM::readByte() { return chunk().code[ip()++]; }
 
     int VM::readU16() {
-        int v = ((int)chunk_->code[ip_] << 8) | (int)chunk_->code[ip_ + 1];
-        ip_ += 2;
+        int v = ((int)chunk().code[ip()] << 8) | (int)chunk().code[ip() + 1];
+        ip() += 2;
         return v;
     }
 
     int VM::readI16() {
-        int16_t v = (int16_t)(((uint16_t)chunk_->code[ip_] << 8) |
-            (uint16_t)chunk_->code[ip_ + 1]);
-        ip_ += 2;
+        int16_t v = (int16_t)(((uint16_t)chunk().code[ip()] << 8) |
+            (uint16_t)chunk().code[ip() + 1]);
+        ip() += 2;
         return (int)v;
     }
 
@@ -29,23 +29,25 @@ namespace nova {
 
     // ---------------------------------------------------------------------------
 
-    void VM::run(const Chunk& chunk) {
-        chunk_ = &chunk;
-        ip_ = 0;
+    void VM::run(std::shared_ptr<Chunk> entryChunk) {
+        frames_.clear();
         stack_.clear();
+        frames_.push_back({ std::move(entryChunk), 0, globals_ });
 
-        for (;;) {
-            if (ip_ >= chunk_->code.size())
-                runtimeError("bytecode ran off the end without RETURN");
-            currentLine_ = chunk_->lines[ip_];
+        while (!frames_.empty()) {
+            CallFrame& f = frames_.back();
+            if (f.ip >= f.chunk->code.size())
+                runtimeError("bytecode ran off the end without RETURN_V");
 
+            currentLine_ = f.chunk->lines[f.ip];
             OpCode op = static_cast<OpCode>(readByte());
+
             switch (op) {
 
                 // ---- Stack & literals ----
             case OpCode::CONST: {
                 int idx = readU16();
-                push(chunk_->constants[idx]);
+                push(chunk().constants[idx]);
                 break;
             }
             case OpCode::NONE:    push(Value());      break;
@@ -57,26 +59,25 @@ namespace nova {
                 // ---- Variables ----
             case OpCode::LOAD: {
                 int idx = readU16();
-                const std::string& name = chunk_->names[idx];
-                Value* slot = globals_->lookup(name);
+                const std::string& name = chunk().names[idx];
+                Value* slot = env()->lookup(name);
                 if (!slot) runtimeError("name '" + name + "' is not defined");
                 push(*slot);
                 break;
             }
             case OpCode::STORE: {
                 int idx = readU16();
-                const std::string& name = chunk_->names[idx];
+                const std::string& name = chunk().names[idx];
                 Value v = pop();
-                if (!globals_->assign(name, v))
+                if (!env()->assign(name, v))
                     runtimeError("name '" + name + "' is not defined");
                 break;
             }
             case OpCode::DEFINE: {
                 int idx = readU16();
-                const std::string& name = chunk_->names[idx];
+                const std::string& name = chunk().names[idx];
                 Value v = pop();
-                if (!globals_->assign(name, v))
-                    globals_->define(name, std::move(v));
+                if (!env()->assign(name, v)) env()->define(name, std::move(v));
                 break;
             }
 
@@ -115,47 +116,42 @@ namespace nova {
                             // ---- Control flow ----
             case OpCode::JUMP: {
                 int off = readI16();
-                ip_ = (size_t)((int)ip_ + off);
+                ip() = (size_t)((int)ip() + off);
                 break;
             }
             case OpCode::JUMP_IF_FALSE: {
                 int off = readI16();
                 Value v = pop();
-                if (!v.truthy()) ip_ = (size_t)((int)ip_ + off);
+                if (!v.truthy()) ip() = (size_t)((int)ip() + off);
                 break;
             }
             case OpCode::JUMP_IF_TRUE: {
                 int off = readI16();
                 Value v = pop();
-                if (v.truthy()) ip_ = (size_t)((int)ip_ + off);
+                if (v.truthy()) ip() = (size_t)((int)ip() + off);
                 break;
             }
 
                                      // ---- Iteration ----
             case OpCode::ITER_NEW: {
                 Value v = pop();
-                if (!v.isList())
-                    runtimeError("cannot iterate over " + v.typeName());
+                if (!v.isList()) runtimeError("cannot iterate over " + v.typeName());
                 push(v);
                 push(Value(0LL));
                 break;
             }
             case OpCode::ITER_NEXT: {
                 int off = readI16();
-                if (stack_.size() < 2)
-                    runtimeError("iterator state corrupted");
                 size_t idxPos = stack_.size() - 1;
                 size_t iterPos = stack_.size() - 2;
                 Value iterable = stack_[iterPos];
                 long long idx = stack_[idxPos].asInt();
-
-                if (!iterable.isList())
-                    runtimeError("iterator state corrupted");
+                if (!iterable.isList()) runtimeError("iterator state corrupted");
                 auto lst = iterable.asList();
                 if (idx < 0 || idx >= (long long)lst->items.size()) {
                     stack_.pop_back();
                     stack_.pop_back();
-                    ip_ = (size_t)((int)ip_ + off);
+                    ip() = (size_t)((int)ip() + off);
                     break;
                 }
                 push(lst->items[(size_t)idx]);
@@ -174,32 +170,76 @@ namespace nova {
                 break;
             }
 
-                                 // ---- Calls ----
+                                 // ---- Functions ----
+            case OpCode::MAKE_FN: {
+                int idx = readU16();
+                auto& fnChunk = chunk().functions[(size_t)idx];
+                auto c = std::make_shared<Callable>();
+                c->kind = Callable::Kind::VMFunction;
+                c->name = "<fn>";
+                c->chunk = fnChunk;
+                c->vmParams = fnChunk->paramNames;
+                c->closure = env();
+                push(Value(c));
+                break;
+            }
+
             case OpCode::CALL: {
                 int argc = readByte();
                 std::vector<Value> args((size_t)argc);
                 for (int i = argc - 1; i >= 0; --i)
                     args[(size_t)i] = pop();
                 Value callee = pop();
-                if (!Interpreter::current_)
-                    runtimeError("VM: no interpreter context for builtin call");
-                Value result = Interpreter::current_->callValue(
-                    callee, args, SourceLocation{});
-                push(std::move(result));
+
+                if (!callee.isCallable())
+                    runtimeError("cannot call " + callee.typeName() + " value");
+
+                auto fn = callee.asCallable();
+                if (fn->kind == Callable::Kind::VMFunction) {
+                    callVMFunction(fn, args);
+                }
+                else {
+                    if (!Interpreter::current_)
+                        runtimeError("VM: no interpreter context for builtin call");
+                    Value r = Interpreter::current_->callValue(
+                        callee, args, SourceLocation{});
+                    push(std::move(r));
+                }
                 break;
             }
 
-                             // ---- Misc ----
+            case OpCode::RETURN_V: {
+                Value v = pop();
+                frames_.pop_back();
+                if (frames_.empty()) return;
+                push(std::move(v));
+                break;
+            }
+
+                                 // ---- Misc ----
             case OpCode::PRINT: {
                 Value v = pop();
                 std::cout << v.toString() << '\n';
                 break;
             }
-
-            case OpCode::RETURN:
-                return;
             }
         }
+    }
+
+    // ---------------------------------------------------------------------------
+
+    void VM::callVMFunction(const std::shared_ptr<Callable>& fn,
+        const std::vector<Value>& args) {
+        if (args.size() != fn->vmParams.size())
+            runtimeError("function expects " + std::to_string(fn->vmParams.size()) +
+                " argument(s), got " + std::to_string(args.size()));
+
+        auto callEnv = std::make_shared<Environment>(
+            fn->closure ? fn->closure : globals_);
+        for (size_t i = 0; i < args.size(); ++i)
+            callEnv->define(fn->vmParams[i], args[i]);
+
+        frames_.push_back({ fn->chunk, 0, callEnv });
     }
 
     // ---------------------------------------------------------------------------
@@ -213,30 +253,26 @@ namespace nova {
 
         switch (op) {
         case OpCode::ADD:
-            if (l.isInt() && r.isInt()) { push(Value(l.asInt() + r.asInt()));         return; }
-            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() + r.asDouble()));   return; }
-            if (l.isString() && r.isString()) { push(Value(l.asString() + r.asString()));   return; }
+            if (l.isInt() && r.isInt()) { push(Value(l.asInt() + r.asInt()));       return; }
+            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() + r.asDouble())); return; }
+            if (l.isString() && r.isString()) { push(Value(l.asString() + r.asString())); return; }
             runtimeError("cannot add " + l.typeName() + " and " + r.typeName());
 
         case OpCode::SUB:
-            if (l.isInt() && r.isInt()) { push(Value(l.asInt() - r.asInt()));         return; }
-            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() - r.asDouble()));   return; }
+            if (l.isInt() && r.isInt()) { push(Value(l.asInt() - r.asInt()));       return; }
+            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() - r.asDouble())); return; }
             runtimeError("cannot subtract " + r.typeName() + " from " + l.typeName());
 
         case OpCode::MUL: {
-            if (l.isInt() && r.isInt()) { push(Value(l.asInt() * r.asInt()));         return; }
-            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() * r.asDouble()));   return; }
+            if (l.isInt() && r.isInt()) { push(Value(l.asInt() * r.asInt()));       return; }
+            if (l.isNumber() && r.isNumber()) { push(Value(l.asDouble() * r.asDouble())); return; }
             if (l.isString() && r.isInt()) {
-                std::string o;
-                for (long long i = 0; i < r.asInt(); ++i) o += l.asString();
-                push(Value(std::move(o)));
-                return;
+                std::string o; for (long long i = 0; i < r.asInt(); ++i) o += l.asString();
+                push(Value(std::move(o))); return;
             }
             if (l.isInt() && r.isString()) {
-                std::string o;
-                for (long long i = 0; i < l.asInt(); ++i) o += r.asString();
-                push(Value(std::move(o)));
-                return;
+                std::string o; for (long long i = 0; i < l.asInt(); ++i) o += r.asString();
+                push(Value(std::move(o))); return;
             }
             runtimeError("cannot multiply " + l.typeName() + " by " + r.typeName());
         }
@@ -245,8 +281,7 @@ namespace nova {
             if (l.isNumber() && r.isNumber()) {
                 double d = r.asDouble();
                 if (d == 0.0) runtimeError("division by zero");
-                push(Value(l.asDouble() / d));
-                return;
+                push(Value(l.asDouble() / d)); return;
             }
             runtimeError("cannot divide " + l.typeName() + " by " + r.typeName());
         }
@@ -281,11 +316,9 @@ namespace nova {
                 if (l.isInt() && r.isInt() && r.asInt() >= 0) {
                     long long base = l.asInt(), exp = r.asInt(), acc = 1;
                     while (exp--) acc *= base;
-                    push(Value(acc));
-                    return;
+                    push(Value(acc)); return;
                 }
-                push(Value(std::pow(l.asDouble(), r.asDouble())));
-                return;
+                push(Value(std::pow(l.asDouble(), r.asDouble()))); return;
             }
             runtimeError("cannot apply '**' to " + l.typeName() + " and " + r.typeName());
         }
@@ -294,8 +327,6 @@ namespace nova {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Comparison
     // ---------------------------------------------------------------------------
 
     static bool valueEqualsVM(const Value& a, const Value& b) {
@@ -343,4 +374,4 @@ namespace nova {
         push(Value(res));
     }
 
-} // namespace nova
+} // namespace vayu

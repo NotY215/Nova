@@ -67,7 +67,7 @@ print(counts["the"])                # 2
 
 # ---- reversing a string with slicing-like loop ----
 rev = ""
-for c in "nova":
+for c in "Vayu":
     rev = c + rev
 print(rev)                          # avon
 

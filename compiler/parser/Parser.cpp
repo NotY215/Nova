@@ -1,7 +1,7 @@
 #include "Parser.hpp"
 #include <cstdlib>
 
-namespace nova {
+namespace vayu {
 
     static int binPrec(TokenType t) {
         switch (t) {
@@ -533,4 +533,4 @@ namespace nova {
         }
     }
 
-} // namespace nova
+} // namespace vayu

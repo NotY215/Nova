@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace nova {
+namespace vayu {
 
     class ParseError : public std::runtime_error {
     public:
@@ -62,4 +62,4 @@ namespace nova {
         ExprPtr  parseTypeExpr();
     };
 
-} // namespace nova
+} // namespace vayu

@@ -1,9 +1,9 @@
 #pragma once
 #include <cstdint>
 
-namespace nova {
+namespace vayu {
 
-    /// Nova bytecode instruction set — Phase 4A.
+    /// vayu bytecode instruction set — Phase 4B.
     enum class OpCode : uint8_t {
         // ---- Stack & literals ----
         CONST,          // <index:u16>    push constants[index]
@@ -13,7 +13,7 @@ namespace nova {
         POP,            //                discard top
         DUP,            //                duplicate top
 
-        // ---- Variables (global scope only in 4A) ----
+        // ---- Variables ----
         LOAD,           // <name:u16>     push value of name
         STORE,          // <name:u16>     pop -> assign existing name
         DEFINE,         // <name:u16>     pop -> define-or-reassign name
@@ -39,14 +39,16 @@ namespace nova {
 // ---- Lists ----
 LIST_NEW,           // <count:u16>    pop count elems, push list
 
-// ---- Calls ----
+// ---- Functions ----
+MAKE_FN,            // <idx:u16>      push Callable for functions[idx],
+//                closure = current env
 CALL,               // <argc:u8>      [callee, a0..aN-1] -> result
+RETURN_V,           //                pop value; pop frame; push to caller
 
 // ---- Misc ----
 PRINT,              // pop, print with newline
-RETURN,             // end of script
     };
 
     const char* opCodeName(OpCode op);
 
-} // namespace nova
+} // namespace vayu

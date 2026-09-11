@@ -25,9 +25,9 @@ print(doubled)              # [2, 4, 6, 8, 10]
 squared = map(lambda x: x * x, [1, 2, 3, 4])
 print(squared)              # [1, 4, 9, 16]
 
-words = ["hello", "world", "nova"]
+words = ["hello", "world", "Vayu"]
 upper = map(lambda s: s.upper(), words)
-print(upper)                # ["HELLO", "WORLD", "NOVA"]
+print(upper)                # ["HELLO", "WORLD", "Vayu"]
 
 # ---- filter ----
 evens = filter(lambda x: x % 2 == 0, nums)

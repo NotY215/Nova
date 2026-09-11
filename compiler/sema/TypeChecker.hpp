@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace nova {
+namespace vayu {
 
     class TypeError : public std::runtime_error {
     public:
@@ -31,6 +31,8 @@ namespace nova {
         int     loopDepth_ = 0;
 
         void    collectSignatures(const Block& program);
+        void    collectDefs(const Block& block, bool isTopLevel);   // <-- 4B
+
         void    checkStmt(const Stmt* s);
         void    checkBlock(const Block& b);
         TypePtr checkExpr(const Expr* e);
@@ -46,7 +48,6 @@ namespace nova {
             const std::string& name);
         void    checkMethodBody(const DefStmt* m, TypePtr cls);
 
-        // collection helpers
         TypePtr lookupCollectionMethod(const TypePtr& target, const std::string& name,
             SourceLocation loc);
         TypePtr commonElementType(const TypePtr& a, const TypePtr& b, SourceLocation loc);
@@ -56,4 +57,4 @@ namespace nova {
         void installBuiltinExceptions();
     };
 
-} // namespace nova
+} // namespace vayu

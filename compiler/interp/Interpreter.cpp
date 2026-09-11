@@ -9,7 +9,7 @@
 #include "parser/Parser.hpp"
 #include <fstream>
 
-namespace nova {
+namespace vayu {
 
     Interpreter* Interpreter::current_ = nullptr;
 
@@ -214,25 +214,25 @@ namespace nova {
             v = activeExceptions_.back();
         }
         if (!v.isInstance()) v = makeException("Exception", v.toString());
-        throw NovaException{ v, r->loc };
+        throw VayuException{ v, r->loc };
     }
 
     // ===========================================================================
-// Module loading
-// ===========================================================================
+    // Module loading
+    // ===========================================================================
 
     bool Interpreter::findModuleFile(const std::string& name, std::string& pathOut) const {
         // 1. source directory of the importing file
         if (!sourceDir_.empty()) {
             std::string p = sourceDir_;
             if (p.back() != '/' && p.back() != '\\') p += '/';
-            p += name + ".nova";
+            p += name + ".vayu";
             std::ifstream in(p, std::ios::binary);
             if (in) { pathOut = p; return true; }
         }
         // 2. current working directory
         {
-            std::string p = name + ".nova";
+            std::string p = name + ".vayu";
             std::ifstream in(p, std::ios::binary);
             if (in) { pathOut = p; return true; }
         }
@@ -255,7 +255,7 @@ namespace nova {
         std::string path;
         if (!findModuleFile(name, path))
             throw RuntimeError("cannot find module '" + name + "' (looked for '" +
-                name + ".nova')", loc);
+                name + ".vayu')", loc);
 
         std::ifstream in(path, std::ios::binary);
         if (!in) throw RuntimeError("cannot open module file '" + path + "'", loc);
@@ -353,7 +353,7 @@ namespace nova {
             finallyRan = true;
             if (t->finallyBody) execBlock(*t->finallyBody);
             };
-        auto dispatch = [&](const NovaException& ne) -> bool {
+        auto dispatch = [&](const VayuException& ne) -> bool {
             for (auto& h : t->handlers) {
                 bool matches = false;
                 if (!h.exceptionType) matches = true;
@@ -381,14 +381,14 @@ namespace nova {
         catch (ReturnSignal&) { runFinally(); throw; }
         catch (BreakSignal&) { runFinally(); throw; }
         catch (ContinueSignal&) { runFinally(); throw; }
-        catch (NovaException& ne) {
+        catch (VayuException& ne) {
             bool handled = false;
             try { handled = dispatch(ne); }
             catch (...) { runFinally(); throw; }
             if (!handled) { runFinally(); throw; }
         }
         catch (RuntimeError& e) {
-            NovaException ne{ makeException("RuntimeError", e.what()), e.loc };
+            VayuException ne{ makeException("RuntimeError", e.what()), e.loc };
             bool handled = false;
             try { handled = dispatch(ne); }
             catch (...) { runFinally(); throw; }
@@ -1500,4 +1500,4 @@ namespace nova {
         globals_->define("math", Value(mod));
     }
 
-} // namespace nova
+} // namespace vayu

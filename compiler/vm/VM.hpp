@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace nova {
+namespace vayu {
 
     class VMRuntimeError : public std::runtime_error {
     public:
@@ -19,14 +19,27 @@ namespace nova {
     public:
         explicit VM(std::shared_ptr<Environment> globals);
 
-        void run(const Chunk& chunk);
+        /// Run a bytecode chunk.  The chunk must contain a `RETURN_V` as its
+        /// last instruction (the compiler emits one automatically).
+        void run(std::shared_ptr<Chunk> entryChunk);
 
     private:
+        struct CallFrame {
+            std::shared_ptr<Chunk>       chunk;
+            size_t                       ip = 0;
+            std::shared_ptr<Environment> env;
+        };
+
         std::shared_ptr<Environment> globals_;
         std::vector<Value>           stack_;
-        const Chunk* chunk_ = nullptr;
-        size_t                       ip_ = 0;
+        std::vector<CallFrame>       frames_;
         int                          currentLine_ = 0;
+
+        // Accessors for the top frame
+        CallFrame& frame() { return frames_.back(); }
+        Chunk& chunk() { return *frame().chunk; }
+        std::shared_ptr<Environment>& env() { return frame().env; }
+        size_t& ip() { return frame().ip; }
 
         void  push(Value v) { stack_.push_back(std::move(v)); }
         Value pop() { Value v = std::move(stack_.back()); stack_.pop_back(); return v; }
@@ -40,6 +53,9 @@ namespace nova {
 
         void doArithmetic(int opcode);
         void doComparison(int opcode);
+
+        void callVMFunction(const std::shared_ptr<Callable>& fn,
+            const std::vector<Value>& args);
     };
 
-} // namespace nova
+} // namespace vayu

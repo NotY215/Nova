@@ -1,9 +1,9 @@
-# Nova Language Syntax
+# Vayu Language Syntax
 
 ::: {align="center"}
-# 🌌 Nova Syntax
+# 🌌 Vayu Syntax
 
-### A practical reference for the currently implemented Nova language.
+### A practical reference for the currently implemented Vayu language.
 
 **Python-inspired syntax · Static type checking · Native-language
 foundations**
@@ -13,13 +13,13 @@ foundations**
 
 ## 📌 About This Document
 
-This document describes the syntax currently demonstrated by the Nova
+This document describes the syntax currently demonstrated by the Vayu
 examples and compiler behavior.
 
 It focuses on the language features that are currently implemented and
 tested, rather than describing planned or future features.
 
-For other parts of the Nova project:
+For other parts of the Vayu project:
 
 -   [📦 Package System](package.md)
 -   [🤖 AI & ML](ai.md)
@@ -29,10 +29,10 @@ For other parts of the Nova project:
 
 # 1. Source Files
 
-Nova source files use the:
+Vayu source files use the:
 
 ``` text
-.nova
+.Vayu
 ```
 
 extension.
@@ -40,13 +40,13 @@ extension.
 Example:
 
 ``` text
-hello.nova
-control.nova
-fib.nova
-classes.nova
+hello.Vayu
+control.Vayu
+fib.Vayu
+classes.Vayu
 ```
 
-Nova source code is indentation-based, using a Python-inspired block
+Vayu source code is indentation-based, using a Python-inspired block
 syntax.
 
 ------------------------------------------------------------------------
@@ -55,7 +55,7 @@ syntax.
 
 Single-line comments begin with `#`.
 
-``` nova
+``` Vayu
 # This is a comment
 
 name = "NotY"  # This is also a comment
@@ -69,18 +69,18 @@ Comments are ignored by the compiler.
 
 Variables are created using assignment.
 
-``` nova
+``` Vayu
 name = "NotY"
 age = 19
 score = 100
 ```
 
-Nova supports type inference:
+Vayu supports type inference:
 
-``` nova
+``` Vayu
 x = 5
 y = 3.14
-name = "Nova"
+name = "Vayu"
 flag = true
 ```
 
@@ -92,10 +92,10 @@ The compiler determines the type from the assigned value.
 
 Variables can optionally specify their type.
 
-``` nova
+``` Vayu
 x: int = 10
 y: float = 2.5
-name: str = "Nova"
+name: str = "Vayu"
 flag: bool = true
 ```
 
@@ -104,7 +104,7 @@ declared type.
 
 For example:
 
-``` nova
+``` Vayu
 x: int = "hello"
 ```
 
@@ -128,13 +128,13 @@ The currently demonstrated type system includes:
 
 Generic collection types can be written using angle brackets:
 
-``` nova
+``` Vayu
 list<int>
 ```
 
 Example:
 
-``` nova
+``` Vayu
 def total_of(lst: list<int>) -> int:
     ...
 ```
@@ -143,16 +143,16 @@ def total_of(lst: list<int>) -> int:
 
 # 6. Boolean Values
 
-Nova uses:
+Vayu uses:
 
-``` nova
+``` Vayu
 true
 false
 ```
 
 Example:
 
-``` nova
+``` Vayu
 active = true
 finished = false
 ```
@@ -160,7 +160,7 @@ finished = false
 Boolean expressions can be created using comparisons and logical
 operators.
 
-``` nova
+``` Vayu
 check = age >= 18
 ok = active and check
 ```
@@ -171,20 +171,20 @@ ok = active and check
 
 Strings use double quotes.
 
-``` nova
-name = "Nova"
+``` Vayu
+name = "Vayu"
 message = "Hello, World"
 ```
 
 Strings can be concatenated with `+`.
 
-``` nova
+``` Vayu
 greeting = "Hello, " + name
 ```
 
 Conversion to a string can be performed with `str()`.
 
-``` nova
+``` Vayu
 age = 19
 print("Age: " + str(age))
 ```
@@ -195,15 +195,15 @@ print("Age: " + str(age))
 
 The built-in `print()` function outputs values.
 
-``` nova
-print("Hello, Nova!")
+``` Vayu
+print("Hello, Vayu!")
 print(42)
 print(name)
 ```
 
 Multiple values can be passed:
 
-``` nova
+``` Vayu
 print("sum:", total)
 ```
 
@@ -213,15 +213,15 @@ print("sum:", total)
 
 Functions use the `def` keyword.
 
-``` nova
+``` Vayu
 def greet(name: str) -> str:
     return "Hello, " + name
 ```
 
 Functions can be called normally:
 
-``` nova
-message = greet("Nova")
+``` Vayu
+message = greet("Vayu")
 print(message)
 ```
 
@@ -231,14 +231,14 @@ print(message)
 
 Parameters can have explicit types.
 
-``` nova
+``` Vayu
 def add(a: int, b: int) -> int:
     return a + b
 ```
 
 Multiple parameters are separated by commas.
 
-``` nova
+``` Vayu
 def scale(value: float, factor: float) -> float:
     return value * factor
 ```
@@ -249,21 +249,21 @@ def scale(value: float, factor: float) -> float:
 
 Return types are specified after `->`.
 
-``` nova
+``` Vayu
 def square(x: int) -> int:
     return x * x
 ```
 
 Functions that do not return a value can use `None`:
 
-``` nova
+``` Vayu
 def greet(name: str) -> None:
     print("Hello, " + name)
 ```
 
 A bare `return` is also supported:
 
-``` nova
+``` Vayu
 def noop():
     return
 ```
@@ -274,7 +274,7 @@ def noop():
 
 Functions can call themselves.
 
-``` nova
+``` Vayu
 def fib(n: int) -> int:
     if n < 2:
         return n
@@ -285,9 +285,9 @@ def fib(n: int) -> int:
 
 # 10. Conditions
 
-Nova uses `if`, `elif`, and `else`.
+Vayu uses `if`, `elif`, and `else`.
 
-``` nova
+``` Vayu
 if x < 0:
     print("negative")
 elif x == 0:
@@ -306,7 +306,7 @@ Blocks are defined through indentation.
 
 `while` repeats a block while its condition is true.
 
-``` nova
+``` Vayu
 x = 5
 
 while x > 0:
@@ -328,16 +328,16 @@ Output:
 
 # 12. For Loops
 
-Nova supports iteration using `for`.
+Vayu supports iteration using `for`.
 
-``` nova
+``` Vayu
 for x in [10, 20, 30]:
     print(x)
 ```
 
 Iteration over a variable is also supported:
 
-``` nova
+``` Vayu
 nums = [1, 2, 3, 4, 5]
 
 for n in nums:
@@ -350,7 +350,7 @@ for n in nums:
 
 The built-in `range()` function can generate integer sequences.
 
-``` nova
+``` Vayu
 for i in range(5):
     print(i)
 ```
@@ -367,14 +367,14 @@ Produces:
 
 A start and end value can be supplied:
 
-``` nova
+``` Vayu
 for i in range(2, 8):
     print(i)
 ```
 
 A step can also be supplied:
 
-``` nova
+``` Vayu
 for i in range(0, 10, 2):
     print(i)
 ```
@@ -385,7 +385,7 @@ for i in range(0, 10, 2):
 
 `break` immediately exits the current loop.
 
-``` nova
+``` Vayu
 for n in [1, 2, 3, 4, 5]:
     if n == 4:
         break
@@ -398,7 +398,7 @@ for n in [1, 2, 3, 4, 5]:
 
 `continue` skips the remainder of the current iteration.
 
-``` nova
+``` Vayu
 for n in [1, 2, 3, 4, 5]:
     if n % 2 == 0:
         continue
@@ -409,10 +409,10 @@ for n in [1, 2, 3, 4, 5]:
 
 # 15. Arithmetic Operators
 
-Nova currently demonstrates the following arithmetic operators:
+Vayu currently demonstrates the following arithmetic operators:
 
   Operator   Meaning                  Example
-  ---------- ------------------------ ----------
+  ---------- ------------------------ ----------------
   `+`        Addition                 `a + b`
   `-`        Subtraction              `a - b`
   `*`        Multiplication           `a * b`
@@ -424,25 +424,113 @@ Nova currently demonstrates the following arithmetic operators:
 
 Examples:
 
-``` nova
-a = 10
-b = 3
-
-print(a + b)
-print(a - b)
-print(a * b)
-print(a / b)
-print(a // b)
-print(a % b)
-print(a ** 2)
-print(-a)
+``` vyu
+print(1 + 2)
+print(10 - 3)
+print(4 * 5)
+print(7 / 2)
+print(7 // 2)
+print(7 % 3)
+print(2 ** 10)
+print(-5)
+print(- -5)
 ```
 
-------------------------------------------------------------------------
+Output:
+
+``` text
+3
+7
+20
+3.5
+3
+1
+1024
+-5
+5
+```
+
+### 15.1 Arithmetic Assignment Through Expressions
+
+Variables can be updated by assigning a new expression to the same
+variable:
+
+``` vyu
+a = 10
+a = a + 5
+print(a)
+```
+
+Output:
+
+``` text
+15
+```
+
+### 15.2 Unary Negative
+
+The `-` operator can be used as a unary operator to negate a value.
+Multiple unary negatives are supported:
+
+``` vyu
+print(-5)
+print(- -5)
+```
+
+The second expression evaluates to `5`.
+
+### 15.3 Exponentiation Associativity
+
+Exponentiation is evaluated right-to-left:
+
+``` vyu
+print(2 ** 3 ** 2)
+```
+
+Output:
+
+``` text
+512
+```
+
+This corresponds to:
+
+``` text
+2 ** (3 ** 2)
+```
+
+rather than:
+
+``` text
+(2 ** 3) ** 2
+```
+
+### 15.4 Expression Examples
+
+Arithmetic expressions can combine variables, literals, operators, and
+parentheses:
+
+``` vyu
+a = 10
+b = 20
+c = a + b
+print(c)
+
+print(1 + 2 * 3)
+print((1 + 2) * 3)
+```
+
+Output:
+
+``` text
+30
+7
+9
+```
 
 # 16. Comparison Operators
 
-Nova supports:
+Vayu supports:
 
 ``` text
 ==
@@ -455,7 +543,7 @@ Nova supports:
 
 Example:
 
-``` nova
+``` Vayu
 age = 19
 
 print(age >= 18)
@@ -469,7 +557,7 @@ Comparison expressions produce boolean values.
 
 # 17. Logical Operators
 
-Nova supports:
+Vayu supports:
 
 ``` text
 and
@@ -479,7 +567,7 @@ not
 
 Examples:
 
-``` nova
+``` Vayu
 adult = age >= 18
 good_score = score > 90
 
@@ -489,7 +577,7 @@ if adult and good_score:
 
 Other examples:
 
-``` nova
+``` Vayu
 result = a and b
 result = a or b
 result = not flag
@@ -499,52 +587,75 @@ result = not flag
 
 # 18. Operator Precedence
 
-Expressions follow normal arithmetic and logical precedence.
+Vayu follows conventional expression precedence for the currently
+implemented operators. Parentheses can be used to explicitly control
+evaluation order.
 
 For example:
 
-``` nova
-1 + 2 * 3
+``` vyu
+print(1 + 2 * 3)
+print((1 + 2) * 3)
 ```
 
-is evaluated with multiplication before addition.
+Output:
 
-Parentheses can explicitly control evaluation:
-
-``` nova
-(1 + 2) * 3
+``` text
+7
+9
 ```
 
-Function calls, indexing, member access and arithmetic expressions can
-be combined:
+Multiplication is evaluated before addition, while parentheses take
+priority over the normal precedence rules.
 
-``` nova
-foo(1, 2, 3)
-nova.ai.Tensor(1, 2)
-obj.method(x).field
-arr[0] + arr[1]
-x.y.z
+Exponentiation is right-associative:
+
+``` vyu
+print(2 ** 3 ** 2)
 ```
 
-------------------------------------------------------------------------
+produces:
+
+``` text
+512
+```
+
+which is equivalent to `2 ** (3 ** 2)`.
+
+Logical and comparison expressions can also be combined:
+
+``` vyu
+print(1 < 5 and 5 < 10)
+print(1 > 5 or 5 < 10)
+```
+
+Output:
+
+``` text
+true
+true
+```
+
+Parentheses are recommended when an expression would otherwise be
+difficult to read.
 
 # 19. Lists
 
 Lists use square brackets.
 
-``` nova
+``` Vayu
 nums = [1, 2, 3, 4, 5]
 ```
 
 Lists can contain strings:
 
-``` nova
+``` Vayu
 names = ["Alice", "Bob", "Charlie"]
 ```
 
 An empty list is valid:
 
-``` nova
+``` Vayu
 items = []
 ```
 
@@ -554,7 +665,7 @@ items = []
 
 Indexing starts at zero.
 
-``` nova
+``` Vayu
 nums = [10, 20, 30]
 
 print(nums[0])
@@ -563,7 +674,7 @@ print(nums[2])
 
 Negative indexes are supported:
 
-``` nova
+``` Vayu
 print(nums[-1])
 ```
 
@@ -573,7 +684,7 @@ print(nums[-1])
 
 Existing elements can be changed:
 
-``` nova
+``` Vayu
 nums[0] = 100
 ```
 
@@ -583,7 +694,7 @@ nums[0] = 100
 
 Use `len()`:
 
-``` nova
+``` Vayu
 print(len(nums))
 ```
 
@@ -593,7 +704,7 @@ print(len(nums))
 
 Add an item to the end:
 
-``` nova
+``` Vayu
 nums.append(6)
 ```
 
@@ -603,7 +714,7 @@ nums.append(6)
 
 Remove and return the last item:
 
-``` nova
+``` Vayu
 last = nums.pop()
 print(last)
 ```
@@ -614,7 +725,7 @@ print(last)
 
 Insert an item at a specified position:
 
-``` nova
+``` Vayu
 nums.insert(0, 100)
 ```
 
@@ -624,13 +735,13 @@ nums.insert(0, 100)
 
 Use `in`:
 
-``` nova
+``` Vayu
 print(3 in nums)
 ```
 
 The list also provides `contains()`:
 
-``` nova
+``` Vayu
 print(nums.contains(3))
 ```
 
@@ -640,13 +751,13 @@ print(nums.contains(3))
 
 Lists can be concatenated:
 
-``` nova
+``` Vayu
 print([1, 2] + [3, 4])
 ```
 
 Lists can be repeated:
 
-``` nova
+``` Vayu
 print([0] * 3)
 ```
 
@@ -656,7 +767,7 @@ print([0] * 3)
 
 Lists can contain other lists.
 
-``` nova
+``` Vayu
 grid = [[1, 2], [3, 4]]
 
 print(grid[0][1])
@@ -670,7 +781,7 @@ List slicing is **not currently implemented**.
 
 For example, syntax such as:
 
-``` nova
+``` Vayu
 nums[1:4]
 ```
 
@@ -682,7 +793,7 @@ should not currently be considered part of the implemented language.
 
 Maps use curly braces with key/value pairs.
 
-``` nova
+``` Vayu
 ages = {
     "alice": 30,
     "bob": 25
@@ -691,7 +802,7 @@ ages = {
 
 Keys can be accessed using brackets:
 
-``` nova
+``` Vayu
 print(ages["alice"])
 ```
 
@@ -699,7 +810,7 @@ print(ages["alice"])
 
 ## 20.1 Adding or Updating Map Values
 
-``` nova
+``` Vayu
 ages["carol"] = 40
 ```
 
@@ -709,7 +820,7 @@ ages["carol"] = 40
 
 A value can also be added using `put()`:
 
-``` nova
+``` Vayu
 ages.put("dave", 22)
 ```
 
@@ -719,7 +830,7 @@ ages.put("dave", 22)
 
 Remove a key:
 
-``` nova
+``` Vayu
 ages.remove("bob")
 ```
 
@@ -727,13 +838,13 @@ ages.remove("bob")
 
 ## 20.4 Map Membership
 
-``` nova
+``` Vayu
 print("alice" in ages)
 ```
 
 or:
 
-``` nova
+``` Vayu
 print(ages.contains("alice"))
 ```
 
@@ -743,7 +854,7 @@ print(ages.contains("alice"))
 
 Retrieve the keys:
 
-``` nova
+``` Vayu
 keys = ages.keys()
 ```
 
@@ -751,7 +862,7 @@ keys = ages.keys()
 
 ## 20.6 Map Length
 
-``` nova
+``` Vayu
 print(len(ages))
 ```
 
@@ -761,7 +872,7 @@ print(len(ages))
 
 An empty map can be created with:
 
-``` nova
+``` Vayu
 empty = {}
 ```
 
@@ -771,7 +882,7 @@ empty = {}
 
 Iteration over a map produces its keys:
 
-``` nova
+``` Vayu
 for name in ages:
     print(name)
 ```
@@ -782,7 +893,7 @@ for name in ages:
 
 Strings can be indexed:
 
-``` nova
+``` Vayu
 text = "hello"
 
 print(text[0])
@@ -791,7 +902,7 @@ print(text[-1])
 
 Strings can also be iterated:
 
-``` nova
+``` Vayu
 for c in "abc":
     print(c)
 ```
@@ -800,48 +911,48 @@ for c in "abc":
 
 # 22. String Methods
 
-Nova currently demonstrates several string operations.
+Vayu currently demonstrates several string operations.
 
 ### `strip()`
 
-``` nova
+``` Vayu
 text.strip()
 ```
 
 ### `lower()`
 
-``` nova
+``` Vayu
 text.lower()
 ```
 
 ### `upper()`
 
-``` nova
+``` Vayu
 text.upper()
 ```
 
 ### `split()`
 
-``` nova
+``` Vayu
 "a,b,c".split(",")
 "one two three".split()
 ```
 
 ### `join()`
 
-``` nova
+``` Vayu
 "-".join(["x", "y", "z"])
 ```
 
 ### `replace()`
 
-``` nova
+``` Vayu
 "hello".replace("l", "L")
 ```
 
 ### `find()`
 
-``` nova
+``` Vayu
 "hello world".find("world")
 ```
 
@@ -849,43 +960,43 @@ Returns `-1` when the substring is not found.
 
 ### `contains()`
 
-``` nova
+``` Vayu
 "hello".contains("ell")
 ```
 
 ### `starts_with()`
 
-``` nova
+``` Vayu
 "file.txt".starts_with("file")
 ```
 
 ### `ends_with()`
 
-``` nova
+``` Vayu
 "file.txt".ends_with(".txt")
 ```
 
 ### `is_digit()`
 
-``` nova
+``` Vayu
 "12345".is_digit()
 ```
 
 ### `is_alpha()`
 
-``` nova
+``` Vayu
 "abcde".is_alpha()
 ```
 
 ### `is_space()`
 
-``` nova
+``` Vayu
 "   ".is_space()
 ```
 
 ### `char_at()`
 
-``` nova
+``` Vayu
 "hello".char_at(1)
 ```
 
@@ -893,9 +1004,9 @@ Returns `-1` when the substring is not found.
 
 # 23. Built-in Conversion Functions
 
-Nova currently demonstrates:
+Vayu currently demonstrates:
 
-``` nova
+``` Vayu
 str(value)
 int(value)
 float(value)
@@ -903,14 +1014,14 @@ float(value)
 
 String/character utility functions include:
 
-``` nova
+``` Vayu
 ord("A")
 chr(66)
 ```
 
 Example:
 
-``` nova
+``` Vayu
 print(ord("A"))
 print(chr(66))
 print(chr(ord("A") + 1))
@@ -923,7 +1034,7 @@ print(chr(ord("A") + 1))
 The `list()` function can create a list from an iterable such as a
 string.
 
-``` nova
+``` Vayu
 print(list("abc"))
 ```
 
@@ -933,7 +1044,7 @@ print(list("abc"))
 
 Functions can be stored in variables.
 
-``` nova
+``` Vayu
 def add(a: int, b: int) -> int:
     return a + b
 
@@ -941,7 +1052,7 @@ operation = add
 print(operation(2, 3))
 ```
 
-Nova also supports anonymous functions through `lambda`.
+Vayu also supports anonymous functions through `lambda`.
 
 ------------------------------------------------------------------------
 
@@ -949,13 +1060,13 @@ Nova also supports anonymous functions through `lambda`.
 
 A lambda is written using:
 
-``` nova
+``` Vayu
 lambda parameters: expression
 ```
 
 Example:
 
-``` nova
+``` Vayu
 double = lambda x: x * 2
 
 print(double(5))
@@ -963,7 +1074,7 @@ print(double(5))
 
 Multiple parameters:
 
-``` nova
+``` Vayu
 add = lambda a, b: a + b
 
 print(add(3, 4))
@@ -971,7 +1082,7 @@ print(add(3, 4))
 
 No parameters:
 
-``` nova
+``` Vayu
 no_args = lambda: 42
 
 print(no_args())
@@ -983,7 +1094,7 @@ print(no_args())
 
 A lambda can capture a variable from its surrounding function.
 
-``` nova
+``` Vayu
 def make_adder(n: int):
     return lambda x: x + n
 
@@ -1000,7 +1111,7 @@ Functions can receive functions as arguments and return functions.
 
 Example:
 
-``` nova
+``` Vayu
 def compose(f, g):
     return lambda x: f(g(x))
 ```
@@ -1011,7 +1122,7 @@ def compose(f, g):
 
 `map()` applies a function to each item.
 
-``` nova
+``` Vayu
 nums = [1, 2, 3, 4, 5]
 
 doubled = map(lambda x: x * 2, nums)
@@ -1025,7 +1136,7 @@ print(doubled)
 
 `filter()` keeps values for which the supplied function is true.
 
-``` nova
+``` Vayu
 evens = filter(lambda x: x % 2 == 0, nums)
 
 print(evens)
@@ -1037,7 +1148,7 @@ print(evens)
 
 `reduce()` combines a collection into a single value.
 
-``` nova
+``` Vayu
 total = reduce(
     lambda acc, x: acc + x,
     [1, 2, 3, 4, 5]
@@ -1052,7 +1163,7 @@ print(total)
 
 Collections can be sorted:
 
-``` nova
+``` Vayu
 sorted_values = sorted([3, 1, 4, 1, 5])
 
 print(sorted_values)
@@ -1060,7 +1171,7 @@ print(sorted_values)
 
 A key function can be supplied:
 
-``` nova
+``` Vayu
 people = ["Charlie", "alice", "Bob"]
 
 result = sorted(people, lambda s: s.lower())
@@ -1072,13 +1183,13 @@ result = sorted(people, lambda s: s.lower())
 
 `any()` returns whether at least one value is truthy.
 
-``` nova
+``` Vayu
 print(any([false, false, true]))
 ```
 
 `all()` returns whether every value is truthy.
 
-``` nova
+``` Vayu
 print(all([true, true, true]))
 ```
 
@@ -1088,13 +1199,13 @@ print(all([true, true, true]))
 
 `sum()` adds values in a collection.
 
-``` nova
+``` Vayu
 print(sum([1, 2, 3, 4, 5]))
 ```
 
 It also works with floating-point values:
 
-``` nova
+``` Vayu
 print(sum([1.5, 2.5, 3.0]))
 ```
 
@@ -1102,9 +1213,9 @@ print(sum([1.5, 2.5, 3.0]))
 
 # 35. Structs
 
-Nova supports `struct` declarations.
+Vayu supports `struct` declarations.
 
-``` nova
+``` Vayu
 struct Player:
     name: str
     health: int
@@ -1119,7 +1230,7 @@ A struct defines named fields with types.
 
 Keyword arguments:
 
-``` nova
+``` Vayu
 p = Player(
     name="NotY",
     health=100,
@@ -1129,7 +1240,7 @@ p = Player(
 
 Positional arguments:
 
-``` nova
+``` Vayu
 q = Player("Ally", 80, 10)
 ```
 
@@ -1139,7 +1250,7 @@ q = Player("Ally", 80, 10)
 
 Use member access:
 
-``` nova
+``` Vayu
 print(p.name)
 print(p.health)
 ```
@@ -1148,7 +1259,7 @@ print(p.health)
 
 ## 35.3 Modifying Fields
 
-``` nova
+``` Vayu
 p.health = p.health - 25
 ```
 
@@ -1158,7 +1269,7 @@ p.health = p.health - 25
 
 Structs can contain other struct types.
 
-``` nova
+``` Vayu
 struct Team:
     leader: Player
     size: int
@@ -1171,7 +1282,7 @@ team = Team(
 
 Nested fields can be accessed:
 
-``` nova
+``` Vayu
 print(team.leader.name)
 print(team.leader.health)
 ```
@@ -1182,7 +1293,7 @@ print(team.leader.health)
 
 A nested struct field can refer to the same object.
 
-``` nova
+``` Vayu
 team.leader.health = 42
 
 print(p.health)
@@ -1204,9 +1315,9 @@ Player(name="NotY", health=42, score=0)
 
 # 36. Classes
 
-Nova supports classes with fields and methods.
+Vayu supports classes with fields and methods.
 
-``` nova
+``` Vayu
 class Player:
     name: str
     health: int
@@ -1214,7 +1325,7 @@ class Player:
 
 Classes can define an initializer using `__init__`.
 
-``` nova
+``` Vayu
 class Player:
     name: str
     health: int
@@ -1230,14 +1341,14 @@ class Player:
 
 Instance methods use `self` to access the current object.
 
-``` nova
+``` Vayu
 def damage(self, amount: int) -> None:
     self.health = self.health - amount
 ```
 
 Fields can be accessed with:
 
-``` nova
+``` Vayu
 self.name
 self.health
 ```
@@ -1248,7 +1359,7 @@ self.health
 
 Classes can define methods.
 
-``` nova
+``` Vayu
 class Counter:
     value: int
 
@@ -1261,7 +1372,7 @@ class Counter:
 
 Create an instance:
 
-``` nova
+``` Vayu
 counter = Counter()
 
 counter.inc()
@@ -1273,7 +1384,7 @@ counter.inc()
 
 An instance method can call another method on the same object.
 
-``` nova
+``` Vayu
 def inc_n(self, n: int) -> None:
     i = 0
 
@@ -1288,7 +1399,7 @@ def inc_n(self, n: int) -> None:
 
 A class can inherit from another class.
 
-``` nova
+``` Vayu
 class Warrior(Player):
     rage: int
 ```
@@ -1301,7 +1412,7 @@ The derived class receives members and behavior from the base class.
 
 A derived class can call the base-class implementation using `super()`.
 
-``` nova
+``` Vayu
 def __init__(self, name: str) -> None:
     super().__init__(name)
     self.rage = 0
@@ -1309,7 +1420,7 @@ def __init__(self, name: str) -> None:
 
 Methods can also call a parent implementation:
 
-``` nova
+``` Vayu
 def damage(self, amount: int) -> None:
     super().damage(amount)
     self.rage = self.rage + amount
@@ -1321,7 +1432,7 @@ def damage(self, amount: int) -> None:
 
 A subclass can replace a method inherited from its parent.
 
-``` nova
+``` Vayu
 class Warrior(Player):
 
     def describe(self) -> str:
@@ -1334,14 +1445,14 @@ class Warrior(Player):
 
 Inheritance can continue through multiple levels.
 
-``` nova
+``` Vayu
 class Mage(Player):
     mana: int
 ```
 
 Then:
 
-``` nova
+``` Vayu
 class Archmage(Mage):
     def cast(self) -> str:
         return self.name + " casts a spell"
@@ -1355,7 +1466,7 @@ The `.` operator accesses fields, methods and module members.
 
 Examples:
 
-``` nova
+``` Vayu
 player.health
 player.damage(20)
 
@@ -1372,7 +1483,7 @@ obj.method(x).field
 
 Function calls use parentheses.
 
-``` nova
+``` Vayu
 print("Hello")
 square(5)
 add(2, 3)
@@ -1380,7 +1491,7 @@ add(2, 3)
 
 Nested calls are supported:
 
-``` nova
+``` Vayu
 print(greet(name))
 ```
 
@@ -1390,7 +1501,7 @@ print(greet(name))
 
 Struct construction supports named arguments.
 
-``` nova
+``` Vayu
 player = Player(
     name="NotY",
     health=100,
@@ -1405,7 +1516,7 @@ functions.
 
 # 47. Exception Handling
 
-Nova supports exception handling with:
+Vayu supports exception handling with:
 
 ``` text
 try
@@ -1416,7 +1527,7 @@ raise
 
 Basic example:
 
-``` nova
+``` Vayu
 try:
     print("before")
     raise ValueError("something went wrong")
@@ -1430,13 +1541,13 @@ except ValueError as e:
 
 Exceptions can be raised using `raise`.
 
-``` nova
+``` Vayu
 raise ValueError("bad value")
 ```
 
 Other demonstrated exception types include:
 
-``` nova
+``` Vayu
 ValueError
 TypeError
 RuntimeError
@@ -1450,14 +1561,14 @@ Exception
 
 An exception can be captured with `as`.
 
-``` nova
+``` Vayu
 except ValueError as e:
     print(e.message)
 ```
 
 The exception's message can be accessed through:
 
-``` nova
+``` Vayu
 e.message
 ```
 
@@ -1467,7 +1578,7 @@ e.message
 
 Multiple `except` blocks can handle different exception types.
 
-``` nova
+``` Vayu
 try:
     risky()
 except ValueError as e:
@@ -1484,7 +1595,7 @@ except RuntimeError as e:
 
 A bare `except` can catch an exception without specifying a type.
 
-``` nova
+``` Vayu
 try:
     raise ValueError("something went wrong")
 except:
@@ -1498,7 +1609,7 @@ except:
 `Exception` can be used to catch exceptions through the common base
 type.
 
-``` nova
+``` Vayu
 try:
     raise ValueError("specific")
 except Exception as e:
@@ -1511,7 +1622,7 @@ except Exception as e:
 
 `finally` runs after a `try` block and its exception handling.
 
-``` nova
+``` Vayu
 try:
     print("doing work")
 finally:
@@ -1520,7 +1631,7 @@ finally:
 
 It also runs when an exception is handled:
 
-``` nova
+``` Vayu
 try:
     print("try block")
     raise ValueError("oops")
@@ -1536,7 +1647,7 @@ finally:
 
 Exception handling can be nested.
 
-``` nova
+``` Vayu
 try:
     try:
         raise ValueError("inner")
@@ -1552,7 +1663,7 @@ except ValueError:
 
 An exception can be re-raised from an exception handler.
 
-``` nova
+``` Vayu
 def reraise() -> None:
     try:
         raise ValueError("original")
@@ -1567,7 +1678,7 @@ def reraise() -> None:
 
 An exception handler can raise another exception.
 
-``` nova
+``` Vayu
 try:
     try:
         raise ValueError("inner")
@@ -1583,7 +1694,7 @@ except TypeError as e:
 
 The current implementation also demonstrates raising a plain string:
 
-``` nova
+``` Vayu
 try:
     raise "plain string error"
 except Exception as e:
@@ -1596,16 +1707,16 @@ This behavior is part of the currently demonstrated runtime behavior.
 
 # 58. Modules
 
-Nova supports importing other `.nova` modules.
+Vayu supports importing other `.Vayu` modules.
 
 Example project:
 
 ``` text
 examples/
 └── modules/
-    ├── main.nova
-    ├── math_helpers.nova
-    └── user.nova
+    ├── main.Vayu
+    ├── math_helpers.Vayu
+    └── user.Vayu
 ```
 
 ------------------------------------------------------------------------
@@ -1614,13 +1725,13 @@ examples/
 
 A module can be imported by name:
 
-``` nova
+``` Vayu
 import math_helpers
 ```
 
 Members can then be accessed through the module:
 
-``` nova
+``` Vayu
 print(math_helpers.square(5))
 print(math_helpers.PI)
 ```
@@ -1631,13 +1742,13 @@ print(math_helpers.PI)
 
 Modules can have aliases:
 
-``` nova
+``` Vayu
 import math_helpers as mh
 ```
 
 Then:
 
-``` nova
+``` Vayu
 print(mh.square(6))
 ```
 
@@ -1647,13 +1758,13 @@ print(mh.square(6))
 
 Specific functions or values can be imported:
 
-``` nova
+``` Vayu
 from math_helpers import square, cube
 ```
 
 They can then be used directly:
 
-``` nova
+``` Vayu
 print(square(5))
 print(cube(3))
 ```
@@ -1664,13 +1775,13 @@ print(cube(3))
 
 Imported members can also have aliases.
 
-``` nova
+``` Vayu
 from math_helpers import square, cube as cb
 ```
 
 Then:
 
-``` nova
+``` Vayu
 print(square(5))
 print(cb(3))
 ```
@@ -1681,13 +1792,13 @@ print(cb(3))
 
 Modules can contain top-level values.
 
-``` nova
+``` Vayu
 PI = 3.14159
 ```
 
 They can be accessed through the module:
 
-``` nova
+``` Vayu
 print(math_helpers.PI)
 ```
 
@@ -1697,7 +1808,7 @@ print(math_helpers.PI)
 
 Modules can contain functions:
 
-``` nova
+``` Vayu
 def square(x: int) -> int:
     return x * x
 ```
@@ -1708,7 +1819,7 @@ def square(x: int) -> int:
 
 Modules can contain structs:
 
-``` nova
+``` Vayu
 struct User:
     name: str
     age: int
@@ -1716,7 +1827,7 @@ struct User:
 
 They can be returned and used by other modules.
 
-``` nova
+``` Vayu
 def make_user(name: str, age: int) -> User:
     return User(name=name, age=age)
 ```
@@ -1727,8 +1838,8 @@ def make_user(name: str, age: int) -> User:
 
 Module and member access can be combined.
 
-``` nova
-nova.ai.Tensor(1, 2)
+``` Vayu
+Vayu.ai.Tensor(1, 2)
 ```
 
 ------------------------------------------------------------------------
@@ -1739,7 +1850,7 @@ The demonstrated `math` module provides mathematical functionality.
 
 Examples:
 
-``` nova
+``` Vayu
 math.sqrt(16)
 math.floor(3.7)
 math.ceil(3.2)
@@ -1755,7 +1866,7 @@ math.log2(8)
 
 Constants:
 
-``` nova
+``` Vayu
 math.pi
 math.e
 ```
@@ -1766,7 +1877,7 @@ math.e
 
 `abs()` returns the absolute value.
 
-``` nova
+``` Vayu
 print(abs(-5))
 ```
 
@@ -1774,11 +1885,11 @@ print(abs(-5))
 
 # 69. Expression Statements
 
-Nova allows expressions to appear as standalone statements.
+Vayu allows expressions to appear as standalone statements.
 
 Examples:
 
-``` nova
+``` Vayu
 1 + 2 * 3
 foo(1, 2, 3)
 obj.method(x)
@@ -1790,13 +1901,13 @@ obj.method(x)
 
 Member access can be chained:
 
-``` nova
+``` Vayu
 x.y.z
 ```
 
 Method calls can be chained with member access:
 
-``` nova
+``` Vayu
 obj.method(x).field
 ```
 
@@ -1806,13 +1917,13 @@ obj.method(x).field
 
 Values can be indexed using square brackets:
 
-``` nova
+``` Vayu
 arr[0]
 ```
 
 Nested indexing is possible:
 
-``` nova
+``` Vayu
 matrix[0][1]
 ```
 
@@ -1823,7 +1934,7 @@ matrix[0][1]
 The current type checker demonstrates integer-to-floating-point
 promotion.
 
-``` nova
+``` Vayu
 a: int = 10
 b: float = 2.5
 
@@ -1835,7 +1946,7 @@ value.
 
 Function arguments can also use this promotion:
 
-``` nova
+``` Vayu
 def scale(v: float, k: float) -> float:
     return v * k
 
@@ -1850,13 +1961,13 @@ Here the integer argument can be promoted to `float`.
 
 Generic type notation is supported for demonstrated collection types.
 
-``` nova
+``` Vayu
 list<int>
 ```
 
 Example:
 
-``` nova
+``` Vayu
 def total_of(values: list<int>) -> int:
     total = 0
 
@@ -1870,23 +1981,23 @@ def total_of(values: list<int>) -> int:
 
 # 74. Type Checking
 
-Nova provides a type-checking mode.
+Vayu provides a type-checking mode.
 
 The compiler can check a source file without executing it:
 
 ``` text
-novac examples/types.nova --check
+vayuc examples/types.Vayu --check
 ```
 
 A successful check reports:
 
 ``` text
-OK: examples/types.nova type-checks successfully.
+OK: examples/types.Vayu type-checks successfully.
 ```
 
 An invalid assignment such as:
 
-``` nova
+``` Vayu
 x: int = "hello"
 ```
 
@@ -1896,11 +2007,11 @@ is rejected by the type checker.
 
 # 75. AST Representation
 
-Nova's compiler can expose the parsed Abstract Syntax Tree.
+Vayu's compiler can expose the parsed Abstract Syntax Tree.
 
 For example, a simple program containing:
 
-``` nova
+``` Vayu
 name = "NotY"
 age = 19
 
@@ -1930,9 +2041,9 @@ returns, binary expressions, calls and conditional branches.
 
 # 76. Example: Hello World
 
-A complete small Nova program:
+A complete small Vayu program:
 
-``` nova
+``` Vayu
 name = "NotY"
 age = 19
 
@@ -1949,7 +2060,7 @@ else:
 
 # 77. Example: Control Flow
 
-``` nova
+``` Vayu
 x = 5
 
 if x < 0:
@@ -1972,7 +2083,7 @@ print("done")
 
 # 78. Example: Recursion
 
-``` nova
+``` Vayu
 def fib(n: int) -> int:
     if n < 2:
         return n
@@ -1990,7 +2101,7 @@ while i < 10:
 
 # 79. Example: Struct + Function
 
-``` nova
+``` Vayu
 struct Player:
     name: str
     health: int
@@ -2013,7 +2124,7 @@ print(player.health)
 
 # 80. Example: Class + Inheritance
 
-``` nova
+``` Vayu
 class Player:
     name: str
     health: int
@@ -2056,7 +2167,7 @@ print(warrior.describe())
 
 # 81. Example: Lambda + Collections
 
-``` nova
+``` Vayu
 nums = [1, 2, 3, 4, 5]
 
 doubled = map(lambda x: x * 2, nums)
@@ -2077,9 +2188,9 @@ print(total)
 
 # 82. Example: Modules
 
-### `math_helpers.nova`
+### `math_helpers.Vayu`
 
-``` nova
+``` Vayu
 PI = 3.14159
 
 def square(x: int) -> int:
@@ -2092,9 +2203,9 @@ def greet(name: str) -> str:
     return "Hello, " + name + "!"
 ```
 
-### `main.nova`
+### `main.Vayu`
 
-``` nova
+``` Vayu
 import math_helpers
 import math_helpers as mh
 
@@ -2104,7 +2215,7 @@ print(math_helpers.square(5))
 print(mh.square(6))
 print(square(7))
 print(cb(3))
-print(greet("Nova"))
+print(greet("Vayu"))
 ```
 
 ------------------------------------------------------------------------
@@ -2167,9 +2278,9 @@ print(greet("Nova"))
 
 ------------------------------------------------------------------------
 
-# 🌌 Nova Syntax Philosophy
+# 🌌 Vayu Syntax Philosophy
 
-Nova's syntax is intentionally designed to remain readable while
+Vayu's syntax is intentionally designed to remain readable while
 providing access to increasingly powerful language features.
 
 The core style can be summarized as:
@@ -2190,13 +2301,13 @@ Functional programming
 Native-language foundations
 ```
 
-Nova is intended to evolve without sacrificing the readability that
+Vayu is intended to evolve without sacrificing the readability that
 makes the language approachable.
 
 ------------------------------------------------------------------------
 
 ::: {align="center"}
-# 🌌 Nova
+# 🌌 Vayu
 
 ### Python-inspired syntax. Native ambition. One language.
 

@@ -4,7 +4,7 @@
 #include <vector>
 #include <unordered_map>
 
-namespace nova {
+namespace vayu {
 
     class Lexer {
     public:
@@ -41,4 +41,4 @@ namespace nova {
         static const std::unordered_map<std::string, TokenType>& keywords();
     };
 
-} // namespace nova
+} // namespace vayu

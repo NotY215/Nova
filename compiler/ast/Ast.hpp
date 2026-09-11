@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace nova {
+namespace vayu {
 
     // ===========================================================================
     // Expressions (unchanged from 3H)
@@ -299,4 +299,4 @@ namespace nova {
     const char* unOpName(UnOp  op);
     void printProgram(const Block& program);
 
-} // namespace nova
+} // namespace vayu

@@ -7,8 +7,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <lexer/Token.hpp>
 
-namespace nova {
+namespace vayu {
 
     class RuntimeError : public std::runtime_error {
     public:
@@ -17,7 +18,7 @@ namespace nova {
             : std::runtime_error(std::move(msg)), loc(l) {}
     };
 
-    struct NovaException {
+    struct VayuException {
         Value          value;
         SourceLocation loc;
     };
@@ -104,4 +105,4 @@ namespace nova {
         void installExceptionClasses();
     };
 
-} // namespace nova
+} // namespace vayu

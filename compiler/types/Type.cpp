@@ -1,6 +1,6 @@
 #include "Type.hpp"
 
-namespace nova {
+namespace vayu {
 
     const StructFieldInfo* Type::findField(const std::string& n) const {
         for (auto& f : fields) if (f.name == n) return &f;
@@ -156,4 +156,4 @@ namespace nova {
         return Types::Float();
     }
 
-} // namespace nova
+} // namespace vayu

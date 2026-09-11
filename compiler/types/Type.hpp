@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace nova {
+namespace vayu {
 
     enum class TypeKind {
         None, Bool, Int, Float, Str, Char, Bytes,
@@ -55,4 +55,4 @@ namespace nova {
     bool    isAssignable(const TypePtr& to, const TypePtr& from);
     TypePtr commonNumeric(const TypePtr& a, const TypePtr& b);
 
-} // namespace nova
+} // namespace vayu

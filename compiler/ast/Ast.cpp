@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <string>
 
-namespace nova {
+namespace vayu {
 
     const char* binOpName(BinOp op) {
         switch (op) {
@@ -358,4 +358,4 @@ namespace nova {
         prBlock(program, "");
     }
 
-} // namespace nova
+} // namespace vayu

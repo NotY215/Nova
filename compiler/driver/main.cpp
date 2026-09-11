@@ -24,7 +24,7 @@ static std::string readFile(const std::string& path) {
 
 static void usage() {
     std::fprintf(stderr,
-        "usage: novac <file.nova> [--run | --check | --dump-tokens | --dump-ast | --dump-bytecode]\n"
+        "usage: vayuc <file.vayu> [--run | --check | --dump-tokens | --dump-ast | --dump-bytecode]\n"
         "       --run            type-check then execute (default)\n"
         "       --check          type-check only\n"
         "       --dump-tokens    print lexer output\n"
@@ -54,45 +54,45 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--dump-bytecode")) mode = Mode::DumpBytecode;
         else if (!std::strcmp(argv[i], "--no-check"))      skipCheck = true;
         else if (!std::strcmp(argv[i], "--vm"))            useVM = true;
-        else { std::fprintf(stderr, "novac: unknown flag '%s'\n", argv[i]); return 1; }
+        else { std::fprintf(stderr, "vayuc: unknown flag '%s'\n", argv[i]); return 1; }
     }
 
     std::string src = readFile(file);
     if (src.empty()) {
-        std::fprintf(stderr, "novac: cannot read '%s'\n", file.c_str());
+        std::fprintf(stderr, "vayuc: cannot read '%s'\n", file.c_str());
         return 1;
     }
 
-    nova::Lexer lexer(std::move(src));
+    vayu::Lexer lexer(std::move(src));
     auto tokens = lexer.tokenize();
 
     if (mode == Mode::DumpTokens) {
         for (const auto& t : tokens)
             std::printf("%3d:%-3d  %-14s  %s\n",
                 t.location.line, t.location.column,
-                nova::tokenTypeName(t.type), t.lexeme.c_str());
+                vayu::tokenTypeName(t.type), t.lexeme.c_str());
         return 0;
     }
 
-    nova::Block program;
+    vayu::Block program;
     try {
-        nova::Parser parser(std::move(tokens));
+        vayu::Parser parser(std::move(tokens));
         program = parser.parseProgram();
     }
-    catch (const nova::ParseError& e) {
+    catch (const vayu::ParseError& e) {
         std::fprintf(stderr, "%s:%d:%d: parse error: %s\n",
             file.c_str(), e.loc.line, e.loc.column, e.what());
         return 1;
     }
 
-    if (mode == Mode::DumpAst) { nova::printProgram(program); return 0; }
+    if (mode == Mode::DumpAst) { vayu::printProgram(program); return 0; }
 
     if (!skipCheck && mode != Mode::DumpBytecode) {
         try {
-            nova::TypeChecker checker;
+            vayu::TypeChecker checker;
             checker.check(program);
         }
-        catch (const nova::TypeError& e) {
+        catch (const vayu::TypeError& e) {
             std::fprintf(stderr, "%s:%d:%d: type error: %s\n",
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
@@ -106,17 +106,17 @@ int main(int argc, char** argv) {
 
     // ---- Bytecode dump mode ----
     if (mode == Mode::DumpBytecode) {
-        nova::Chunk chunk;
+        auto chunk = std::make_shared<vayu::Chunk>();
         try {
-            nova::Compiler c;
-            c.compile(program, chunk);
+            vayu::Compiler c;
+            c.compile(program, *chunk);
         }
-        catch (const nova::CompileError& e) {
+        catch (const vayu::CompileError& e) {
             std::fprintf(stderr, "%s:%d:%d: compile error: %s\n",
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
-        nova::disassemble(chunk, file.c_str());
+        vayu::disassemble(*chunk, file.c_str());
         return 0;
     }
 
@@ -129,23 +129,23 @@ int main(int argc, char** argv) {
 
     // ---- Run on bytecode VM ----
     if (useVM) {
-        nova::Chunk chunk;
+        auto chunk = std::make_shared<vayu::Chunk>();
         try {
-            nova::Compiler c;
-            c.compile(program, chunk);
+            vayu::Compiler c;
+            c.compile(program, *chunk);
         }
-        catch (const nova::CompileError& e) {
+        catch (const vayu::CompileError& e) {
             std::fprintf(stderr, "%s:%d:%d: VM compile error: %s\n",
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
         try {
-            nova::Interpreter interp;
+            vayu::Interpreter interp;
             interp.setSourceDir(srcDir);
-            nova::VM vm(interp.globals());
+            vayu::VM vm(interp.globals());
             vm.run(chunk);
         }
-        catch (const nova::VMRuntimeError& e) {
+        catch (const vayu::VMRuntimeError& e) {
             std::fprintf(stderr, "%s:%d: VM runtime error: %s\n",
                 file.c_str(), e.line, e.what());
             return 1;
@@ -159,18 +159,18 @@ int main(int argc, char** argv) {
 
     // ---- Run on tree-walker (default) ----
     try {
-        nova::Interpreter interp;
+        vayu::Interpreter interp;
         interp.setSourceDir(srcDir);
         interp.run(program);
     }
-    catch (const nova::NovaException& e) {
+    catch (const vayu::VayuException& e) {
         std::fprintf(stderr, "%s:%d:%d: uncaught %s: %s\n",
             file.c_str(), e.loc.line, e.loc.column,
-            nova::Interpreter::exceptionTypeName(e.value).c_str(),
-            nova::Interpreter::exceptionMessage(e.value).c_str());
+            vayu::Interpreter::exceptionTypeName(e.value).c_str(),
+            vayu::Interpreter::exceptionMessage(e.value).c_str());
         return 1;
     }
-    catch (const nova::RuntimeError& e) {
+    catch (const vayu::RuntimeError& e) {
         std::fprintf(stderr, "%s:%d:%d: runtime error: %s\n",
             file.c_str(), e.loc.line, e.loc.column, e.what());
         return 1;

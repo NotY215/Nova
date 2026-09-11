@@ -1,6 +1,6 @@
 #include "Token.hpp"
 
-namespace nova {
+namespace vayu {
 
     const char* tokenTypeName(TokenType t) {
         switch (t) {
@@ -110,4 +110,4 @@ namespace nova {
         return "?";
     }
 
-} // namespace nova
+} // namespace vayu

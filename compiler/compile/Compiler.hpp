@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace nova {
+namespace vayu {
 
     class CompileError : public std::runtime_error {
     public:
@@ -15,7 +15,6 @@ namespace nova {
 
     class Compiler {
     public:
-        /// Compile a program to bytecode. Throws CompileError on unsupported AST.
         void compile(const Block& program, Chunk& out);
 
     private:
@@ -28,6 +27,8 @@ namespace nova {
         void compileIf(const IfStmt* n);
         void compileWhile(const WhileStmt* n);
         void compileFor(const ForStmt* n);
+        void compileDef(const DefStmt* n);
+        void compileReturn(const ReturnStmt* n);
 
         size_t emitJump(OpCode op, int line);
         void   patchJump(size_t operandPos, size_t target);
@@ -36,4 +37,4 @@ namespace nova {
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
     };
 
-} // namespace nova
+} // namespace vayu

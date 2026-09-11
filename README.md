@@ -1,655 +1,489 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="Nova Logo" width="180"/>
+<img src="assets/logo.svg" alt="Vayu Logo" width="180">
 
-# 🌌 Nova
+# Vayu
 
 ### Python simplicity. Native performance. Low-level control. AI-ready.
 
-**A modern, independent programming language designed to bring the strengths of  
-Python, C++, Java, and C# together into one unified language.**
+**A modern general-purpose programming language designed to combine simplicity, performance, portability, and powerful application development.**
 
-<br>
-
-[![Status](https://img.shields.io/badge/Status-Early%20Development-orange?style=for-the-badge)](.)
-[![Language](https://img.shields.io/badge/Language-Nova-6C63FF?style=for-the-badge)](.)
-[![Syntax](https://img.shields.io/badge/Syntax-Python--Inspired-3776AB?style=for-the-badge)](docs/syntax.md)
-[![Performance](https://img.shields.io/badge/Performance-Native-00599C?style=for-the-badge)](.)
-[![AI](https://img.shields.io/badge/AI%2FML-Ready-8A2BE2?style=for-the-badge)](docs/ai.md)
-[![Platform](https://img.shields.io/badge/Platform-Cross--Platform-2EA44F?style=for-the-badge)](.)
-[![License](https://img.shields.io/badge/License-See%20LICENSE-lightgrey?style=for-the-badge)](LICENSE)
-
-<br>
-
-**[📖 Syntax](docs/syntax.md) · [📦 Packages](docs/package.md) · [🤖 AI & ML](docs/ai.md) · [🔭 Vision](docs/vision.md)**
+[Syntax](docs/syntax.md) • [AI & ML](docs/ai.md) • [Package Manager](docs/package.md) • [Vision](docs/vision.md)
 
 </div>
 
 ---
 
-# 🌌 What is Nova?
+## What is Vayu?
 
-**Nova** is an independent programming language project built around one simple
-idea:
+**Vayu** is a next-generation programming language designed to combine the best ideas from:
 
-> **Programming should be easy to write, powerful to run, and capable of
-> giving developers control when they need it.**
+- 🐍 **Python** — simple, readable syntax and a powerful ecosystem
+- ⚡ **C++** — native performance and low-level control
+- ☕ **Java** — portability and large-scale application development
+- 🎯 **C#** — modern application and GUI development
 
-Nova aims to combine the most useful characteristics of several major
-programming languages:
+Vayu aims to provide these capabilities without forcing developers to switch between multiple languages for different types of software.
 
-- 🐍 **Python** — simplicity, readability, productivity and AI/data-science
-  accessibility
-- ⚡ **C++** — native performance, hardware control and systems-level capability
-- ☕ **Java** — portability, large-scale software concepts and mature
-  application development
-- 🔷 **C#** — modern application development, GUI capabilities and developer
-  productivity
-
-Instead of forcing developers to choose between **easy syntax** and
-**high-level performance**, Nova aims to provide both.
+> **Write simple. Run native. Control everything.**
 
 ---
 
-# 🎯 The Idea Behind Nova
+## Core Philosophy
 
-Nova is designed around four major principles:
+Vayu is built around a simple idea:
 
-### 🐍 Simple to Learn
+> **Programming should be easy to learn, powerful enough for professionals, and fast enough for demanding software.**
 
-Nova's syntax is designed to be approachable, readable and familiar to
-developers coming from Python and other modern languages.
+The language focuses on:
 
-### ⚡ Fast by Design
-
-Nova is intended to be a compiled, native programming language capable of
-delivering performance suitable for demanding applications.
-
-### 🧠 Powerful When Needed
-
-Developers should be able to move from high-level application development to
-lower-level memory and system control without having to switch languages.
-
-### 🤖 Ready for Modern Computing
-
-AI, machine learning, data processing, graphics, applications and systems
-development should all be possible within the same language ecosystem.
+- Clean, Python-inspired syntax
+- Native compiled execution
+- Strong static typing with type inference
+- Optional explicit type annotations
+- Modern memory and resource management
+- High-level APIs with low-level access when required
+- AI/ML and scientific computing
+- GUI and application development
+- Game and graphics development
+- Systems and performance-oriented programming
+- Cross-platform development
+- C/C++ interoperability
+- Python ecosystem interoperability
+- Future Java and .NET interoperability
 
 ---
 
-# ✨ What Makes Nova Different?
+# Vayu vs Other Languages
 
-Nova is not intended to simply copy Python, C++, Java or C#.
-
-The goal is to take useful ideas from each ecosystem and combine them into a
-single language with its own identity.
-
-| Capability | Python | C++ | Java | C# | **Nova** |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Easy syntax | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Capability | Python | C++ | Java | C# | **Vayu** |
+|---|---:|---:|---:|---:|---:|
+| Beginner-friendly syntax | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 | Native performance | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Low-level control | ⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Low-level control | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Type inference | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 | Memory control | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| AI / ML ecosystem | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| GUI development | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Game development | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Systems programming | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Cross-platform potential | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Beginner friendliness | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| High-level productivity | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| AI-native direction | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| AI/ML ecosystem | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| GUI/application development | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Game development | ⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Cross-platform | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| Simplicity + performance | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 
-> **Nova's goal is not to replace every language. Its goal is to reduce the
-> number of situations where developers need to switch between languages.**
+**These ratings represent Vayu's design goals, not a claim that it currently has the maturity or ecosystem size of established languages.**
 
 ---
 
-# 🚀 Core Features
+# Key Features
 
-## 🧩 Modern Language Design
+## 🧠 Simple Syntax
 
-Nova is intended to provide:
+Vayu uses a clean, indentation-friendly syntax designed to remain readable while supporting serious software development.
 
-- readable syntax
-- optional static typing
-- type inference
-- object-oriented programming
-- structures and classes
-- generics
-- collections
-- modules
-- error handling
-- modern concurrency
-- asynchronous programming
-- native compilation
-- cross-platform development
+The complete syntax and currently implemented features are documented separately:
 
-The complete language syntax and semantics are maintained separately.
-
-### 📖 Learn the Nova Syntax
-
-<div align="center">
-
-### [🌟 OPEN `docs/syntax.md` →](docs/syntax.md)
-
-**Complete syntax, language rules, types, functions, classes, memory concepts,
-control flow and other language features.**
-
-</div>
+**[→ Read the Vayu Syntax Reference](docs/syntax.md)**
 
 ---
 
-# ⚡ Native Performance
+## ⚡ Native Performance
 
-Nova is designed as a **compiled native language** rather than a purely
-interpreted scripting language.
+Vayu is designed as a **compiled native language**.
 
-The long-term goal is to provide:
+The goal is to provide:
 
-- native executables
-- optimized compilation
-- efficient memory usage
-- low runtime overhead
-- hardware-level capabilities
-- predictable performance
-- support for demanding applications
-
-Nova aims to provide the convenience of a high-level language without making
-performance an afterthought.
+- Native machine-code execution
+- Compiler optimizations
+- Efficient memory usage
+- Hardware-level control
+- Low runtime overhead
+- High-performance applications
 
 ---
 
-# 🧠 Memory & Resource Control
+## 🧩 Modern Type System
 
-One of Nova's major goals is to bridge the gap between:
+Vayu combines:
 
-**Python-style simplicity**
+- Static typing
+- Type inference
+- Optional type annotations
+- Generic types
+- Structs
+- Classes
+- Inheritance
+- Function types
+- Modern error handling
 
-and
+---
 
-**C++-style control.**
+## 🧠 Memory & Resource Control
 
-Developers should be able to write ordinary applications without constantly
-thinking about memory management while still having access to more explicit
-resource and memory control when an application requires it.
+Vayu is designed to provide both convenience and control.
 
-This makes Nova suitable for both:
+The language aims to support:
 
-- everyday application development
-- performance-sensitive and systems-oriented software
+- Automatic management for common cases
+- Deterministic resource handling
+- Ownership-oriented programming
+- Smart pointers
+- Explicit memory operations
+- Unsafe/low-level programming when required
+
+Planned smart-pointer concepts include:
+
+```text
+unique<T>
+shared<T>
+weak<T>
+```
 
 ---
 
 # 🤖 AI & Machine Learning
 
-AI is considered a first-class area of Nova's ecosystem.
+AI is a major direction of Vayu.
 
-Nova is intended to support:
+The ecosystem is planned to support:
 
-- machine learning
-- deep learning
-- neural networks
-- tensor computation
-- data processing
-- computer vision
-- model inference
+- Machine learning
+- Deep learning
+- Neural networks
+- Tensor operations
+- Data processing
+- Computer vision
 - GPU acceleration
-- scientific computing
-- AI application development
-- interoperability with established AI ecosystems
+- CUDA
+- ONNX
+- Python AI ecosystem interoperability
 
-The goal is not to isolate Nova from existing AI technologies.
+Target compatibility includes technologies such as NumPy, PyTorch, TensorFlow, OpenCV, ONNX, CUDA, and ROCm.
 
-Instead, Nova should be able to work alongside the existing AI ecosystem while
-also providing opportunities for high-performance native AI applications.
-
-### 🤖 AI Documentation
-
-<div align="center">
-
-### [🧠 OPEN `docs/ai.md` →](docs/ai.md)
-
-**AI, machine learning, model support, ecosystem integration and Nova's AI
-direction.**
-
-</div>
+**[→ Read the Vayu AI & ML Documentation](docs/ai.md)**
 
 ---
 
 # 📦 Package Ecosystem
 
-Nova is intended to have its own package ecosystem built around the
-**`nva` package manager**.
+Vayu is designed around a dedicated package ecosystem.
 
-The package ecosystem is intended to make it possible to discover, install,
-manage and distribute reusable Nova libraries and applications.
+The package manager is planned around:
 
-The long-term ecosystem can include packages for:
+```text
+nva install <package>
+```
 
-- AI
-- graphics
-- games
-- networking
-- databases
-- GUI applications
-- mathematics
-- scientific computing
-- multimedia
-- web development
-- system programming
-- developer tools
+The ecosystem is intended to provide:
 
-### 📦 Package Documentation
+- Package installation
+- Dependency management
+- Version management
+- Project configuration
+- Lock files
+- Package publishing
+- Build integration
+- Native libraries
+- AI/ML packages
+- GUI libraries
+- Game-development libraries
 
-<div align="center">
+The package documentation contains the detailed package-system specification:
 
-### [📦 OPEN `docs/package.md` →](docs/package.md)
+**[→ Read the Vayu Package Documentation](docs/package.md)**
 
-**Complete information about Nova packages, the package ecosystem and package
-management.**
-
-</div>
+> Package-manager naming and implementation may evolve as the ecosystem matures.
 
 ---
 
 # 🖥️ Application Development
 
-Nova is intended to be useful beyond command-line programs.
+Vayu is designed to cover more than command-line programs.
 
-Its broader ecosystem is designed around multiple categories of software.
+### GUI
 
-### 🖼️ GUI Applications
+- Desktop applications
+- Modern user interfaces
+- Native application APIs
+- Cross-platform GUI development
 
-Nova aims to support modern desktop application development with native
-performance and reusable application components.
+### Games
 
-### 🎮 Game Development
+- Game logic
+- Graphics
+- Input
+- Audio
+- Physics
+- Rendering
+- OpenGL
+- Vulkan
+- DirectX
 
-Nova is intended to provide the foundations required for:
+### Systems
 
-- game logic
-- graphics
-- audio
-- input
-- physics
-- mathematics
-- real-time applications
+- Native applications
+- System utilities
+- Hardware-oriented software
+- High-performance services
+- Networking
 
-### 🌐 Networking
+### Scientific & Data
 
-Network applications, servers, communication systems and network utilities are
-also part of Nova's broader ecosystem.
-
-### 📊 Data & Scientific Computing
-
-Nova aims to combine high-level productivity with native performance for
-scientific and data-intensive workloads.
-
----
-
-# 🔗 Multi-Language Interoperability
-
-Nova is designed with interoperability in mind.
-
-The long-term ecosystem is intended to work with technologies and libraries
-from established ecosystems such as:
-
-- C
-- C++
-- Python
-- Java
-- C#
-- .NET
-- existing native libraries
-- existing AI/ML frameworks
-
-This means Nova does not need to exist as an isolated ecosystem.
-
-Developers should be able to gradually adopt Nova while continuing to use
-existing technologies where appropriate.
+- Numerical computing
+- Data processing
+- Scientific applications
+- Visualization
+- AI/ML workflows
 
 ---
 
-# 🌍 Cross-Platform Direction
+# 🔗 Interoperability
 
-Nova is intended to become a cross-platform language.
+Vayu is intended to work with existing ecosystems instead of isolating developers.
 
-The long-term goal includes support for:
+### C / C++
 
-- 🪟 Windows
-- 🐧 Linux
-- 🍎 macOS
-- 📱 mobile platforms where practical
-- ☁️ server environments
-- 🖥️ native desktop applications
+Native interoperability is a major part of Vayu's systems-programming direction, allowing existing native libraries and platform APIs to be used.
 
-Cross-platform support is an important part of Nova's long-term identity.
+### Python
+
+Vayu is designed to interact with the Python ecosystem through runtime/FFI interoperability where appropriate, especially for AI, ML, data science, and scientific computing.
+
+### Java
+
+Future interoperability is intended through JVM/JNI-based integration.
+
+### C#
+
+Future interoperability is intended through .NET integration.
 
 ---
 
-# 📄 Nova Files
+# 🌍 Cross-Platform
 
-Nova uses its own language and project ecosystem.
+Vayu is designed to become a cross-platform language.
 
-| File | Purpose |
+Target platforms include:
+
+- Windows
+- Linux
+- macOS
+- Android
+- Other platforms as the compiler and ecosystem mature
+
+---
+
+# 📁 Source Format
+
+Vayu source files use:
+
+```text
+.vayu
+```
+
+Examples:
+
+```text
+hello.vayu
+main.vayu
+game.vayu
+ai.vayu
+```
+
+The official language name is **Vayu** and the official source extension is **`.vayu`**.
+
+---
+
+# 📚 Documentation
+
+| Document | Purpose |
 |---|---|
-| `.nova` | Nova source file |
-| `nova.toml` | Nova project/package configuration |
-| `nova.lock` | Dependency lock information |
-
-The `.nova` extension represents the language itself.
-
----
-
-# 🧭 Documentation
-
-Nova intentionally keeps detailed technical information outside the main
-README.
-
-This README provides the **overview**.
-
-The dedicated documentation contains the deeper information.
-
-<div align="center">
-
-| Documentation | Description |
-|---|---|
-| 🌟 **[Syntax](docs/syntax.md)** | Complete Nova language syntax and language rules |
-| 📦 **[Packages](docs/package.md)** | Package ecosystem and package management |
-| 🤖 **[AI & ML](docs/ai.md)** | AI, machine learning and AI ecosystem direction |
-| 🔭 **[Vision](docs/vision.md)** | Long-term goals and future direction |
-
-</div>
+| [`docs/syntax.md`](docs/syntax.md) | Complete language syntax and implemented features |
+| [`docs/package.md`](docs/package.md) | Package manager and ecosystem |
+| [`docs/ai.md`](docs/ai.md) | AI/ML direction and ecosystem |
+| [`docs/vision.md`](docs/vision.md) | Long-term vision and future roadmap |
 
 ---
 
-# 🔭 Long-Term Vision
+# 🚀 Long-Term Vision
 
-Nova is intended to grow beyond being just another programming language.
+Vayu is intended to grow into a complete development ecosystem.
 
-The long-term vision is to create an ecosystem where developers can use one
-language for a wide range of software:
+The long-term vision includes:
 
-**Applications · Games · AI · Systems · Graphics · Data · Networking · Tools**
+- Mature native compiler
+- Advanced optimizer
+- Self-hosting compiler
+- Standard library
+- Package ecosystem
+- IDE/LSP support
+- Debugging tools
+- AI/ML stack
+- GUI framework
+- Game-development stack
+- Graphics APIs
+- Native interoperability
+- Cross-platform tooling
+- Modern concurrency
+- Metaprogramming
+- Professional developer tooling
 
-The detailed long-term roadmap and future concepts are intentionally kept in a
-separate document.
-
-### 🔭 Explore the Vision
-
-<div align="center">
-
-### [🌌 OPEN `docs/vision.md` →](docs/vision.md)
-
-**Read the complete long-term vision and future direction of Nova.**
-
-</div>
-
----
-
-# ❤️ Built Independently
-
-Nova is an **independent project created by a single developer**.
-
-There is currently:
-
-- 👤 **1 independent developer**
-- 💰 **No revenue**
-- 🏢 **No company behind Nova**
-- 💼 **No corporate funding**
-- 🚀 **No commercial organization controlling the project**
-
-Nova is being developed from an idea into a complete programming-language
-ecosystem through independent effort, experimentation, learning and continuous
-development.
-
-There is no large development team behind the project.
-
-There is no corporation funding the language.
-
-There is simply a developer with the ambition to build something new.
-
-> **Nova is being built because the idea is worth building.**
+**[→ Read the Vayu Vision](docs/vision.md)**
 
 ---
 
-# 💪 Why Build Nova?
+# 👨‍💻 Independent Development
 
-There are already many excellent programming languages.
+Vayu is currently being developed by **one independent developer**.
 
-So why create another one?
+There is:
 
-Because there is still a gap between different programming experiences.
+- No company behind the project
+- No corporate development team
+- No revenue model
+- No large development budget
+- No large engineering organization
 
-Python is extremely productive.
+Vayu is being developed as an independent project driven by experimentation, learning, engineering, and the goal of creating a language that combines ideas from several ecosystems.
 
-C++ provides enormous control and performance.
-
-Java provides portability and large-scale application capabilities.
-
-C# provides a highly productive modern application-development ecosystem.
-
-Nova explores the question:
-
-> **What if the best parts of these approaches could exist together in one
-> language without making the language unnecessarily complicated?**
-
-That is the experiment behind Nova.
+> **Small team. Big vision.**
 
 ---
 
-# ✅ Pros
+# ✅ Advantages
 
-### 🟢 Developer-Friendly
-
-Nova aims to be approachable for developers who are familiar with Python-like
-syntax.
-
-### 🟢 Native Performance
-
-Nova is designed around compiled native execution and performance-oriented
-software.
-
-### 🟢 Low-Level Capability
-
-Developers are not permanently trapped inside a high-level abstraction layer.
-
-### 🟢 AI-Oriented
-
-AI and machine learning are considered major parts of the ecosystem rather than
-an afterthought.
-
-### 🟢 Broad Use Cases
-
-Nova aims to cover:
-
-**AI + Games + GUI + Systems + Data + Networking + Applications**
-
-### 🟢 Modern Ecosystem
-
-The language is being designed with packages, tooling, interoperability and
-cross-platform development in mind.
-
-### 🟢 One Language Philosophy
-
-Nova attempts to reduce the need to jump between multiple languages for
-different parts of the same project.
-
-### 🟢 Independent Direction
-
-Because Nova is currently developed independently, its design can be driven by
-a clear language philosophy rather than existing corporate product
-requirements.
+- Python-inspired readability
+- Native compiled execution
+- Low-level capabilities
+- Static typing with inference
+- Modern memory-management direction
+- AI/ML-focused ecosystem
+- GUI development goals
+- Game-development goals
+- Systems-programming capabilities
+- Cross-platform ambitions
+- C/C++ interoperability
+- Python ecosystem interoperability
+- Beginner-friendly philosophy
+- Professional-development ambitions
+- One unified ecosystem instead of many disconnected languages
 
 ---
 
-# ⚠️ Cons
+# ⚠️ Current Limitations
 
-Nova is an ambitious project, and that comes with significant disadvantages.
+Vayu is still an evolving language.
 
-### 🔴 Early Development
+Important limitations include:
 
-Nova is not a mature programming language.
+- Small ecosystem
+- Limited third-party packages
+- Young compiler
+- Developing tooling
+- Limited IDE integration
+- Limited documentation compared with established languages
+- Smaller community
+- Many planned features are not yet mature
+- Compatibility layers are still evolving
+- Performance and stability will improve as the compiler matures
 
-Its ecosystem and tooling are still developing.
-
-### 🔴 Small Ecosystem
-
-Established languages have enormous ecosystems containing thousands of mature
-libraries and tools.
-
-Nova does not currently have that level of ecosystem support.
-
-### 🔴 Small Development Team
-
-The project currently has only one developer.
-
-This naturally limits development speed and available resources.
-
-### 🔴 No Revenue
-
-Nova currently has no revenue or commercial funding behind it.
-
-Development therefore depends primarily on available personal time and
-resources.
-
-### 🔴 Compatibility Challenges
-
-Interoperability with existing ecosystems is technically complex and requires
-significant engineering effort.
-
-### 🔴 Compiler Complexity
-
-Creating a complete modern programming language, compiler, runtime, package
-ecosystem and development environment is a very large undertaking.
-
-### 🔴 Long Road Ahead
-
-Nova is an ambitious long-term project.
-
-Becoming a mature alternative to established languages will require years of
-development, testing, ecosystem growth and community involvement.
+Vayu should therefore be considered an **early-stage independent language project**, not a replacement for mature languages yet.
 
 ---
 
-# ⚖️ Nova vs Established Languages
+# 🎯 Who Is Vayu For?
 
-| Language | Main Strength | Main Limitation |
-|---|---|---|
-| 🐍 Python | Simplicity, productivity, AI | Performance and low-level control |
-| ⚡ C++ | Performance and control | Complexity |
-| ☕ Java | Portability and large applications | More abstraction and verbosity |
-| 🔷 C# | Application development and productivity | Primarily centered around its ecosystem |
-| 🌌 **Nova** | Simplicity + native performance + control + AI direction | Young ecosystem and early development |
+Vayu is designed for developers who want to work across multiple areas without constantly changing languages.
 
-Nova does **not** claim to currently outperform these languages in every area.
+Potential users include:
 
-Instead, Nova represents an attempt to create a different balance.
-
----
-
-# 🧑‍💻 Who Is Nova For?
-
-Nova is envisioned for developers who want to build:
-
-- 🤖 AI applications
-- 🧠 Machine-learning software
-- 🎮 Games
-- 🖥️ Desktop applications
-- ⚙️ System utilities
-- 🌐 Network applications
-- 📊 Data-processing applications
-- 🎨 Graphics software
-- 🔬 Scientific applications
-- 🛠️ Developer tools
-- 🚀 Performance-sensitive applications
-
-It is intended to be useful to both newcomers and experienced programmers,
-while still providing a path toward advanced development.
+- Beginners learning programming
+- Application developers
+- Systems programmers
+- Game developers
+- AI/ML developers
+- Scientific programmers
+- Tool developers
+- Desktop application developers
+- Performance-oriented developers
+- Developers coming from Python
+- Developers coming from C++
+- Developers interested in language design
 
 ---
 
-# 🌟 The Nova Philosophy
+# 🧭 Design Principles
 
-Nova can be summarized in four words:
+### 1. Simplicity
+Common tasks should require minimal unnecessary code.
 
-> **Simple. Fast. Powerful. Open.**
+### 2. Performance
+High-level syntax should not automatically mean low performance.
 
-### Simple
+### 3. Control
+Developers should be able to access lower-level capabilities when needed.
 
-Write understandable software.
+### 4. Interoperability
+Existing ecosystems should be usable rather than discarded.
 
-### Fast
+### 5. Portability
+Software should be able to move across platforms with minimal changes.
 
-Run native software.
+### 6. Practicality
+Features should solve real development problems rather than exist only because they are technically possible.
 
-### Powerful
-
-Access advanced capabilities when required.
-
-### Open
-
-Build an independent ecosystem that can evolve with its community.
-
----
-
-# 🛣️ Current Status
-
-Nova is currently an **early-stage independent programming-language project**.
-
-The project is focused on establishing a strong foundation before attempting to
-become a mature ecosystem.
-
-The current priority is not to claim that Nova has already replaced established
-languages.
-
-The priority is to build Nova properly.
+### 7. One Ecosystem
+The long-term goal is to make Vayu useful for everything from small programs and applications to games, AI systems, and native software.
 
 ---
 
-# 🌌 The Goal
+# 📊 Current Status
 
-The ultimate goal is simple:
+Vayu is an **early-stage independent programming language project**.
 
-> **Create a programming language where a developer does not have to sacrifice
-> simplicity to gain power, or sacrifice power to gain simplicity.**
+The compiler currently demonstrates core language capabilities including:
 
-Nova wants to make it possible to move naturally between:
+- Variables
+- Type inference
+- Type annotations
+- Functions
+- Recursion
+- Conditions
+- Loops
+- Collections
+- Structs
+- Classes
+- Inheritance
+- Lambdas
+- Exceptions
+- Modules
+- Standard-library functionality
+- Type checking
+- AST generation
 
-**High-Level Development**
-
-↓  
-
-**Application Development**
-
-↓
-
-**AI / ML**
-
-↓
-
-**Graphics / Games**
-
-↓
-
-**Performance-Critical Software**
-
-↓
-
-**Low-Level Systems**
-
-—all within one language ecosystem.
+The language will continue to expand incrementally.
 
 ---
 
-# 💙 Special Thanks
+# 🌱 The Goal
 
-Nova is an independent project, but its development journey has been supported
-by AI-assisted research, discussion, experimentation and problem solving.
+Vayu is not trying to simply become:
 
-Two AI systems in particular have contributed to that journey.
+> "Python but faster."
+
+or:
+
+> "C++ with Python syntax."
+
+The bigger goal is to create a **unified language ecosystem** where developers can move naturally between:
+
+**simple programs → applications → AI → games → systems → native software**
+
+without needing to completely change languages.
 
 ---
+
+# ❤️ Special Thanks
+
+Vayu is an independent project, but AI tools played an important role during its development.
 
 ## 🐋 DeepSeek
 
@@ -665,7 +499,7 @@ Two AI systems in particular have contributed to that journey.
 
 A **very special and major thank you to DeepSeek**.
 
-DeepSeek provided substantial assistance throughout the development of the Nova
+DeepSeek provided substantial assistance throughout the development of the Vayu
 concept and its technical exploration.
 
 It was especially valuable for:
@@ -681,9 +515,9 @@ It was especially valuable for:
 - helping develop and refine technical ideas
 
 A significant amount of the technical exploration and coding assistance during
-Nova's development was made possible with the help of DeepSeek.
+Vayu's development was made possible with the help of DeepSeek.
 
-> **Thank you, DeepSeek, for being such a major part of the Nova journey. ❤️**
+> **Thank you, DeepSeek, for being such a major part of the Vayu journey. ❤️**
 
 <div align="center">
 
@@ -705,7 +539,7 @@ Nova's development was made possible with the help of DeepSeek.
 
 </div>
 
-A special thank you to **ChatGPT by OpenAI** for contributing to the Nova
+A special thank you to **ChatGPT by OpenAI** for contributing to the Vayu
 journey through:
 
 - idea confirmation
@@ -719,7 +553,7 @@ journey through:
 ChatGPT played a **smaller supporting role** compared with DeepSeek, primarily
 helping with confirmation, refinement and additional perspectives.
 
-> **Thank you, ChatGPT, for being part of the Nova journey. ❤️**
+> **Thank you, ChatGPT, for being part of the Vayu journey. ❤️**
 
 <div align="center">
 
@@ -731,7 +565,7 @@ helping with confirmation, refinement and additional perspectives.
 
 <div align="center">
 
-### 🐋 DeepSeek · 🤖 ChatGPT · 🌌 Nova
+### 🐋 DeepSeek · 🤖 ChatGPT · 🌌 Vayu
 
 **Different tools. One idea. One journey.**
 
@@ -746,42 +580,36 @@ helping with confirmation, refinement and additional perspectives.
 
 ---
 
-# 🌌 Final Words
+> **Acknowledgement of these tools does not imply sponsorship, partnership, endorsement, or official affiliation with Vayu or its developer.**
 
-Nova started with a simple question:
+---
 
-> **Can one programming language combine the simplicity developers love with
-> the performance and control developers need?**
+# 💭 Final Words
 
-Nova is an attempt to answer that question.
+Vayu is an ambitious independent experiment:
+
+**What if the simplicity of Python, the performance and control of C++, the portability of Java, and the application-development strengths of C# could move toward one unified language?**
+
+Vayu is an attempt to explore that idea.
 
 It is still young.
 
 It is still evolving.
 
-It does not have a corporation behind it.
+And there is a long way to go.
 
-It does not have a large development team.
+But the goal is simple:
 
-It does not have revenue.
+> **Make programming simpler without giving up power.**
 
-It is being built independently, one step at a time.
-
-And that is exactly what makes the project exciting.
+---
 
 <div align="center">
 
-# 🌌 NOVA
+### Vayu
 
-### **Write simple. Run native. Control everything.**
+**Write simple. Run native. Control everything.**
 
-**Python simplicity · Native performance · Low-level control · AI-ready**
-
-<br>
-
-[📖 Syntax](docs/syntax.md) ·
-[📦 Packages](docs/package.md) ·
-[🤖 AI & ML](docs/ai.md) ·
-[🔭 Vision](docs/vision.md)
+Made independently with ❤️, code, experimentation, and a lot of debugging.
 
 </div>

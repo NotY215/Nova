@@ -1,11 +1,12 @@
 #include "Compiler.hpp"
 
-namespace nova {
+namespace vayu {
 
     void Compiler::compile(const Block& program, Chunk& out) {
         chunk_ = &out;
         compileBlock(program);
-        chunk_->emitOp(OpCode::RETURN, 0);
+        chunk_->emitOp(OpCode::NONE, 0);
+        chunk_->emitOp(OpCode::RETURN_V, 0);
         chunk_ = nullptr;
     }
 
@@ -20,11 +21,9 @@ namespace nova {
         chunk_->emit(0, line);
         return pos;
     }
-
     void Compiler::patchJump(size_t operandPos, size_t target) {
         chunk_->patchJump(operandPos, (int)target, 0);
     }
-
     void Compiler::emitLoop(size_t loopStart, int line) {
         chunk_->emitOp(OpCode::JUMP, line);
         size_t pos = chunk_->code.size();
@@ -57,7 +56,7 @@ namespace nova {
             auto* n = static_cast<const AssignStmt*>(s);
             if (n->target->kind != ExprKind::NameRef)
                 error(n->target->loc,
-                    "VM mode: only simple-name assignment is supported in 4A");
+                    "VM mode: only simple-name assignment is supported in 4B");
             const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
             compileExpr(n->value.get());
             chunk_->emitOp(OpCode::DEFINE, line);
@@ -78,21 +77,20 @@ namespace nova {
             return;
         }
 
-        case StmtKind::If:    compileIf(static_cast<const IfStmt*>(s));    return;
-        case StmtKind::While: compileWhile(static_cast<const WhileStmt*>(s)); return;
-        case StmtKind::For:   compileFor(static_cast<const ForStmt*>(s));   return;
+        case StmtKind::If:     compileIf(static_cast<const IfStmt*>(s));     return;
+        case StmtKind::While:  compileWhile(static_cast<const WhileStmt*>(s));  return;
+        case StmtKind::For:    compileFor(static_cast<const ForStmt*>(s));    return;
+        case StmtKind::Def:    compileDef(static_cast<const DefStmt*>(s));    return;
+        case StmtKind::Return: compileReturn(static_cast<const ReturnStmt*>(s)); return;
 
         case StmtKind::Pass:
             return;
 
         case StmtKind::Break:
-            error(s->loc, "VM mode: break not yet implemented (4A)");
+            error(s->loc, "VM mode: break not yet implemented");
 
         case StmtKind::Continue:
-            error(s->loc, "VM mode: continue not yet implemented (4A)");
-
-        case StmtKind::Def:
-            error(s->loc, "VM mode: user-defined functions arrive in 4D");
+            error(s->loc, "VM mode: continue not yet implemented");
 
         case StmtKind::Struct:
         case StmtKind::Class:
@@ -107,6 +105,50 @@ namespace nova {
             error(s->loc, "VM mode: modules arrive in 4H");
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // Functions
+    // ---------------------------------------------------------------------------
+
+    void Compiler::compileDef(const DefStmt* n) {
+        int line = n->loc.line;
+
+        auto fnChunk = std::make_shared<Chunk>();
+        for (auto& p : n->params) fnChunk->paramNames.push_back(p.name);
+
+        Chunk* saved = chunk_;
+        chunk_ = fnChunk.get();
+
+        for (auto& st : n->body.stmts) compileStmt(st.get());
+
+        // Implicit fallthrough return
+        chunk_->emitOp(OpCode::NONE, line);
+        chunk_->emitOp(OpCode::RETURN_V, line);
+
+        chunk_ = saved;
+
+        int fnIdx = chunk_->addFunction(fnChunk);
+        chunk_->emitOp(OpCode::MAKE_FN, line);
+        chunk_->emit((uint8_t)((fnIdx >> 8) & 0xFF), line);
+        chunk_->emit((uint8_t)(fnIdx & 0xFF), line);
+
+        // Bind to name in current scope
+        chunk_->emitOp(OpCode::DEFINE, line);
+        int nameIdx = chunk_->addName(n->name);
+        chunk_->emit((uint8_t)((nameIdx >> 8) & 0xFF), line);
+        chunk_->emit((uint8_t)(nameIdx & 0xFF), line);
+    }
+
+    void Compiler::compileReturn(const ReturnStmt* n) {
+        int line = n->loc.line;
+        if (n->value) compileExpr(n->value.get());
+        else          chunk_->emitOp(OpCode::NONE, line);
+        chunk_->emitOp(OpCode::RETURN_V, line);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Control flow
+    // ---------------------------------------------------------------------------
 
     void Compiler::compileIf(const IfStmt* n) {
         int line = n->loc.line;
@@ -138,31 +180,22 @@ namespace nova {
 
         compileExpr(n->cond.get());
         size_t exitJump = emitJump(OpCode::JUMP_IF_FALSE, line);
-
         compileBlock(n->body);
         emitLoop(loopStart, line);
-
         patchJump(exitJump, chunk_->here());
     }
 
     void Compiler::compileFor(const ForStmt* n) {
         int line = n->loc.line;
-
-        // Stack: [iterable]
         compileExpr(n->iterable.get());
-        // Stack: [iterable, 0]
         chunk_->emitOp(OpCode::ITER_NEW, line);
 
         size_t loopStart = chunk_->here();
-
-        // Stack: [iterable, idx] -> on continue: [iterable, idx+1, elem]
-        //                        -> on done:    pops both, jumps
         chunk_->emitOp(OpCode::ITER_NEXT, line);
         size_t iterOperandPos = chunk_->code.size();
         chunk_->emit(0, line);
         chunk_->emit(0, line);
 
-        // DEFINE loopVar
         chunk_->emitOp(OpCode::DEFINE, line);
         int nameIdx = chunk_->addName(n->targetName);
         chunk_->emit((uint8_t)((nameIdx >> 8) & 0xFF), line);
@@ -233,7 +266,7 @@ namespace nova {
             compileExpr(n->operand.get());
             switch (n->op) {
             case UnOp::Neg: chunk_->emitOp(OpCode::NEG, line); break;
-            case UnOp::Pos: break;   // no-op
+            case UnOp::Pos: break;
             case UnOp::Not: chunk_->emitOp(OpCode::NOT, line); break;
             }
             return;
@@ -242,7 +275,6 @@ namespace nova {
         case ExprKind::Binary: {
             auto* n = static_cast<const BinaryExpr*>(e);
 
-            // Short-circuit `a and b` / `a or b`
             if (n->op == BinOp::And) {
                 compileExpr(n->lhs.get());
                 chunk_->emitOp(OpCode::DUP, line);
@@ -284,17 +316,20 @@ namespace nova {
                     binOpName(n->op) + "' not yet implemented");
             case BinOp::And:
             case BinOp::Or:
-                return;   // handled above
+                return;
             }
             return;
         }
 
         case ExprKind::Call: {
             auto* n = static_cast<const CallExpr*>(e);
-            if (n->callee->kind != ExprKind::NameRef)
-                error(e->loc, "VM mode: only plain-name calls are supported (4A)");
+            if (n->callee->kind != ExprKind::NameRef &&
+                n->callee->kind != ExprKind::Attr)
+                error(e->loc, "VM mode: only plain-name calls are supported in 4B");
+            if (n->callee->kind == ExprKind::Attr)
+                error(e->loc, "VM mode: method calls arrive in 4E/4F");
 
-            // Stack layout: [callee, arg0, arg1, ..., argN-1]
+            // [callee, arg0, arg1, ..., argN-1]
             compileExpr(n->callee.get());
             for (auto& a : n->args) {
                 if (!a.name.empty())
@@ -321,8 +356,8 @@ namespace nova {
         case ExprKind::MapLit:
         case ExprKind::Lambda:
         case ExprKind::GenericType:
-            error(e->loc, "VM mode: this expression is not yet supported in 4A");
+            error(e->loc, "VM mode: this expression is not yet supported");
         }
     }
 
-} // namespace nova
+} // namespace vayu

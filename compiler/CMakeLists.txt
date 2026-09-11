@@ -1,4 +1,4 @@
-add_library(nova_compiler STATIC
+add_library(vayu_compiler STATIC
     lexer/Token.cpp
     lexer/Lexer.cpp
     ast/Ast.cpp
@@ -12,7 +12,7 @@ add_library(nova_compiler STATIC
     compile/Compiler.cpp
     vm/VM.cpp
 )
-target_include_directories(nova_compiler PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(vayu_compiler PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(novac driver/main.cpp)
-target_link_libraries(novac PRIVATE nova_compiler)
+add_executable(vayuc driver/main.cpp)
+target_link_libraries(vayuc PRIVATE vayu_compiler)

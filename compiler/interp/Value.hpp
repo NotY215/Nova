@@ -6,11 +6,12 @@
 #include <variant>
 #include <vector>
 
-namespace nova {
+namespace vayu {
 
     class  Environment;
     struct DefStmt;
     struct LambdaExpr;
+    struct Chunk;          // forward decl for VMFunction
     class  Value;
     struct ClassObject;
     struct ListValue;
@@ -108,20 +109,23 @@ namespace nova {
             ListMethod,
             MapMethod,
             StringMethod,
-            Lambda,        // <-- NEW
+            Lambda,
+            VMFunction,       // bytecode-compiled function
         } kind = Kind::Native;
 
         std::string name;
 
         NativeFnPtr nativeFn = nullptr;
 
-        // User / BoundMethod / SuperMethod
+        // User / BoundMethod / SuperMethod / Lambda
         const DefStmt* decl = nullptr;
         std::shared_ptr<Environment> closure;
         std::shared_ptr<ClassObject> definingClass;
-
-        // Lambda
         const LambdaExpr* lambdaExpr = nullptr;
+
+        // VMFunction
+        std::shared_ptr<Chunk>       chunk;
+        std::vector<std::string>     vmParams;
 
         // ClassCtor
         std::shared_ptr<ClassObject> classObj;
@@ -137,4 +141,4 @@ namespace nova {
         std::string                boundStr;
     };
 
-} // namespace nova
+} // namespace vayu

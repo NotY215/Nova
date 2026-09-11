@@ -1,0 +1,79 @@
+# ---- Basic functions ----
+def add(a, b):
+    return a + b
+
+print(add(3, 4))
+print(add(10, 20))
+
+# ---- No parameters ----
+def answer():
+    return 42
+
+print(answer())
+
+# ---- Fallthrough returns None ----
+def noop():
+    pass
+
+print(noop())
+
+# ---- Recursion: factorial ----
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+print(factorial(5))
+print(factorial(10))
+
+# ---- Recursion: fibonacci ----
+def fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+print(fib(10))
+print(fib(20))
+
+# ---- Function composition via data ----
+def double(x):
+    return x * 2
+
+def triple(x):
+    return x * 3
+
+f = double
+print(f(21))
+
+g = triple
+print(g(7))
+
+# ---- Passing functions as arguments ----
+def apply(fn, x):
+    return fn(x)
+
+print(apply(double, 21))
+print(apply(triple, 5))
+
+# ---- Nested calls ----
+print(add(add(1, 2), add(3, 4)))
+
+# ---- Closures ----
+def make_adder(n):
+    def adder(x):
+        return x + n
+    return adder
+
+add5  = make_adder(5)
+add10 = make_adder(10)
+print(add5(3))
+print(add10(3))
+
+# ---- Closure counter pattern ----
+def make_counter():
+    def counter():
+        return 99
+    return counter
+
+c = make_counter()
+print(c())

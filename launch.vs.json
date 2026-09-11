@@ -5,30 +5,23 @@
     {
       "type": "default",
       "project": "CMakeLists.txt",
-      "projectTarget": "novac.exe",
-      "name": "novac run hello.nova",
-      "args": [ "${workspaceRoot}\\examples\\hello.nova" ]
+      "projectTarget": "vayuc.exe",
+      "name": "vayuc run hello.vyu",
+      "args": [ "${workspaceRoot}\\examples\\hello.vyu" ]
     },
     {
       "type": "default",
       "project": "CMakeLists.txt",
-      "projectTarget": "novac.exe",
-      "name": "novac run control.nova",
-      "args": [ "${workspaceRoot}\\examples\\control.nova" ]
+      "projectTarget": "vayuc.exe",
+      "name": "vayuc run vm_fn.vyu --vm",
+      "args": [ "${workspaceRoot}\\examples\\vm_fn.vyu", "--vm" ]
     },
     {
       "type": "default",
       "project": "CMakeLists.txt",
-      "projectTarget": "novac.exe",
-      "name": "novac run fib.nova",
-      "args": [ "${workspaceRoot}\\examples\\fib.nova" ]
-    },
-    {
-      "type": "default",
-      "project": "CMakeLists.txt",
-      "projectTarget": "novac.exe",
-      "name": "novac check types.nova",
-      "args": [ "${workspaceRoot}\\examples\\types.nova", "--check" ]
+      "projectTarget": "vayuc.exe",
+      "name": "vayuc run modules/main.vyu",
+      "args": [ "${workspaceRoot}\\examples\\modules\\main.vyu" ]
     }
   ]
 }

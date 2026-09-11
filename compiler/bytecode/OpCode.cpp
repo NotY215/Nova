@@ -1,6 +1,6 @@
 #include "OpCode.hpp"
 
-namespace nova {
+namespace vayu {
 
     const char* opCodeName(OpCode op) {
         switch (op) {
@@ -34,11 +34,12 @@ namespace nova {
         case OpCode::ITER_NEW:       return "ITER_NEW";
         case OpCode::ITER_NEXT:      return "ITER_NEXT";
         case OpCode::LIST_NEW:       return "LIST_NEW";
+        case OpCode::MAKE_FN:        return "MAKE_FN";
         case OpCode::CALL:           return "CALL";
+        case OpCode::RETURN_V:       return "RETURN_V";
         case OpCode::PRINT:          return "PRINT";
-        case OpCode::RETURN:         return "RETURN";
         }
         return "?";
     }
 
-} // namespace nova
+} // namespace vayu

@@ -1,7 +1,7 @@
 #include "Lexer.hpp"
 #include <cctype>
 
-namespace nova {
+namespace vayu {
 
     // NOTE: "self" is intentionally NOT a keyword. The class parser enforces
     // the naming convention; the lexer treats it as a plain identifier.
@@ -277,4 +277,4 @@ namespace nova {
         }
     }
 
-} // namespace nova
+} // namespace vayu

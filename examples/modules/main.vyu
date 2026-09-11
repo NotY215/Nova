@@ -6,7 +6,7 @@ print(math_helpers.square(5))       # 25
 print(mh.square(6))                 # 36
 print(square(7))                    # 49
 print(cb(3))                        # 27
-print(greet("Nova"))                # Hello, Nova!
+print(greet("Vayu"))                # Hello, Vayu!
 
 print(math_helpers.PI)              # 3.14159
 print(mh.circle_area(1.0))          # 3.14159

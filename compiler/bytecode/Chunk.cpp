@@ -1,7 +1,7 @@
 #include "Chunk.hpp"
 #include <cstdio>
 
-namespace nova {
+namespace vayu {
 
     void Chunk::emit(uint8_t b, int line) {
         code.push_back(b);
@@ -30,6 +30,11 @@ namespace nova {
         return (int)names.size() - 1;
     }
 
+    int Chunk::addFunction(std::shared_ptr<Chunk> fn) {
+        functions.push_back(std::move(fn));
+        return (int)functions.size() - 1;
+    }
+
     void Chunk::patchJump(size_t pos, int target, int /*line*/) {
         int offset = target - (int)(pos + 2);
         code[pos] = (uint8_t)((offset >> 8) & 0xFF);
@@ -39,7 +44,6 @@ namespace nova {
     int Chunk::readU16(size_t at) const {
         return ((int)code[at] << 8) | (int)code[at + 1];
     }
-
     int Chunk::readI16(size_t at) const {
         int16_t v = (int16_t)(((uint16_t)code[at] << 8) | (uint16_t)code[at + 1]);
         return (int)v;
@@ -52,18 +56,19 @@ namespace nova {
         else              std::printf("%s", v.toString().c_str());
     }
 
-    void disassemble(const Chunk& chunk, const char* title) {
-        std::printf("=== %s (%zu bytes, %zu consts, %zu names) ===\n",
-            title, chunk.code.size(), chunk.constants.size(),
-            chunk.names.size());
+    static void disassembleChunk(const Chunk& chunk, int indent, const char* title) {
+        std::string pad((size_t)indent, ' ');
+        std::printf("%s=== %s (%zu bytes, %zu consts, %zu names, %zu fns) ===\n",
+            pad.c_str(), title,
+            chunk.code.size(), chunk.constants.size(),
+            chunk.names.size(), chunk.functions.size());
 
         size_t i = 0;
         while (i < chunk.code.size()) {
-            std::printf("%04zu  L%-3d  ", i, chunk.lines[i]);
+            std::printf("%s%04zu  L%-3d  ", pad.c_str(), i, chunk.lines[i]);
             OpCode op = static_cast<OpCode>(chunk.code[i]);
             ++i;
             std::printf("%-16s", opCodeName(op));
-
             switch (op) {
             case OpCode::CONST: {
                 int idx = chunk.readU16(i); i += 2;
@@ -91,6 +96,11 @@ namespace nova {
                 std::printf(" %d", cnt);
                 break;
             }
+            case OpCode::MAKE_FN: {
+                int idx = chunk.readU16(i); i += 2;
+                std::printf(" %d", idx);
+                break;
+            }
             case OpCode::CALL: {
                 std::printf(" %d", chunk.code[i]); ++i;
                 break;
@@ -99,7 +109,18 @@ namespace nova {
             }
             std::printf("\n");
         }
+
+        // Recurse into nested functions
+        for (size_t f = 0; f < chunk.functions.size(); ++f) {
+            char sub[64];
+            std::snprintf(sub, sizeof(sub), "%s :: fn[%zu]", title, f);
+            disassembleChunk(*chunk.functions[f], indent + 2, sub);
+        }
         std::printf("\n");
     }
 
-} // namespace nova
+    void disassemble(const Chunk& chunk, const char* title) {
+        disassembleChunk(chunk, 0, title);
+    }
+
+} // namespace vayu
