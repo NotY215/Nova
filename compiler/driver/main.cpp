@@ -6,6 +6,7 @@
 #include "compile/Compiler.hpp"
 #include "bytecode/Optimizer.hpp"
 #include "vm/VM.hpp"
+#include "native/NativeCompiler.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -21,10 +22,6 @@
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 #endif
-
-// ===========================================================================
-// Helpers
-// ===========================================================================
 
 static std::string readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
@@ -44,22 +41,20 @@ static void usage() {
         "usage: vayuc <file.vyu> [mode] [flags]\n"
         "\n"
         "Modes (default --run):\n"
-        "  --run              type-check and execute on the tree-walking interpreter\n"
-        "  --vm               execute on the bytecode virtual machine\n"
+        "  --run              tree-walking interpreter\n"
+        "  --vm               bytecode virtual machine\n"
+        "  --native           LLVM JIT-compiled native code (Phase 6A+)\n"
         "  --check            type-check only\n"
         "  --dump-tokens      print the lexer output\n"
         "  --dump-ast         print the parsed AST\n"
         "  --dump-bytecode    compile to bytecode and print disassembly\n"
+        "  --dump-ir          compile to LLVM IR and print the module\n"
         "\n"
         "Flags:\n"
         "  --no-check         skip the type checker\n"
         "  --no-opt           disable bytecode optimizer (VM only)\n"
-        "  --bench [N]        run the program N times (default 5), report timings\n");
+        "  --bench [N]        run the program N times, report timings\n");
 }
-
-// ===========================================================================
-// Bench helper
-// ===========================================================================
 
 namespace {
 
@@ -79,17 +74,12 @@ namespace {
         double avg = 0.0;
         for (double t : times) avg += t;
         avg /= (double)times.size();
-
         std::fprintf(stderr,
             "[%s] best: %.3f ms   avg: %.3f ms   runs: %d\n",
             label, best, avg, runs);
     }
 
 } // namespace
-
-// ===========================================================================
-// main
-// ===========================================================================
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -100,7 +90,7 @@ int main(int argc, char** argv) {
 
     std::string file = argv[1];
 
-    enum class Mode { Run, Check, DumpTokens, DumpAst, DumpBytecode };
+    enum class Mode { Run, Check, DumpTokens, DumpAst, DumpBytecode, DumpIR, Native };
     Mode mode = Mode::Run;
     bool skipCheck = false;
     bool useVM = false;
@@ -114,13 +104,14 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--dump-tokens"))   mode = Mode::DumpTokens;
         else if (!std::strcmp(a, "--dump-ast"))      mode = Mode::DumpAst;
         else if (!std::strcmp(a, "--dump-bytecode")) mode = Mode::DumpBytecode;
+        else if (!std::strcmp(a, "--dump-ir"))       mode = Mode::DumpIR;
+        else if (!std::strcmp(a, "--native")) { mode = Mode::Native; }
         else if (!std::strcmp(a, "--vm"))            useVM = true;
         else if (!std::strcmp(a, "--no-check"))      skipCheck = true;
         else if (!std::strcmp(a, "--no-opt"))        useOpt = false;
         else if (!std::strcmp(a, "--bench")) {
             benchRuns = 5;
             if (i + 1 < argc) {
-                // Optional numeric argument
                 char* end = nullptr;
                 long v = std::strtol(argv[i + 1], &end, 10);
                 if (end && *end == '\0' && v > 0) {
@@ -142,7 +133,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ---- Lex ----
     vayu::Lexer lexer(std::move(src));
     auto tokens = lexer.tokenize();
 
@@ -156,7 +146,6 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // ---- Parse ----
     vayu::Block program;
     try {
         vayu::Parser parser(std::move(tokens));
@@ -173,8 +162,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // ---- Type check ----
-    if (!skipCheck && mode != Mode::DumpBytecode) {
+    if (!skipCheck && mode != Mode::DumpBytecode && mode != Mode::DumpIR) {
         try {
             vayu::TypeChecker checker;
             checker.check(program);
@@ -207,21 +195,55 @@ int main(int argc, char** argv) {
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
-
         std::printf("--- raw bytecode ---\n");
         vayu::disassemble(*chunk, file.c_str());
-
         if (useOpt) {
             vayu::OptStats stats;
             vayu::optimizeChunk(*chunk, stats);
-            std::printf("--- after optimization "
-                "(folded=%d, notNOT=%d, peep=%d) ---\n",
-                stats.constantsFolded,
-                stats.notNotCollapsed,
-                stats.peepholesApplied);
+            std::printf("--- after optimization (folded=%d) ---\n",
+                stats.constantsFolded);
             vayu::disassemble(*chunk, file.c_str());
         }
         return 0;
+    }
+
+    // =======================================================================
+    // --dump-ir
+    // =======================================================================
+    if (mode == Mode::DumpIR) {
+        vayu::NativeCompiler nc;
+        nc.dumpIR(program);
+        if (!nc.lastError().empty()) {
+            std::fprintf(stderr, "%s: native IR error: %s\n",
+                file.c_str(), nc.lastError().c_str());
+            return 1;
+        }
+        return 0;
+    }
+
+    // =======================================================================
+    // --native
+    // =======================================================================
+    if (mode == Mode::Native) {
+        if (benchRuns > 0) {
+            // Recompile each run (JIT is single-shot per module).
+            runBenchmark("native", benchRuns, [&]() {
+                vayu::NativeCompiler nc;
+                if (nc.compileAndRun(program) != 0) {
+                    std::fprintf(stderr, "native: %s\n", nc.lastError().c_str());
+                    std::exit(2);
+                }
+                });
+            return 0;
+        }
+
+        vayu::NativeCompiler nc;
+        int rc = nc.compileAndRun(program);
+        if (rc != 0) {
+            std::fprintf(stderr, "%s: native error: %s\n",
+                file.c_str(), nc.lastError().c_str());
+        }
+        return rc;
     }
 
     // =======================================================================
@@ -243,11 +265,8 @@ int main(int argc, char** argv) {
             vayu::OptStats stats;
             vayu::optimizeChunk(*chunk, stats);
             if (std::getenv("VAYU_OPT_VERBOSE")) {
-                std::fprintf(stderr,
-                    "[opt] folded=%d  notNOT=%d  peep=%d\n",
-                    stats.constantsFolded,
-                    stats.notNotCollapsed,
-                    stats.peepholesApplied);
+                std::fprintf(stderr, "[opt] folded=%d notNOT=%d\n",
+                    stats.constantsFolded, stats.notNotCollapsed);
             }
         }
 
@@ -294,7 +313,7 @@ int main(int argc, char** argv) {
     }
 
     // =======================================================================
-    // --run  (tree-walking interpreter)
+    // --run  (tree-walk)
     // =======================================================================
     if (benchRuns > 0) {
         runBenchmark("tree-walk", benchRuns, [&]() {
