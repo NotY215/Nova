@@ -23,14 +23,20 @@ namespace vayu {
     private:
         struct ClassInfo {
             std::string              parentName;
-            std::vector<std::string> ownFields;      // declared directly
-            std::vector<std::string> allFields;      // own + inherited
-            std::vector<std::string> initParams;     // excludes `self`
+            std::vector<std::string> ownFields;
+            std::vector<std::string> allFields;
+            std::vector<std::string> initParams;
             bool                     hasInit = false;
+        };
+
+        struct LoopContext {
+            std::vector<size_t> breakJumps;
+            size_t              continueTarget = 0;
         };
 
         Chunk* chunk_ = nullptr;
         std::unordered_map<std::string, ClassInfo> classInfo_;
+        std::vector<LoopContext>                   loopStack_;
 
         // declaration pre-pass
         void collectDeclarations(const Block& program);
@@ -46,17 +52,23 @@ namespace vayu {
         void compileFor(const ForStmt* n);
         void compileDef(const DefStmt* n);
         void compileReturn(const ReturnStmt* n);
+        void compileTry(const TryStmt* n);
+        void compileRaise(const RaiseStmt* n);
+        void compileImport(const ImportStmt* n);
+        void compileFrom(const FromImportStmt* n);
 
         // expressions
         void compileExpr(const Expr* e);
         void compileAttrGet(const AttrExpr* a, int line);
         void compileCall(const CallExpr* c, int line);
+        void compileLambda(const LambdaExpr* n);
         void compileAssignAttr(const AttrExpr* target, const Expr* value, int line);
 
         // helpers
         size_t emitJump(OpCode op, int line);
         void   patchJump(size_t operandPos, size_t target);
         void   emitLoop(size_t loopStart, int line);
+        void   emitJumpTo(size_t target, int line);
         void   emitNameU16(OpCode op, const std::string& name, int line);
         void   emitNameU16WithCount(OpCode op, const std::string& name,
             uint8_t count, int line);

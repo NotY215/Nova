@@ -1,0 +1,16 @@
+import math_helpers
+import math_helpers as mh
+from math_helpers import square, cube as cb, greet
+
+print(math_helpers.square(5))
+print(mh.square(6))
+print(square(7))
+print(cb(3))
+print(greet("Vayu"))
+
+print(math_helpers.PI)
+print(mh.circle_area(1.0))
+
+import user
+u = user.make_user("Bob", 40)
+print(u)

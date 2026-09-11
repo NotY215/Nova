@@ -118,6 +118,22 @@ namespace vayu {
                 std::printf(" %d", cnt);
                 break;
             }
+            case OpCode::TRY_BEGIN: {
+                int off = chunk.readI16(i); i += 2;
+                std::printf(" -> %04zu", (size_t)((int)i + off));
+                break;
+            }
+            case OpCode::EXCEPT_MATCH: {
+                int ni = chunk.readU16(i); i += 2;
+                std::printf(" %d (%s)", ni, chunk.names[ni].c_str());
+                break;
+            }
+            case OpCode::IMPORT:
+            case OpCode::IMPORT_MEMBER: {
+                int ni = chunk.readU16(i); i += 2;
+                std::printf(" %d (%s)", ni, chunk.names[ni].c_str());
+                break;
+            }
             case OpCode::CALL: {
                 std::printf(" %d", chunk.code[i]); ++i;
                 break;

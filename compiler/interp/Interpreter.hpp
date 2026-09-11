@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include <lexer/Token.hpp>
+#include <functional>
 
 namespace vayu {
 
@@ -35,8 +36,9 @@ namespace vayu {
         /// Register top-level struct / class declarations without executing
         /// the program.  Called by the driver before running on the VM.
         void registerDeclarations(const Block& program);
-
-        // ---- Phase 4C: hooks for the bytecode VM ----
+        bool  vmIsInstanceOf(const Value& v, const std::string& className);
+        Value vmMakeException(const std::string& typeName, const std::string& msg);
+        // ---- : hooks for the bytecode VM ----
         // These mirror the logic of the tree-walking evaluator's attr lookup,
         // instance construction, and method dispatch, but operate on
         // pre-evaluated values.
@@ -45,6 +47,16 @@ namespace vayu {
             const Value& v, SourceLocation loc);
         Value vmNewInst(const std::string& className,
             const std::vector<Value>& args, SourceLocation loc);
+        /// Return a ClassCtor callable for a class, or nullptr if not a class.
+        std::shared_ptr<Callable> vmLookupClass(const std::string& name);
+
+        /// Load a module (used by the VM's IMPORT opcode).
+        Value vmLoadModule(const std::string& name, SourceLocation loc);
+
+        // ---- Phase 4G: hook so builtins can invoke VMFunctions ----
+        using VMFunctionRunner = std::function<Value(std::shared_ptr<Callable>,
+            const std::vector<Value>&)>;
+        void setVMFunctionRunner(VMFunctionRunner r) { vmRunner_ = std::move(r); }
 
         /// Directory to search first when resolving module imports.
         /// Should include a trailing separator.  Empty means "current directory".
@@ -83,6 +95,7 @@ namespace vayu {
         void  execRaise(const RaiseStmt* r);
         void  execImport(const ImportStmt* n);
         void  execFromImport(const FromImportStmt* n);
+        VMFunctionRunner vmRunner_;
 
         Value loadModule(const std::string& name, SourceLocation loc);
         bool  findModuleFile(const std::string& name, std::string& pathOut) const;

@@ -1,0 +1,124 @@
+# ---- Basic raise / catch ----
+try:
+    print("before")
+    raise ValueError("boom")
+    print("after (not reached)")
+except ValueError as e:
+    print("caught:", e.message)
+
+# ---- Multiple except clauses ----
+def risky(mode):
+    if mode == "v":
+        raise ValueError("bad value")
+    if mode == "t":
+        raise TypeError("bad type")
+    if mode == "r":
+        raise RuntimeError("bad runtime")
+    print("no error")
+
+try:
+    risky("v")
+except ValueError:
+    print("value error")
+except TypeError:
+    print("type error")
+
+try:
+    risky("t")
+except ValueError:
+    print("value error")
+except TypeError:
+    print("type error")
+
+try:
+    risky("r")
+except ValueError:
+    print("value error")
+except TypeError:
+    print("type error")
+except RuntimeError:
+    print("runtime error")
+
+# ---- Bare except ----
+try:
+    raise ValueError("caught by bare except")
+except:
+    print("bare except fired")
+
+# ---- finally runs on normal path ----
+def cleanup_normal():
+    try:
+        print("doing work")
+    finally:
+        print("cleanup")
+
+cleanup_normal()
+
+# ---- try/except/finally ----
+def with_finally():
+    try:
+        print("try")
+        raise ValueError("oops")
+    except ValueError:
+        print("handler")
+    finally:
+        print("finally")
+
+with_finally()
+
+# ---- Subclass matching ----
+try:
+    raise ZeroDivisionError("zde")
+except Exception as e:
+    print("caught by base:", e.message)
+
+try:
+    raise ValueError("ve")
+except Exception as e:
+    print("caught by base:", e.message)
+
+# ---- Re-raise ----
+def first_catch():
+    try:
+        raise ValueError("original")
+    except ValueError:
+        print("inner")
+        raise
+
+try:
+    first_catch()
+except ValueError as e:
+    print("outer:", e.message)
+
+# ---- Nested try ----
+try:
+    try:
+        raise ValueError("inner")
+    except ValueError:
+        print("inner handler")
+        raise TypeError("from inner")
+except TypeError as e:
+    print("outer handler:", e.message)
+
+# ---- try inside a loop ----
+for i in range(5):
+    try:
+        if i == 3:
+            raise ValueError("three!")
+        print("i =", i)
+    except ValueError as e:
+        print("skipped:", e.message)
+
+# ---- Raise inside a function, caught in another ----
+def do_raise():
+    raise RuntimeError("from do_raise")
+
+def catch_it():
+    try:
+        do_raise()
+    except RuntimeError as e:
+        return "caught in catch_it: " + e.message
+
+print(catch_it())
+
+print("done")

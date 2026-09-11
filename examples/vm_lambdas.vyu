@@ -1,0 +1,59 @@
+# ---- Lambda basics ----
+double = lambda x: x * 2
+print(double(5))
+
+add = lambda a, b: a + b
+print(add(3, 4))
+
+no_args = lambda: 42
+print(no_args())
+
+# ---- Closures ----
+def make_adder(n):
+    return lambda x: x + n
+
+add5 = make_adder(5)
+print(add5(100))
+
+# ---- HOF builtins ----
+nums = [1, 2, 3, 4, 5]
+doubled = map(lambda x: x * 2, nums)
+print(doubled)
+
+evens = filter(lambda x: x % 2 == 0, nums)
+print(evens)
+
+total = reduce(lambda a, b: a + b, nums)
+print(total)
+
+ordered = sorted([3, 1, 4, 1, 5, 9, 2, 6])
+print(ordered)
+
+by_lower = sorted(["Charlie", "alice", "Bob"], lambda s: s.lower())
+print(by_lower)
+
+print(any([false, false, true]))
+print(all([true, true, true]))
+print(sum([10, 20, 30]))
+
+# ---- break / continue ----
+i = 0
+while i < 10:
+    i = i + 1
+    if i == 5:
+        break
+    print("while:", i)
+
+for n in range(10):
+    if n % 2 == 0:
+        continue
+    print("odd:", n)
+
+# ---- Nested loops with break ----
+for a in range(3):
+    for b in range(3):
+        if b == 2:
+            break
+        print(a, b)
+
+print("done")

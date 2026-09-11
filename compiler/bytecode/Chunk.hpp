@@ -15,7 +15,7 @@ namespace vayu {
         std::vector<Value>       constants;
         std::vector<std::string> names;
 
-        /// Nested functions declared inside this chunk (Phase 4B).
+        /// Nested functions declared inside this chunk .
         std::vector<std::shared_ptr<Chunk>> functions;
 
         /// Parameter names — populated for function chunks; empty for top-level.

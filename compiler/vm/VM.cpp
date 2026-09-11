@@ -36,375 +36,492 @@ namespace vayu {
     void VM::run(std::shared_ptr<Chunk> entryChunk) {
         frames_.clear();
         stack_.clear();
-        frames_.push_back({ std::move(entryChunk), 0, globals_ });
+        handlers_.clear();
+        activeExceptions_.clear();
 
-        while (!frames_.empty()) {
+        if (Interpreter::current_) {
+            Interpreter::current_->setVMFunctionRunner(
+                [this](std::shared_ptr<Callable> fn,
+                    const std::vector<Value>& args) {
+                        return callVMFunctionSync(std::move(fn), args);
+                });
+        }
+
+        frames_.push_back({ std::move(entryChunk), 0, globals_,
+            /*stackBase=*/0, /*handlers=*/0, /*activeExc=*/0 });
+        runLoop(0);
+    }
+
+    void VM::runLoop(size_t stopAtFrameCount) {
+        while (frames_.size() > stopAtFrameCount) {
             CallFrame& f = frames_.back();
             if (f.ip >= f.chunk->code.size())
                 runtimeError("bytecode ran off the end without RETURN_V");
 
             currentLine_ = f.chunk->lines[f.ip];
-            OpCode op = static_cast<OpCode>(readByte());
 
-            switch (op) {
+            try {
+                OpCode op = static_cast<OpCode>(readByte());
+                switch (op) {
 
-                // ---- Stack & literals ----
-            case OpCode::CONST: {
-                int idx = readU16();
-                push(chunk().constants[idx]);
-                break;
-            }
-            case OpCode::NONE:    push(Value());      break;
-            case OpCode::TRUE_V:  push(Value(true));  break;
-            case OpCode::FALSE_V: push(Value(false)); break;
-            case OpCode::POP:     (void)pop();        break;
-            case OpCode::DUP:     push(top());        break;
+                    // ---- Stack & literals ----
+                case OpCode::CONST: {
+                    int idx = readU16();
+                    push(chunk().constants[idx]);
+                    break;
+                }
+                case OpCode::NONE:    push(Value());      break;
+                case OpCode::TRUE_V:  push(Value(true));  break;
+                case OpCode::FALSE_V: push(Value(false)); break;
+                case OpCode::POP:     (void)pop();        break;
+                case OpCode::DUP:     push(top());        break;
 
-                // ---- Variables ----
-            case OpCode::LOAD: {
-                int idx = readU16();
-                const std::string& name = chunk().names[idx];
-                Value* slot = env()->lookup(name);
-                if (!slot) runtimeError("name '" + name + "' is not defined");
-                push(*slot);
-                break;
-            }
-            case OpCode::STORE: {
-                int idx = readU16();
-                const std::string& name = chunk().names[idx];
-                Value v = pop();
-                if (!env()->assign(name, v))
+                    // ---- Variables ----
+                case OpCode::LOAD: {
+                    int idx = readU16();
+                    const std::string& name = chunk().names[idx];
+                    Value* slot = env()->lookup(name);
+                    if (slot) { push(*slot); break; }
+                    if (Interpreter::current_) {
+                        auto cls = Interpreter::current_->vmLookupClass(name);
+                        if (cls) { push(Value(cls)); break; }
+                    }
                     runtimeError("name '" + name + "' is not defined");
-                break;
-            }
-            case OpCode::DEFINE: {
-                int idx = readU16();
-                const std::string& name = chunk().names[idx];
-                Value v = pop();
-                if (!env()->assign(name, v)) env()->define(name, std::move(v));
-                break;
-            }
-
-                               // ---- Arithmetic ----
-            case OpCode::ADD:
-            case OpCode::SUB:
-            case OpCode::MUL:
-            case OpCode::DIV:
-            case OpCode::FLOORDIV:
-            case OpCode::MOD:
-            case OpCode::POW:
-                doArithmetic((int)op);
-                break;
-
-            case OpCode::NEG: {
-                Value v = pop();
-                if (v.isInt())        push(Value(-v.asInt()));
-                else if (v.isFloat()) push(Value(-v.asFloat()));
-                else                  runtimeError("cannot negate " + v.typeName());
-                break;
-            }
-
-                            // ---- Comparison / logic ----
-            case OpCode::EQ: case OpCode::NEQ:
-            case OpCode::LT: case OpCode::GT:
-            case OpCode::LE: case OpCode::GE:
-                doComparison((int)op);
-                break;
-
-            case OpCode::NOT: {
-                Value v = pop();
-                push(Value(!v.truthy()));
-                break;
-            }
-
-                            // ---- Control flow ----
-            case OpCode::JUMP: {
-                int off = readI16();
-                ip() = (size_t)((int)ip() + off);
-                break;
-            }
-            case OpCode::JUMP_IF_FALSE: {
-                int off = readI16();
-                Value v = pop();
-                if (!v.truthy()) ip() = (size_t)((int)ip() + off);
-                break;
-            }
-            case OpCode::JUMP_IF_TRUE: {
-                int off = readI16();
-                Value v = pop();
-                if (v.truthy()) ip() = (size_t)((int)ip() + off);
-                break;
-            }
-
-                                     // ---- Iteration ----
-            case OpCode::ITER_NEW: {
-                Value v = pop();
-                if (v.isList()) {
-                    push(v);
-                    push(Value(0LL));
+                }
+                case OpCode::STORE: {
+                    int idx = readU16();
+                    const std::string& name = chunk().names[idx];
+                    Value v = pop();
+                    if (!env()->assign(name, v))
+                        runtimeError("name '" + name + "' is not defined");
                     break;
                 }
-                if (v.isMap()) {
-                    // Iterate keys — snapshot into a list.
-                    auto keys = std::make_shared<ListValue>();
-                    for (auto& [k, _] : v.asMap()->entries)
-                        keys->items.push_back(Value(k));
-                    push(Value(keys));
-                    push(Value(0LL));
+                case OpCode::DEFINE: {
+                    int idx = readU16();
+                    const std::string& name = chunk().names[idx];
+                    Value v = pop();
+                    if (!env()->assign(name, v)) env()->define(name, std::move(v));
                     break;
                 }
-                if (v.isString()) {
-                    auto chars = std::make_shared<ListValue>();
-                    for (char c : v.asString())
-                        chars->items.push_back(Value(std::string(1, c)));
-                    push(Value(chars));
-                    push(Value(0LL));
+
+                                   // ---- Arithmetic ----
+                case OpCode::ADD:
+                case OpCode::SUB:
+                case OpCode::MUL:
+                case OpCode::DIV:
+                case OpCode::FLOORDIV:
+                case OpCode::MOD:
+                case OpCode::POW:
+                    doArithmetic((int)op);
+                    break;
+
+                case OpCode::NEG: {
+                    Value v = pop();
+                    if (v.isInt())        push(Value(-v.asInt()));
+                    else if (v.isFloat()) push(Value(-v.asFloat()));
+                    else                  runtimeError("cannot negate " + v.typeName());
                     break;
                 }
-                runtimeError("cannot iterate over " + v.typeName());
-            }
-            case OpCode::ITER_NEXT: {
-                int off = readI16();
-                size_t idxPos = stack_.size() - 1;
-                size_t iterPos = stack_.size() - 2;
-                Value iterable = stack_[iterPos];
-                long long idx = stack_[idxPos].asInt();
-                if (!iterable.isList()) runtimeError("iterator state corrupted");
-                auto lst = iterable.asList();
-                if (idx < 0 || idx >= (long long)lst->items.size()) {
-                    stack_.pop_back();
-                    stack_.pop_back();
+
+                                // ---- Comparison / logic ----
+                case OpCode::EQ: case OpCode::NEQ:
+                case OpCode::LT: case OpCode::GT:
+                case OpCode::LE: case OpCode::GE:
+                    doComparison((int)op);
+                    break;
+
+                case OpCode::NOT: {
+                    Value v = pop();
+                    push(Value(!v.truthy()));
+                    break;
+                }
+
+                                // ---- Control flow ----
+                case OpCode::JUMP: {
+                    int off = readI16();
                     ip() = (size_t)((int)ip() + off);
                     break;
                 }
-                push(lst->items[(size_t)idx]);
-                stack_[idxPos] = Value(idx + 1);
-                break;
-            }
-
-                                  // ---- Lists ----
-            case OpCode::LIST_NEW: {
-                int count = readU16();
-                auto lst = std::make_shared<ListValue>();
-                lst->items.resize((size_t)count);
-                for (int i = count - 1; i >= 0; --i)
-                    lst->items[(size_t)i] = pop();
-                push(Value(lst));
-                break;
-            }
-
-                                 // ---- Functions ----
-            case OpCode::MAKE_FN: {
-                int idx = readU16();
-                auto& fnChunk = chunk().functions[(size_t)idx];
-                auto c = std::make_shared<Callable>();
-                c->kind = Callable::Kind::VMFunction;
-                c->name = "<fn>";
-                c->chunk = fnChunk;
-                c->vmParams = fnChunk->paramNames;
-                c->closure = env();
-                push(Value(c));
-                break;
-            }
-
-            case OpCode::CALL: {
-                int argc = readByte();
-                std::vector<Value> args((size_t)argc);
-                for (int i = argc - 1; i >= 0; --i)
-                    args[(size_t)i] = pop();
-                Value callee = pop();
-
-                if (!callee.isCallable())
-                    runtimeError("cannot call " + callee.typeName() + " value");
-
-                auto fn = callee.asCallable();
-                if (fn->kind == Callable::Kind::VMFunction) {
-                    callVMFunction(fn, args);
-                }
-                else {
-                    if (!Interpreter::current_)
-                        runtimeError("VM: no interpreter context for builtin call");
-                    Value r = Interpreter::current_->callValue(
-                        callee, args, SourceLocation{});
-                    push(std::move(r));
-                }
-                break;
-            }
-
-            case OpCode::RETURN_V: {
-                Value v = pop();
-                frames_.pop_back();
-                if (frames_.empty()) return;
-                push(std::move(v));
-                break;
-            }
-
-                                 // ---- Structs & classes ----
-            case OpCode::NEW_INSTANCE: {
-                int nameIdx = readU16();
-                int argc = readByte();
-                std::string clsName = chunk().names[nameIdx];
-                std::vector<Value> args((size_t)argc);
-                for (int i = argc - 1; i >= 0; --i) args[(size_t)i] = pop();
-                if (!Interpreter::current_)
-                    runtimeError("VM: no interpreter context for instance construction");
-                Value inst = Interpreter::current_->vmNewInst(
-                    clsName, args, SourceLocation{});
-                push(std::move(inst));
-                break;
-            }
-
-            case OpCode::ATTR_GET: {
-                int nameIdx = readU16();
-                std::string attr = chunk().names[nameIdx];
-                Value base = pop();
-                if (!Interpreter::current_)
-                    runtimeError("VM: no interpreter context for attribute lookup");
-                Value v = Interpreter::current_->vmGetAttr(
-                    base, attr, SourceLocation{});
-                push(std::move(v));
-                break;
-            }
-
-            case OpCode::ATTR_SET: {
-                int nameIdx = readU16();
-                std::string attr = chunk().names[nameIdx];
-                Value value = pop();
-                Value base = pop();
-                if (!Interpreter::current_)
-                    runtimeError("VM: no interpreter context for attribute write");
-                Interpreter::current_->vmSetAttr(base, attr, value, SourceLocation{});
-                break;
-            }
-
-            case OpCode::SUPER: {
-                Value* s = env()->lookup("self");
-                Value* k = env()->lookup("__class__");
-                if (!s || !k || !s->isInstance() || !k->isClass())
-                    runtimeError("super() outside method");
-                auto sup = std::make_shared<Callable>();
-                sup->kind = Callable::Kind::SuperMethod;
-                sup->name = "super";
-                sup->boundSelf = s->asInstance();
-                sup->superParent = k->asClass()->parent;
-                if (!sup->superParent)
-                    runtimeError("class '" + k->asClass()->name + "' has no parent");
-                push(Value(sup));
-                break;
-            }
-                              // ---- Collections ----
-            case OpCode::INDEX_GET: {
-                Value idx = pop();
-                Value tgt = pop();
-                if (tgt.isList()) {
-                    if (!idx.isInt())
-                        runtimeError("list index must be int, got " + idx.typeName());
-                    auto lst = tgt.asList();
-                    long long i = idx.asInt();
-                    if (i < 0) i += (long long)lst->items.size();
-                    if (i < 0 || i >= (long long)lst->items.size())
-                        runtimeError("list index out of range");
-                    push(lst->items[(size_t)i]);
+                case OpCode::JUMP_IF_FALSE: {
+                    int off = readI16();
+                    Value v = pop();
+                    if (!v.truthy()) ip() = (size_t)((int)ip() + off);
                     break;
                 }
-                if (tgt.isMap()) {
-                    if (!idx.isString())
-                        runtimeError("map key must be str, got " + idx.typeName());
-                    auto m = tgt.asMap();
-                    auto it = m->entries.find(idx.asString());
-                    if (it == m->entries.end())
-                        runtimeError("map has no key '" + idx.asString() + "'");
+                case OpCode::JUMP_IF_TRUE: {
+                    int off = readI16();
+                    Value v = pop();
+                    if (v.truthy()) ip() = (size_t)((int)ip() + off);
+                    break;
+                }
+
+                                         // ---- Iteration ----
+                case OpCode::ITER_NEW: {
+                    Value v = pop();
+                    if (v.isList()) {
+                        push(v);
+                        push(Value(0LL));
+                        break;
+                    }
+                    if (v.isMap()) {
+                        auto keys = std::make_shared<ListValue>();
+                        for (auto& [k, _] : v.asMap()->entries)
+                            keys->items.push_back(Value(k));
+                        push(Value(keys));
+                        push(Value(0LL));
+                        break;
+                    }
+                    if (v.isString()) {
+                        auto chars = std::make_shared<ListValue>();
+                        for (char c : v.asString())
+                            chars->items.push_back(Value(std::string(1, c)));
+                        push(Value(chars));
+                        push(Value(0LL));
+                        break;
+                    }
+                    runtimeError("cannot iterate over " + v.typeName());
+                }
+                case OpCode::ITER_NEXT: {
+                    int off = readI16();
+                    size_t idxPos = stack_.size() - 1;
+                    size_t iterPos = stack_.size() - 2;
+                    Value iterable = stack_[iterPos];
+                    long long idx = stack_[idxPos].asInt();
+                    if (!iterable.isList()) runtimeError("iterator state corrupted");
+                    auto lst = iterable.asList();
+                    if (idx < 0 || idx >= (long long)lst->items.size()) {
+                        // Do NOT pop here — the compiler emits POP; POP at the
+                        // loop exit so that `break` uses the same cleanup path.
+                        ip() = (size_t)((int)ip() + off);
+                        break;
+                    }
+                    push(lst->items[(size_t)idx]);
+                    stack_[idxPos] = Value(idx + 1);
+                    break;
+                }
+
+                                      // ---- Lists ----
+                case OpCode::LIST_NEW: {
+                    int count = readU16();
+                    auto lst = std::make_shared<ListValue>();
+                    lst->items.resize((size_t)count);
+                    for (int i = count - 1; i >= 0; --i)
+                        lst->items[(size_t)i] = pop();
+                    push(Value(lst));
+                    break;
+                }
+
+                                     // ---- Functions ----
+                case OpCode::MAKE_FN: {
+                    int idx = readU16();
+                    auto& fnChunk = chunk().functions[(size_t)idx];
+                    auto c = std::make_shared<Callable>();
+                    c->kind = Callable::Kind::VMFunction;
+                    c->name = "<fn>";
+                    c->chunk = fnChunk;
+                    c->vmParams = fnChunk->paramNames;
+                    c->closure = env();
+                    push(Value(c));
+                    break;
+                }
+
+                case OpCode::CALL: {
+                    int argc = readByte();
+                    std::vector<Value> args((size_t)argc);
+                    for (int i = argc - 1; i >= 0; --i)
+                        args[(size_t)i] = pop();
+                    Value callee = pop();
+
+                    if (!callee.isCallable())
+                        runtimeError("cannot call " + callee.typeName() + " value");
+
+                    auto fn = callee.asCallable();
+                    if (fn->kind == Callable::Kind::VMFunction) {
+                        callVMFunction(fn, args);
+                    }
+                    else {
+                        if (!Interpreter::current_)
+                            runtimeError("VM: no interpreter context for builtin call");
+                        Value r = Interpreter::current_->callValue(
+                            callee, args, SourceLocation{});
+                        push(std::move(r));
+                    }
+                    break;
+                }
+
+                case OpCode::RETURN_V: {
+                    Value v = pop();
+                    size_t sBase = frames_.back().stackBase;
+                    size_t hAtEntry = frames_.back().handlersAtEntry;
+                    size_t aAtEntry = frames_.back().activeExcAtEntry;
+                    frames_.pop_back();
+                    if (stack_.size() > sBase)              stack_.resize(sBase);
+                    if (handlers_.size() > hAtEntry)        handlers_.resize(hAtEntry);
+                    if (activeExceptions_.size() > aAtEntry)
+                        activeExceptions_.resize(aAtEntry);
+                    if (!frames_.empty()) push(std::move(v));
+                    break;
+                }
+
+                                     // ---- Structs & classes (Phase 4C) ----
+                case OpCode::NEW_INSTANCE: {
+                    int nameIdx = readU16();
+                    int argc = readByte();
+                    std::string clsName = chunk().names[nameIdx];
+                    std::vector<Value> args((size_t)argc);
+                    for (int i = argc - 1; i >= 0; --i) args[(size_t)i] = pop();
+                    if (!Interpreter::current_)
+                        runtimeError("VM: no interpreter context for instance construction");
+                    Value inst = Interpreter::current_->vmNewInst(
+                        clsName, args, SourceLocation{});
+                    push(std::move(inst));
+                    break;
+                }
+                case OpCode::ATTR_GET: {
+                    int nameIdx = readU16();
+                    std::string attr = chunk().names[nameIdx];
+                    Value base = pop();
+                    if (!Interpreter::current_)
+                        runtimeError("VM: no interpreter context for attribute lookup");
+                    Value v = Interpreter::current_->vmGetAttr(
+                        base, attr, SourceLocation{});
+                    push(std::move(v));
+                    break;
+                }
+                case OpCode::ATTR_SET: {
+                    int nameIdx = readU16();
+                    std::string attr = chunk().names[nameIdx];
+                    Value value = pop();
+                    Value base = pop();
+                    if (!Interpreter::current_)
+                        runtimeError("VM: no interpreter context for attribute write");
+                    Interpreter::current_->vmSetAttr(base, attr, value, SourceLocation{});
+                    break;
+                }
+                case OpCode::SUPER: {
+                    Value* s = env()->lookup("self");
+                    Value* k = env()->lookup("__class__");
+                    if (!s || !k || !s->isInstance() || !k->isClass())
+                        runtimeError("super() outside method");
+                    auto sup = std::make_shared<Callable>();
+                    sup->kind = Callable::Kind::SuperMethod;
+                    sup->name = "super";
+                    sup->boundSelf = s->asInstance();
+                    sup->superParent = k->asClass()->parent;
+                    if (!sup->superParent)
+                        runtimeError("class '" + k->asClass()->name + "' has no parent");
+                    push(Value(sup));
+                    break;
+                }
+
+                                  // ---- Collections (Phase 4D) ----
+                case OpCode::INDEX_GET: {
+                    Value idx = pop();
+                    Value tgt = pop();
+                    if (tgt.isList()) {
+                        if (!idx.isInt())
+                            runtimeError("list index must be int, got " + idx.typeName());
+                        auto lst = tgt.asList();
+                        long long i = idx.asInt();
+                        if (i < 0) i += (long long)lst->items.size();
+                        if (i < 0 || i >= (long long)lst->items.size())
+                            runtimeError("list index out of range");
+                        push(lst->items[(size_t)i]);
+                        break;
+                    }
+                    if (tgt.isMap()) {
+                        if (!idx.isString())
+                            runtimeError("map key must be str, got " + idx.typeName());
+                        auto m = tgt.asMap();
+                        auto it = m->entries.find(idx.asString());
+                        if (it == m->entries.end())
+                            runtimeError("map has no key '" + idx.asString() + "'");
+                        push(it->second);
+                        break;
+                    }
+                    if (tgt.isString()) {
+                        if (!idx.isInt())
+                            runtimeError("str index must be int, got " + idx.typeName());
+                        const std::string& s = tgt.asString();
+                        long long i = idx.asInt();
+                        if (i < 0) i += (long long)s.size();
+                        if (i < 0 || i >= (long long)s.size())
+                            runtimeError("string index out of range");
+                        push(Value(std::string(1, s[(size_t)i])));
+                        break;
+                    }
+                    runtimeError("cannot index value of type " + tgt.typeName());
+                }
+                case OpCode::INDEX_SET: {
+                    Value v = pop();
+                    Value idx = pop();
+                    Value tgt = pop();
+                    if (tgt.isList()) {
+                        if (!idx.isInt())
+                            runtimeError("list index must be int, got " + idx.typeName());
+                        auto lst = tgt.asList();
+                        long long i = idx.asInt();
+                        if (i < 0) i += (long long)lst->items.size();
+                        if (i < 0 || i >= (long long)lst->items.size())
+                            runtimeError("list index out of range");
+                        lst->items[(size_t)i] = std::move(v);
+                        break;
+                    }
+                    if (tgt.isMap()) {
+                        if (!idx.isString())
+                            runtimeError("map key must be str, got " + idx.typeName());
+                        tgt.asMap()->entries[idx.asString()] = std::move(v);
+                        break;
+                    }
+                    if (tgt.isString())
+                        runtimeError("strings are immutable");
+                    runtimeError("cannot index-assign to value of type " + tgt.typeName());
+                }
+                case OpCode::MAP_NEW: {
+                    int count = readU16();
+                    auto m = std::make_shared<MapValue>();
+                    std::vector<std::pair<std::string, Value>> pairs((size_t)count);
+                    for (int i = count - 1; i >= 0; --i) {
+                        Value v = pop();
+                        Value k = pop();
+                        if (!k.isString())
+                            runtimeError("map keys must be str, got " + k.typeName());
+                        pairs[(size_t)i] = { k.asString(), std::move(v) };
+                    }
+                    for (auto& [k, v] : pairs) m->entries[k] = std::move(v);
+                    push(Value(m));
+                    break;
+                }
+                case OpCode::IN: {
+                    Value r = pop();
+                    Value l = pop();
+                    if (r.isList()) {
+                        bool found = false;
+                        for (auto& v : r.asList()->items)
+                            if (valueEqualsVM(l, v)) { found = true; break; }
+                        push(Value(found));
+                        break;
+                    }
+                    if (r.isMap()) {
+                        if (!l.isString()) { push(Value(false)); break; }
+                        push(Value(r.asMap()->entries.count(l.asString()) > 0));
+                        break;
+                    }
+                    if (r.isString() && l.isString()) {
+                        push(Value(r.asString().find(l.asString()) != std::string::npos));
+                        break;
+                    }
+                    runtimeError("'in' requires a list, map, or str on the right");
+                }
+
+                               // ---- Exceptions (Phase 4E) ----
+                case OpCode::TRY_BEGIN: {
+                    int off = readI16();
+                    Handler h;
+                    h.ip = (size_t)((int)ip() + off);
+                    h.stackSize = stack_.size();
+                    h.framesSize = frames_.size();
+                    h.activeExcSize = activeExceptions_.size();
+                    handlers_.push_back(h);
+                    break;
+                }
+                case OpCode::TRY_END:
+                    if (!handlers_.empty()) handlers_.pop_back();
+                    break;
+
+                case OpCode::RAISE: {
+                    Value v = pop();
+                    if (!v.isInstance()) {
+                        if (!Interpreter::current_)
+                            runtimeError("VM: no interpreter context for exception creation");
+                        v = Interpreter::current_->vmMakeException("Exception",
+                            v.toString());
+                    }
+                    throw VayuException{ v, SourceLocation{} };
+                }
+                case OpCode::RERAISE: {
+                    if (activeExceptions_.empty())
+                        runtimeError("no active exception to re-raise");
+                    throw VayuException{ activeExceptions_.back(), SourceLocation{} };
+                }
+                case OpCode::EXCEPT_PUSH: {
+                    if (stack_.empty())
+                        runtimeError("EXCEPT_PUSH: empty stack");
+                    activeExceptions_.push_back(top());
+                    break;
+                }
+                case OpCode::EXCEPT_POP:
+                    if (!activeExceptions_.empty()) activeExceptions_.pop_back();
+                    break;
+                case OpCode::EXCEPT_MATCH: {
+                    int nameIdx = readU16();
+                    std::string clsName = chunk().names[nameIdx];
+                    if (stack_.empty())
+                        runtimeError("EXCEPT_MATCH: empty stack");
+                    Value v = top();
+                    if (!Interpreter::current_)
+                        runtimeError("VM: no interpreter context for exception match");
+                    bool m = Interpreter::current_->vmIsInstanceOf(v, clsName);
+                    push(Value(m));
+                    break;
+                }
+                                         // ---- Modules ---
+                case OpCode::IMPORT: {
+                    int idx = readU16();
+                    const std::string& modName = chunk().names[idx];
+                    if (!Interpreter::current_)
+                        runtimeError("VM: no interpreter context for module load");
+                    Value mod = Interpreter::current_->vmLoadModule(
+                        modName, SourceLocation{});
+                    push(std::move(mod));
+                    break;
+                }
+                case OpCode::IMPORT_MEMBER: {
+                    int idx = readU16();
+                    const std::string& member = chunk().names[idx];
+                    if (stack_.empty() || !top().isModule())
+                        runtimeError("IMPORT_MEMBER: top of stack is not a module");
+                    auto mod = top().asModule();
+                    auto it = mod->members.find(member);
+                    if (it == mod->members.end())
+                        runtimeError("module '" + mod->name +
+                            "' has no member '" + member + "'");
                     push(it->second);
                     break;
                 }
-                if (tgt.isString()) {
-                    if (!idx.isInt())
-                        runtimeError("str index must be int, got " + idx.typeName());
-                    const std::string& s = tgt.asString();
-                    long long i = idx.asInt();
-                    if (i < 0) i += (long long)s.size();
-                    if (i < 0 || i >= (long long)s.size())
-                        runtimeError("string index out of range");
-                    push(Value(std::string(1, s[(size_t)i])));
-                    break;
-                }
-                runtimeError("cannot index value of type " + tgt.typeName());
-            }
 
-            case OpCode::INDEX_SET: {
-                Value v = pop();
-                Value idx = pop();
-                Value tgt = pop();
-                if (tgt.isList()) {
-                    if (!idx.isInt())
-                        runtimeError("list index must be int, got " + idx.typeName());
-                    auto lst = tgt.asList();
-                    long long i = idx.asInt();
-                    if (i < 0) i += (long long)lst->items.size();
-                    if (i < 0 || i >= (long long)lst->items.size())
-                        runtimeError("list index out of range");
-                    lst->items[(size_t)i] = std::move(v);
-                    break;
-                }
-                if (tgt.isMap()) {
-                    if (!idx.isString())
-                        runtimeError("map key must be str, got " + idx.typeName());
-                    tgt.asMap()->entries[idx.asString()] = std::move(v);
-                    break;
-                }
-                if (tgt.isString())
-                    runtimeError("strings are immutable");
-                runtimeError("cannot index-assign to value of type " + tgt.typeName());
-            }
-
-            case OpCode::MAP_NEW: {
-                int count = readU16();
-                auto m = std::make_shared<MapValue>();
-                std::vector<std::pair<std::string, Value>> pairs((size_t)count);
-                for (int i = count - 1; i >= 0; --i) {
+                                         // ---- Misc ----
+                case OpCode::PRINT: {
                     Value v = pop();
-                    Value k = pop();
-                    if (!k.isString())
-                        runtimeError("map keys must be str, got " + k.typeName());
-                    pairs[(size_t)i] = { k.asString(), std::move(v) };
-                }
-                for (auto& [k, v] : pairs) m->entries[k] = std::move(v);
-                push(Value(m));
-                break;
-            }
-
-            case OpCode::IN: {
-                Value r = pop();
-                Value l = pop();
-                if (r.isList()) {
-                    bool found = false;
-                    for (auto& v : r.asList()->items)
-                        if (valueEqualsVM(l, v)) { found = true; break; }
-                    push(Value(found));
+                    std::cout << v.toString() << '\n';
                     break;
                 }
-                if (r.isMap()) {
-                    if (!l.isString()) { push(Value(false)); break; }
-                    push(Value(r.asMap()->entries.count(l.asString()) > 0));
-                    break;
                 }
-                if (r.isString() && l.isString()) {
-                    push(Value(r.asString().find(l.asString()) != std::string::npos));
-                    break;
-                }
-                runtimeError("'in' requires a list, map, or str on the right");
             }
-
-                                 // ---- Misc ----
-            case OpCode::PRINT: {
-                Value v = pop();
-                std::cout << v.toString() << '\n';
-                break;
-            }
+            catch (VayuException& ne) {
+                unwindToHandler(ne.value);
             }
         }
     }
 
+    // ---------------------------------------------------------------------------
+
+    void VM::unwindToHandler(const Value& excValue) {
+        if (handlers_.empty()) {
+            // No handler anywhere in this VM run — repackage and propagate.
+            throw VayuException{ excValue, SourceLocation{} };
+        }
+        Handler h = handlers_.back();
+        handlers_.pop_back();
+
+        if (stack_.size() > h.stackSize)            stack_.resize(h.stackSize);
+        if (frames_.size() > h.framesSize)          frames_.resize(h.framesSize);
+        if (activeExceptions_.size() > h.activeExcSize)
+            activeExceptions_.resize(h.activeExcSize);
+
+        stack_.push_back(excValue);
+        frames_.back().ip = h.ip;
+    }
     // ---------------------------------------------------------------------------
 
     void VM::callVMFunction(const std::shared_ptr<Callable>& fn,
@@ -418,7 +535,16 @@ namespace vayu {
         for (size_t i = 0; i < args.size(); ++i)
             callEnv->define(fn->vmParams[i], args[i]);
 
-        frames_.push_back({ fn->chunk, 0, callEnv });
+        frames_.push_back({ fn->chunk, 0, callEnv,
+                   stack_.size(),
+                   handlers_.size(), activeExceptions_.size() });
+    }
+    Value VM::callVMFunctionSync(std::shared_ptr<Callable> fn,
+        const std::vector<Value>& args) {
+        size_t stopAt = frames_.size();
+        callVMFunction(fn, args);
+        runLoop(stopAt);
+        return pop();
     }
 
     // ---------------------------------------------------------------------------

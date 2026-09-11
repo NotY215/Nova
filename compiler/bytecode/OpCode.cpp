@@ -8,6 +8,8 @@ namespace vayu {
         case OpCode::NONE:     return "NONE";
         case OpCode::TRUE_V:   return "TRUE";
         case OpCode::FALSE_V:  return "FALSE";
+        case OpCode::IMPORT:        return "IMPORT";
+        case OpCode::IMPORT_MEMBER: return "IMPORT_MEMBER";
         case OpCode::POP:      return "POP";
         case OpCode::DUP:      return "DUP";
         case OpCode::LOAD:     return "LOAD";
@@ -46,6 +48,13 @@ namespace vayu {
         case OpCode::CALL:           return "CALL";
         case OpCode::RETURN_V:       return "RETURN_V";
         case OpCode::PRINT:          return "PRINT";
+        case OpCode::TRY_BEGIN:    return "TRY_BEGIN";
+        case OpCode::TRY_END:      return "TRY_END";
+        case OpCode::RAISE:        return "RAISE";
+        case OpCode::RERAISE:      return "RERAISE";
+        case OpCode::EXCEPT_PUSH:  return "EXCEPT_PUSH";
+        case OpCode::EXCEPT_POP:   return "EXCEPT_POP";
+        case OpCode::EXCEPT_MATCH: return "EXCEPT_MATCH";
         }
         return "?";
     }

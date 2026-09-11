@@ -92,7 +92,13 @@ namespace vayu {
         chunk_->emit(0, line);
         chunk_->patchJump(pos, (int)loopStart, line);
     }
-
+    void Compiler::emitJumpTo(size_t target, int line) {
+        chunk_->emitOp(OpCode::JUMP, line);
+        size_t pos = chunk_->code.size();
+        chunk_->emit(0, line);
+        chunk_->emit(0, line);
+        chunk_->patchJump(pos, (int)target, line);
+    }
     void Compiler::emitNameU16(OpCode op, const std::string& name, int line) {
         chunk_->emitOp(op, line);
         int idx = chunk_->addName(name);
@@ -130,7 +136,6 @@ namespace vayu {
 
         case StmtKind::Assign: {
             auto* n = static_cast<const AssignStmt*>(s);
-
             if (n->target->kind == ExprKind::NameRef) {
                 const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
                 compileExpr(n->value.get());
@@ -144,7 +149,6 @@ namespace vayu {
             }
             if (n->target->kind == ExprKind::Index) {
                 auto* ix = static_cast<const IndexExpr*>(n->target.get());
-                // Stack: [target, index, value]
                 compileExpr(ix->target.get());
                 compileExpr(ix->index.get());
                 compileExpr(n->value.get());
@@ -167,26 +171,48 @@ namespace vayu {
         case StmtKind::For:    compileFor(static_cast<const ForStmt*>(s));    return;
         case StmtKind::Def:    compileDef(static_cast<const DefStmt*>(s));    return;
         case StmtKind::Return: compileReturn(static_cast<const ReturnStmt*>(s)); return;
-
-        case StmtKind::Pass: return;
+        case StmtKind::Try:    compileTry(static_cast<const TryStmt*>(s));    return;
+        case StmtKind::Raise:  compileRaise(static_cast<const RaiseStmt*>(s));  return;
+        case StmtKind::Import: compileImport(static_cast<const ImportStmt*>(s)); return;
+        case StmtKind::FromImport: compileFrom(static_cast<const FromImportStmt*>(s)); return;
 
         case StmtKind::Break:
-            error(s->loc, "VM mode: break not yet implemented");
+            if (loopStack_.empty())
+                error(s->loc, "'break' outside loop");
+            loopStack_.back().breakJumps.push_back(emitJump(OpCode::JUMP, line));
+            return;
+
         case StmtKind::Continue:
-            error(s->loc, "VM mode: continue not yet implemented");
+            if (loopStack_.empty())
+                error(s->loc, "'continue' outside loop");
+            emitJumpTo(loopStack_.back().continueTarget, line);
+            return;
+
+        case StmtKind::Pass: return;
 
         case StmtKind::Struct:
         case StmtKind::Class:
             return;   // registered at compile time
-
-        case StmtKind::Try:
-        case StmtKind::Raise:
-            error(s->loc, "VM mode: exceptions arrive in a later sub-phase");
-
-        case StmtKind::Import:
-        case StmtKind::FromImport:
-            error(s->loc, "VM mode: modules not yet supported");
         }
+    }
+
+    void Compiler::compileImport(const ImportStmt* n) {
+        int line = n->loc.line;
+        emitNameU16(OpCode::IMPORT, n->moduleName, line);
+        const std::string& bind = n->alias.empty() ? n->moduleName : n->alias;
+        emitNameU16(OpCode::DEFINE, bind, line);
+    }
+
+    void Compiler::compileFrom(const FromImportStmt* n) {
+        int line = n->loc.line;
+        emitNameU16(OpCode::IMPORT, n->moduleName, line);
+        for (auto& item : n->items) {
+            // Peek top module, push member
+            emitNameU16(OpCode::IMPORT_MEMBER, item.name, line);
+            const std::string& bind = item.alias.empty() ? item.name : item.alias;
+            emitNameU16(OpCode::DEFINE, bind, line);
+        }
+        chunk_->emitOp(OpCode::POP, line);   // drop module
     }
 
     void Compiler::compileAssignAttr(const AttrExpr* target, const Expr* value,
@@ -197,7 +223,7 @@ namespace vayu {
     }
 
     // ===========================================================================
-    // Functions
+    // Functions & lambdas
     // ===========================================================================
 
     void Compiler::compileDef(const DefStmt* n) {
@@ -207,11 +233,9 @@ namespace vayu {
 
         Chunk* saved = chunk_;
         chunk_ = fnChunk.get();
-
         for (auto& st : n->body.stmts) compileStmt(st.get());
         chunk_->emitOp(OpCode::NONE, line);
         chunk_->emitOp(OpCode::RETURN_V, line);
-
         chunk_ = saved;
 
         int fnIdx = chunk_->addFunction(fnChunk);
@@ -219,6 +243,23 @@ namespace vayu {
         chunk_->emit((uint8_t)((fnIdx >> 8) & 0xFF), line);
         chunk_->emit((uint8_t)(fnIdx & 0xFF), line);
         emitNameU16(OpCode::DEFINE, n->name, line);
+    }
+
+    void Compiler::compileLambda(const LambdaExpr* n) {
+        int line = n->loc.line;
+        auto fnChunk = std::make_shared<Chunk>();
+        for (auto& p : n->params) fnChunk->paramNames.push_back(p);
+
+        Chunk* saved = chunk_;
+        chunk_ = fnChunk.get();
+        compileExpr(n->body.get());
+        chunk_->emitOp(OpCode::RETURN_V, line);
+        chunk_ = saved;
+
+        int fnIdx = chunk_->addFunction(fnChunk);
+        chunk_->emitOp(OpCode::MAKE_FN, line);
+        chunk_->emit((uint8_t)((fnIdx >> 8) & 0xFF), line);
+        chunk_->emit((uint8_t)(fnIdx & 0xFF), line);
     }
 
     void Compiler::compileReturn(const ReturnStmt* n) {
@@ -249,7 +290,6 @@ namespace vayu {
             endJumps.push_back(emitJump(OpCode::JUMP, line));
             patchJump(s, chunk_->here());
         }
-
         if (n->elseBody) compileBlock(*n->elseBody);
 
         size_t end = chunk_->here();
@@ -259,11 +299,19 @@ namespace vayu {
     void Compiler::compileWhile(const WhileStmt* n) {
         int line = n->loc.line;
         size_t loopStart = chunk_->here();
+
+        loopStack_.push_back({});
+        loopStack_.back().continueTarget = loopStart;
+
         compileExpr(n->cond.get());
         size_t exitJump = emitJump(OpCode::JUMP_IF_FALSE, line);
         compileBlock(n->body);
         emitLoop(loopStart, line);
-        patchJump(exitJump, chunk_->here());
+
+        size_t exit = chunk_->here();
+        patchJump(exitJump, exit);
+        for (size_t j : loopStack_.back().breakJumps) patchJump(j, exit);
+        loopStack_.pop_back();
     }
 
     void Compiler::compileFor(const ForStmt* n) {
@@ -272,6 +320,10 @@ namespace vayu {
         chunk_->emitOp(OpCode::ITER_NEW, line);
 
         size_t loopStart = chunk_->here();
+
+        loopStack_.push_back({});
+        loopStack_.back().continueTarget = loopStart;
+
         chunk_->emitOp(OpCode::ITER_NEXT, line);
         size_t iterOperandPos = chunk_->code.size();
         chunk_->emit(0, line);
@@ -281,7 +333,80 @@ namespace vayu {
 
         compileBlock(n->body);
         emitLoop(loopStart, line);
-        patchJump(iterOperandPos, chunk_->here());
+
+        size_t exit = chunk_->here();
+        patchJump(iterOperandPos, exit);
+        for (size_t j : loopStack_.back().breakJumps) patchJump(j, exit);
+        loopStack_.pop_back();
+
+        // Both normal exit and `break` land here; clean up [iterable, idx].
+        chunk_->emitOp(OpCode::POP, line);
+        chunk_->emitOp(OpCode::POP, line);
+    }
+
+    // ===========================================================================
+    // try / raise  (from 4E)
+    // ===========================================================================
+
+    void Compiler::compileTry(const TryStmt* t) {
+        int line = t->loc.line;
+
+        chunk_->emitOp(OpCode::TRY_BEGIN, line);
+        size_t operandPos = chunk_->code.size();
+        chunk_->emit(0, line);
+        chunk_->emit(0, line);
+
+        compileBlock(t->tryBody);
+        chunk_->emitOp(OpCode::TRY_END, line);
+        size_t jumpAfterTry = emitJump(OpCode::JUMP, line);
+
+        size_t catchIp = chunk_->here();
+        patchJump(operandPos, catchIp);
+
+        std::vector<size_t> doneJumps;
+        for (auto& h : t->handlers) {
+            size_t skip = 0;
+            if (h.exceptionType) {
+                if (h.exceptionType->kind != ExprKind::NameRef)
+                    error(h.exceptionType->loc,
+                        "try/except: exception type must be a class name");
+                const std::string& cn =
+                    static_cast<const NameRefExpr*>(h.exceptionType.get())->name;
+                chunk_->emitOp(OpCode::EXCEPT_MATCH, line);
+                int ni = chunk_->addName(cn);
+                chunk_->emit((uint8_t)((ni >> 8) & 0xFF), line);
+                chunk_->emit((uint8_t)(ni & 0xFF), line);
+                skip = emitJump(OpCode::JUMP_IF_FALSE, line);
+            }
+            chunk_->emitOp(OpCode::EXCEPT_PUSH, line);
+            if (!h.varName.empty()) {
+                chunk_->emitOp(OpCode::DUP, line);
+                emitNameU16(OpCode::DEFINE, h.varName, line);
+            }
+            compileBlock(h.body);
+            chunk_->emitOp(OpCode::EXCEPT_POP, line);
+            chunk_->emitOp(OpCode::POP, line);
+            doneJumps.push_back(emitJump(OpCode::JUMP, line));
+            if (skip) patchJump(skip, chunk_->here());
+        }
+        chunk_->emitOp(OpCode::RAISE, line);
+
+        size_t afterCatch = chunk_->here();
+        patchJump(jumpAfterTry, afterCatch);
+        for (size_t j : doneJumps) patchJump(j, afterCatch);
+
+        if (t->finallyBody) compileBlock(*t->finallyBody);
+    }
+
+    void Compiler::compileRaise(const RaiseStmt* n) {
+        int line = n->loc.line;
+        if (n->exception) {
+            compileExpr(n->exception.get());
+            chunk_->emitOp(OpCode::RAISE, line);
+        }
+        else {
+            chunk_->emitOp(OpCode::RERAISE, line);
+        }
     }
 
     // ===========================================================================
@@ -294,7 +419,6 @@ namespace vayu {
     }
 
     void Compiler::compileCall(const CallExpr* c, int line) {
-        // super()
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             if (nm->name == "super") {
@@ -305,13 +429,11 @@ namespace vayu {
             }
         }
 
-        // struct / class construction
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             auto ci = classInfo_.find(nm->name);
             if (ci != classInfo_.end()) {
                 const ClassInfo& info = ci->second;
-
                 if (info.hasInit) {
                     for (auto& a : c->args)
                         if (!a.name.empty())
@@ -326,7 +448,6 @@ namespace vayu {
                         (uint8_t)c->args.size(), line);
                     return;
                 }
-
                 std::vector<int> argForField(info.allFields.size(), -1);
                 size_t positional = 0;
                 for (size_t i = 0; i < c->args.size(); ++i) {
@@ -357,7 +478,6 @@ namespace vayu {
             }
         }
 
-        // method call: obj.method(args)
         if (c->callee->kind == ExprKind::Attr) {
             auto* attr = static_cast<const AttrExpr*>(c->callee.get());
             compileExpr(attr->target.get());
@@ -372,7 +492,6 @@ namespace vayu {
             return;
         }
 
-        // plain-name call
         if (c->callee->kind == ExprKind::NameRef) {
             compileExpr(c->callee.get());
             for (auto& a : c->args) {
@@ -535,8 +654,11 @@ namespace vayu {
         }
 
         case ExprKind::Lambda:
+            compileLambda(static_cast<const LambdaExpr*>(e));
+            return;
+
         case ExprKind::GenericType:
-            error(e->loc, "VM mode: this expression is not yet supported");
+            error(e->loc, "VM mode: generic type expression used as value");
         }
     }
 

@@ -62,6 +62,16 @@ namespace vayu {
         }
         execBlock(program);
     }
+    bool Interpreter::vmIsInstanceOf(const Value& v, const std::string& className) {
+        auto it = classes_.find(className);
+        if (it == classes_.end()) return false;
+        return valueIsInstanceOf(v, it->second);
+    }
+
+    Value Interpreter::vmMakeException(const std::string& typeName,
+        const std::string& msg) {
+        return makeException(typeName, msg);
+    }
 
     void Interpreter::registerDeclarations(const Block& program) {
         for (auto& s : program.stmts) {
@@ -392,6 +402,8 @@ namespace vayu {
         }
         std::string savedDir = sourceDir_;
         sourceDir_ = moduleDir;
+
+
 
         // Swap env_ for the module's env
         auto savedEnv = env_;
@@ -750,6 +762,19 @@ namespace vayu {
         throw RuntimeError("type '" + (si->cls ? si->cls->name : "?") +
             "' has no field or method '" + a->name + "'", a->loc);
     }
+    std::shared_ptr<Callable> Interpreter::vmLookupClass(const std::string& name) {
+        auto it = classes_.find(name);
+        if (it == classes_.end()) return nullptr;
+        auto c = std::make_shared<Callable>();
+        c->kind = Callable::Kind::ClassCtor;
+        c->name = name;
+        c->classObj = it->second;
+        return c;
+    }
+
+    Value Interpreter::vmLoadModule(const std::string& name, SourceLocation loc) {
+        return loadModule(name, loc);
+    }
 
     std::shared_ptr<Callable> Interpreter::findMethod(
         const std::shared_ptr<ClassObject>& cls,
@@ -1026,6 +1051,9 @@ namespace vayu {
             return constructInstance(fn->classObj, kwargs, loc);
         }
         case Callable::Kind::User:   return callUser(fn, args, loc);
+        case Callable::Kind::VMFunction:
+            if (vmRunner_) return vmRunner_(fn, args);
+            throw RuntimeError("VM function invoked without VM context", loc);
         case Callable::Kind::Lambda: return callLambda(fn, args, loc);
         case Callable::Kind::BoundMethod: {
             std::vector<Value> all;
