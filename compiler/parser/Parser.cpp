@@ -75,21 +75,13 @@ namespace nova {
         if (check(TokenType::While))  return parseWhile();
         if (check(TokenType::For))    return parseFor();
         if (check(TokenType::Return)) return parseReturn();
-        if (check(TokenType::Try))    return parseTry();
-        if (check(TokenType::Raise))  return parseRaise();
+        if (check(TokenType::Import)) return parseImport();
+        if (check(TokenType::From))   return parseFromImport();
 
-        if (check(TokenType::Pass)) {
-            Token t = advance();
-            return std::make_unique<PassStmt>(t.location);
-        }
-        if (check(TokenType::Break)) {
-            Token t = advance();
-            return std::make_unique<BreakStmt>(t.location);
-        }
-        if (check(TokenType::Continue)) {
-            Token t = advance();
-            return std::make_unique<ContinueStmt>(t.location);
-        }
+        if (check(TokenType::Pass)) { Token t = advance(); return std::make_unique<PassStmt>(t.location); }
+        if (check(TokenType::Break)) { Token t = advance(); return std::make_unique<BreakStmt>(t.location); }
+        if (check(TokenType::Continue)) { Token t = advance(); return std::make_unique<ContinueStmt>(t.location); }
+
         if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon)
             return parseAnnotatedAssign();
         return parseExprOrAssign();
@@ -130,9 +122,7 @@ namespace nova {
         Token tryTok = advance();
         expect(TokenType::Colon, "':' after try");
         Block tryBody = parseBlock();
-
         auto stmt = std::make_unique<TryStmt>(std::move(tryBody), tryTok.location);
-
         bool sawExcept = false;
         while (check(TokenType::Except)) {
             sawExcept = true;
@@ -149,12 +139,10 @@ namespace nova {
             clause.body = parseBlock();
             stmt->handlers.push_back(std::move(clause));
         }
-
         if (match(TokenType::Finally)) {
             expect(TokenType::Colon, "':' after finally");
             stmt->finallyBody = parseBlock();
         }
-
         if (!sawExcept && !stmt->finallyBody)
             throw ParseError("try block must have at least one except or a finally",
                 tryTok.location);
@@ -225,6 +213,37 @@ namespace nova {
             defTok.location);
     }
 
+    StmtPtr Parser::parseImport() {
+        Token imp = advance();   // 'import'
+        Token name = expect(TokenType::Identifier, "module name");
+        std::string alias;
+        if (match(TokenType::As)) {
+            Token a = expect(TokenType::Identifier, "alias after 'as'");
+            alias = a.lexeme;
+        }
+        return std::make_unique<ImportStmt>(name.lexeme, alias, imp.location);
+    }
+
+    StmtPtr Parser::parseFromImport() {
+        Token fromTok = advance();   // 'from'
+        Token module = expect(TokenType::Identifier, "module name");
+        expect(TokenType::Import, "'import' after module name");
+
+        std::vector<ImportItem> items;
+        for (;;) {
+            ImportItem it;
+            Token n = expect(TokenType::Identifier, "name to import");
+            it.name = n.lexeme;
+            if (match(TokenType::As)) {
+                Token a = expect(TokenType::Identifier, "alias after 'as'");
+                it.alias = a.lexeme;
+            }
+            items.push_back(std::move(it));
+            if (!match(TokenType::Comma)) break;
+        }
+        return std::make_unique<FromImportStmt>(module.lexeme, std::move(items), fromTok.location);
+    }
+
     FieldDef Parser::parseFieldDef() {
         Token name = expect(TokenType::Identifier, "field name");
         expect(TokenType::Colon, "':' after field name");
@@ -256,7 +275,6 @@ namespace nova {
     StmtPtr Parser::parseClass() {
         Token cTok = advance();
         Token name = expect(TokenType::Identifier, "class name");
-
         std::string parentName;
         if (match(TokenType::LParen)) {
             Token p = expect(TokenType::Identifier, "parent class name");
@@ -266,9 +284,7 @@ namespace nova {
         expect(TokenType::Colon, "':' after class name");
         expect(TokenType::Newline, "newline after ':'");
         expect(TokenType::Indent, "indented class body");
-
         auto cls = std::make_unique<ClassStmt>(name.lexeme, parentName, cTok.location);
-
         for (;;) {
             skipNewlines();
             if (isAtEnd() || check(TokenType::Dedent)) break;
@@ -276,8 +292,7 @@ namespace nova {
                 auto m = parseDef();
                 if (m->params.empty() || m->params[0].name != "self")
                     throw ParseError("method '" + m->name +
-                        "' must have 'self' as its first parameter",
-                        m->loc);
+                        "' must have 'self' as its first parameter", m->loc);
                 cls->methods.push_back(std::move(m));
             }
             else if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon) {
@@ -286,10 +301,8 @@ namespace nova {
             else throw ParseError("expected field or method in class body", peek().location);
         }
         match(TokenType::Dedent);
-
         if (cls->fields.empty() && cls->methods.empty())
             throw ParseError("class '" + name.lexeme + "' is empty", cTok.location);
-
         for (auto& f : cls->fields)
             for (auto& m : cls->methods)
                 if (f.name == m->name)
@@ -327,8 +340,7 @@ namespace nova {
         Token name = advance();
         if (isPrimitiveTypeName(name.type) || !check(TokenType::Lt))
             return std::make_unique<NameRefExpr>(name.lexeme, name.location);
-
-        advance();   // '<'
+        advance();
         auto node = std::make_unique<GenericTypeExpr>(name.lexeme, name.location);
         node->typeArgs.push_back(parseTypeExpr());
         while (match(TokenType::Comma))
@@ -337,7 +349,28 @@ namespace nova {
         return node;
     }
 
-    ExprPtr Parser::parseExpression() { return parseBinary(1); }
+    // ---- expression parsing ----
+    ExprPtr Parser::parseExpression() {
+        if (check(TokenType::Lambda)) return parseLambda();
+        return parseBinary(1);
+    }
+
+    ExprPtr Parser::parseLambda() {
+        Token lamTok = advance();   // 'lambda'
+        auto node = std::make_unique<LambdaExpr>(lamTok.location);
+        if (!check(TokenType::Colon)) {
+            Token p = expect(TokenType::Identifier, "lambda parameter name");
+            node->params.push_back(p.lexeme);
+            while (match(TokenType::Comma)) {
+                p = expect(TokenType::Identifier, "lambda parameter name");
+                node->params.push_back(p.lexeme);
+            }
+        }
+        expect(TokenType::Colon, "':' after lambda parameters");
+        node->body = parseExpression();
+        return node;
+    }
+
     ExprPtr Parser::parseBinary(int minPrec) {
         ExprPtr left = parseUnary();
         for (;;) {

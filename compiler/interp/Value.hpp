@@ -10,6 +10,7 @@ namespace nova {
 
     class  Environment;
     struct DefStmt;
+    struct LambdaExpr;
     class  Value;
     struct ClassObject;
     struct ListValue;
@@ -17,10 +18,6 @@ namespace nova {
     struct ModuleValue;
     struct StructInstance;
     struct Callable;
-
-    // ===========================================================================
-    // Value
-    // ===========================================================================
 
     class Value {
     public:
@@ -83,37 +80,21 @@ namespace nova {
         std::string typeName() const;
     };
 
-    // ===========================================================================
-    // Runtime object types
-    // ===========================================================================
-
     struct StructInstance {
         std::shared_ptr<ClassObject>           cls;
         std::unordered_map<std::string, Value> fields;
     };
-
-    struct ListValue {
-        std::vector<Value> items;
-    };
-
-    struct MapValue {
-        std::unordered_map<std::string, Value> entries;
-    };
-
+    struct ListValue { std::vector<Value> items; };
+    struct MapValue { std::unordered_map<std::string, Value> entries; };
     struct ModuleValue {
         std::string                            name;
         std::unordered_map<std::string, Value> members;
     };
-
     struct ClassObject {
         std::string                  name;
         std::vector<std::string>     fieldOrder;
         std::shared_ptr<ClassObject> parent;
     };
-
-    // ===========================================================================
-    // Callables
-    // ===========================================================================
 
     using NativeFnPtr = Value(*)(const std::vector<Value>&);
 
@@ -127,17 +108,20 @@ namespace nova {
             ListMethod,
             MapMethod,
             StringMethod,
+            Lambda,        // <-- NEW
         } kind = Kind::Native;
 
         std::string name;
 
-        // Native
         NativeFnPtr nativeFn = nullptr;
 
         // User / BoundMethod / SuperMethod
         const DefStmt* decl = nullptr;
         std::shared_ptr<Environment> closure;
         std::shared_ptr<ClassObject> definingClass;
+
+        // Lambda
+        const LambdaExpr* lambdaExpr = nullptr;
 
         // ClassCtor
         std::shared_ptr<ClassObject> classObj;

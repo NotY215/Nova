@@ -39,6 +39,8 @@ namespace nova {
 
     void TypeChecker::installBuiltins() {
         auto A = Types::Any();
+        auto listAny = Types::List(A);
+
         defineVar("print", Types::Function({ A }, Types::None()));
         defineVar("str", Types::Function({ A }, Types::Str()));
         defineVar("int", Types::Function({ A }, Types::Int()));
@@ -52,18 +54,25 @@ namespace nova {
         defineVar("range", Types::Function({ Types::Int() }, Types::List(Types::Int())));
         defineVar("ord", Types::Function({ Types::Str() }, Types::Int()));
         defineVar("chr", Types::Function({ Types::Int() }, Types::Str()));
-        defineVar("list", Types::Function({ A }, Types::List(A)));
+        defineVar("list", Types::Function({ A }, listAny));
 
-        // `math` module — typed as Any for now; a real module type arrives in 3G.
+        // Higher-order builtins.  We register them with their exact arity; the
+        // variadic `sorted` and `range` are handled in the call-site whitelist.
+        defineVar("map", Types::Function({ A, listAny }, listAny));
+        defineVar("filter", Types::Function({ A, listAny }, listAny));
+        defineVar("sorted", Types::Function({ listAny }, listAny));
+        defineVar("reduce", Types::Function({ A, listAny }, A));
+        defineVar("any", Types::Function({ listAny }, Types::Bool()));
+        defineVar("all", Types::Function({ listAny }, Types::Bool()));
+        defineVar("sum", Types::Function({ listAny }, A));
+
         defineVar("math", Types::Any());
     }
 
     void TypeChecker::installBuiltinExceptions() {
-        // Only the base Exception class declares `message`; subclasses inherit it.
         auto base = Types::Struct("Exception", {});
         base->fields.push_back({ "message", Types::Str() });
         structs_["Exception"] = base;
-
         auto mkStruct = [&](const std::string& name, TypePtr parent) {
             auto t = Types::Struct(name, {});
             t->parent = std::move(parent);
@@ -81,11 +90,10 @@ namespace nova {
     }
 
     // ===========================================================================
-    // Pass 1 — declarations
+    // Pass 1
     // ===========================================================================
 
     void TypeChecker::collectSignatures(const Block& program) {
-        // structs
         for (auto& s : program.stmts) {
             if (s->kind != StmtKind::Struct) continue;
             auto* d = static_cast<const StructStmt*>(s.get());
@@ -100,8 +108,6 @@ namespace nova {
             }
             st->fields = std::move(fields);
         }
-
-        // classes (2-pass for inheritance)
         for (int pass = 0; pass < 2; ++pass) {
             for (auto& s : program.stmts) {
                 if (s->kind != StmtKind::Class) continue;
@@ -116,50 +122,39 @@ namespace nova {
                 auto ct = structs_[d->name];
                 if (!d->parentName.empty()) {
                     auto it = structs_.find(d->parentName);
-                    if (it == structs_.end())
-                        error(d->loc, "unknown parent class '" + d->parentName + "'");
-                    if (it->second->kind != TypeKind::Struct)
-                        error(d->loc, "'" + d->parentName + "' is not a class");
-                    if (it->second->name == d->name)
-                        error(d->loc, "class '" + d->name + "' cannot inherit from itself");
+                    if (it == structs_.end()) error(d->loc, "unknown parent class '" + d->parentName + "'");
+                    if (it->second->kind != TypeKind::Struct) error(d->loc, "'" + d->parentName + "' is not a class");
+                    if (it->second->name == d->name) error(d->loc, "class '" + d->name + "' cannot inherit from itself");
                     ct->parent = it->second;
                 }
                 std::vector<StructFieldInfo> fields;
                 for (auto& f : d->fields) {
                     for (auto& e : fields) if (e.name == f.name)
                         error(f.loc, "duplicate field '" + f.name + "' in class '" + d->name + "'");
-                    if (ct->findField(f.name))
-                        error(f.loc, "field '" + f.name + "' re-declared in subclass");
+                    if (ct->findField(f.name)) error(f.loc, "field '" + f.name + "' re-declared in subclass");
                     fields.push_back({ f.name, resolveTypeExpr(f.type.get()) });
                 }
                 ct->fields = std::move(fields);
                 for (auto& m : d->methods) {
-                    if (ct->methods.count(m->name))
-                        error(m->loc, "method '" + m->name + "' declared twice");
-                    if (ct->findField(m->name))
-                        error(m->loc, "field '" + m->name + "' already exists; cannot also be a method");
+                    if (ct->methods.count(m->name)) error(m->loc, "method '" + m->name + "' declared twice");
+                    if (ct->findField(m->name)) error(m->loc, "field '" + m->name + "' already exists; cannot also be a method");
                     std::vector<TypePtr> params;
                     for (size_t i = 0; i < m->params.size(); ++i) {
                         if (i == 0) params.push_back(ct);
-                        else params.push_back(m->params[i].type
-                            ? resolveTypeExpr(m->params[i].type.get())
-                            : Types::Any());
+                        else params.push_back(m->params[i].type ? resolveTypeExpr(m->params[i].type.get()) : Types::Any());
                     }
-                    TypePtr ret = m->returnType ? resolveTypeExpr(m->returnType.get())
-                        : Types::None();
+                    TypePtr ret = m->returnType ? resolveTypeExpr(m->returnType.get()) : Types::Any();
                     ct->methods[m->name] = Types::Function(std::move(params), ret);
                 }
             }
         }
-
-        // functions
         for (auto& s : program.stmts) {
             if (s->kind != StmtKind::Def) continue;
             auto* d = static_cast<const DefStmt*>(s.get());
             std::vector<TypePtr> params;
             for (auto& p : d->params)
                 params.push_back(p.type ? resolveTypeExpr(p.type.get()) : Types::Any());
-            TypePtr ret = d->returnType ? resolveTypeExpr(d->returnType.get()) : Types::None();
+            TypePtr ret = d->returnType ? resolveTypeExpr(d->returnType.get()) : Types::Any();
             if (functions_.count(d->name)) error(d->loc, "function '" + d->name + "' already defined");
             auto sig = Types::Function(std::move(params), std::move(ret));
             functions_[d->name] = sig;
@@ -173,25 +168,20 @@ namespace nova {
 
     TypePtr TypeChecker::resolveTypeExpr(const Expr* e) {
         if (!e) return Types::Any();
-
         if (e->kind == ExprKind::GenericType) {
             auto* g = static_cast<const GenericTypeExpr*>(e);
             if (g->name == "list") {
-                if (g->typeArgs.size() != 1)
-                    error(e->loc, "list<> takes exactly one type argument");
+                if (g->typeArgs.size() != 1) error(e->loc, "list<> takes exactly one type argument");
                 return Types::List(resolveTypeExpr(g->typeArgs[0].get()));
             }
             if (g->name == "map") {
-                if (g->typeArgs.size() != 2)
-                    error(e->loc, "map<> takes exactly two type arguments");
+                if (g->typeArgs.size() != 2) error(e->loc, "map<> takes exactly two type arguments");
                 return Types::Map(resolveTypeExpr(g->typeArgs[0].get()),
                     resolveTypeExpr(g->typeArgs[1].get()));
             }
             error(e->loc, "unknown generic type '" + g->name + "'");
         }
-
         if (e->kind != ExprKind::NameRef) error(e->loc, "expected a type name");
-
         const std::string& n = static_cast<const NameRefExpr*>(e)->name;
         if (n == "int")   return Types::Int();
         if (n == "float") return Types::Float();
@@ -201,7 +191,6 @@ namespace nova {
         if (n == "bytes") return Types::Bytes();
         if (n == "None")  return Types::None();
         if (n == "any")   return Types::Any();
-
         auto it = structs_.find(n);
         if (it != structs_.end()) return it->second;
         auto t = std::make_shared<Type>(TypeKind::Named); t->name = n; return t;
@@ -228,7 +217,6 @@ namespace nova {
     TypePtr TypeChecker::lookupCollectionMethod(const TypePtr& target,
         const std::string& name,
         SourceLocation loc) {
-        // ---- str ----
         if (target->kind == TypeKind::Str) {
             if (name == "upper" || name == "lower" || name == "strip" ||
                 name == "lstrip" || name == "rstrip")
@@ -249,8 +237,6 @@ namespace nova {
                 return Types::Function({ Types::Int() }, Types::Str());
             error(loc, "str has no method '" + name + "'");
         }
-
-        // ---- list ----
         if (target->kind == TypeKind::List) {
             TypePtr E = target->params.empty() ? Types::Any() : target->params[0];
             if (name == "append")   return Types::Function({ E }, Types::None());
@@ -262,8 +248,6 @@ namespace nova {
             if (name == "index")    return Types::Function({ E }, Types::Int());
             error(loc, "list has no method '" + name + "'");
         }
-
-        // ---- map ----
         if (target->kind == TypeKind::Map) {
             TypePtr K = target->params.size() > 0 ? target->params[0] : Types::Str();
             TypePtr V = target->params.size() > 1 ? target->params[1] : Types::Any();
@@ -328,16 +312,13 @@ namespace nova {
         pushScope();
         for (size_t i = 0; i < m->params.size(); ++i)
             defineVar(m->params[i].name, i == 0 ? cls : sig->params[i]);
-
         TypePtr savedRet = currentReturnType_;
         TypePtr savedClass = currentClass_;
         int     savedLoop = loopDepth_;
         currentReturnType_ = sig->returnType;
         currentClass_ = cls;
         loopDepth_ = 0;
-
         for (auto& st : m->body.stmts) checkStmt(st.get());
-
         currentReturnType_ = savedRet;
         currentClass_ = savedClass;
         loopDepth_ = savedLoop;
@@ -357,14 +338,11 @@ namespace nova {
     void TypeChecker::checkStmt(const Stmt* s) {
         if (!s) return;
         switch (s->kind) {
-
         case StmtKind::Expr:
-            checkExpr(static_cast<const ExprStmt*>(s)->expr.get());
-            return;
+            checkExpr(static_cast<const ExprStmt*>(s)->expr.get()); return;
 
         case StmtKind::Assign: {
             auto* n = static_cast<const AssignStmt*>(s);
-
             if (n->target->kind == ExprKind::NameRef) {
                 TypePtr v = checkExpr(n->value.get());
                 const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
@@ -396,13 +374,11 @@ namespace nova {
                 TypePtr tgt = checkExpr(ix->target.get());
                 TypePtr idx = checkExpr(ix->index.get());
                 TypePtr val = checkExpr(n->value.get());
-
                 if (tgt->kind == TypeKind::List) {
                     if (idx->kind != TypeKind::Int && idx->kind != TypeKind::Any)
                         error(ix->loc, "list index must be int, got " + idx->toString());
                     if (!isAssignable(tgt->params[0], val))
-                        error(n->loc, "cannot assign " + val->toString() +
-                            " into " + tgt->toString());
+                        error(n->loc, "cannot assign " + val->toString() + " into " + tgt->toString());
                     return;
                 }
                 if (tgt->kind == TypeKind::Map) {
@@ -410,8 +386,7 @@ namespace nova {
                         error(ix->loc, "map key must be " + tgt->params[0]->toString() +
                             ", got " + idx->toString());
                     if (!isAssignable(tgt->params[1], val))
-                        error(n->loc, "cannot assign " + val->toString() +
-                            " into " + tgt->toString());
+                        error(n->loc, "cannot assign " + val->toString() + " into " + tgt->toString());
                     return;
                 }
                 if (tgt->kind == TypeKind::Str)
@@ -420,7 +395,6 @@ namespace nova {
             }
             error(n->target->loc, "invalid assignment target");
         }
-
         case StmtKind::AnnotAssign: {
             auto* n = static_cast<const AnnotAssignStmt*>(s);
             TypePtr declared = resolveTypeExpr(n->type.get());
@@ -428,13 +402,11 @@ namespace nova {
                 TypePtr v = checkExpr(n->value.get());
                 if (!isAssignable(declared, v))
                     error(n->loc, "cannot initialize '" + n->name + "' (" +
-                        declared->toString() + ") with value of type " +
-                        v->toString());
+                        declared->toString() + ") with value of type " + v->toString());
             }
             defineVar(n->name, declared);
             return;
         }
-
         case StmtKind::If: {
             auto* n = static_cast<const IfStmt*>(s);
             checkExpr(n->cond.get());
@@ -443,42 +415,27 @@ namespace nova {
             if (n->elseBody) checkBlock(*n->elseBody);
             return;
         }
-
         case StmtKind::While: {
             auto* n = static_cast<const WhileStmt*>(s);
             checkExpr(n->cond.get());
             ++loopDepth_; checkBlock(n->body); --loopDepth_;
             return;
         }
-
         case StmtKind::For: {
             auto* n = static_cast<const ForStmt*>(s);
             TypePtr it = checkExpr(n->iterable.get());
-
             TypePtr elem;
-            if (it->kind == TypeKind::List) {
-                elem = it->params.empty() ? Types::Any() : it->params[0];
-            }
-            else if (it->kind == TypeKind::Map) {
-                elem = it->params.empty() ? Types::Any() : it->params[0];
-            }
-            else if (it->kind == TypeKind::Str) {
-                elem = Types::Str();
-            }
-            else if (it->kind == TypeKind::Any || it->kind == TypeKind::Error) {
-                elem = it;
-            }
-            else {
-                error(n->loc, "cannot iterate over value of type " + it->toString());
-            }
-
+            if (it->kind == TypeKind::List) elem = it->params.empty() ? Types::Any() : it->params[0];
+            else if (it->kind == TypeKind::Map) elem = it->params.empty() ? Types::Any() : it->params[0];
+            else if (it->kind == TypeKind::Str) elem = Types::Str();
+            else if (it->kind == TypeKind::Any || it->kind == TypeKind::Error) elem = it;
+            else error(n->loc, "cannot iterate over value of type " + it->toString());
             defineVar(n->targetName, elem);
             ++loopDepth_;
             for (auto& st : n->body.stmts) checkStmt(st.get());
             --loopDepth_;
             return;
         }
-
         case StmtKind::Def: {
             auto* n = static_cast<const DefStmt*>(s);
             auto it = functions_.find(n->name);
@@ -497,7 +454,6 @@ namespace nova {
             popScope();
             return;
         }
-
         case StmtKind::Return: {
             auto* n = static_cast<const ReturnStmt*>(s);
             if (!currentReturnType_) error(n->loc, "'return' outside function");
@@ -507,57 +463,55 @@ namespace nova {
                     " from function declared to return " + currentReturnType_->toString());
             return;
         }
-
         case StmtKind::Struct: return;
-
         case StmtKind::Class: {
             auto* n = static_cast<const ClassStmt*>(s);
             TypePtr ct = structs_.at(n->name);
             for (auto& m : n->methods) checkMethodBody(m.get(), ct);
             return;
         }
-
-                            // -------------------------------------------------------------------
-                            // try / except / finally
-                            // -------------------------------------------------------------------
         case StmtKind::Try: {
             auto* n = static_cast<const TryStmt*>(s);
             checkBlock(n->tryBody);
-
             for (auto& h : n->handlers) {
                 TypePtr excType = Types::Any();
                 if (h.exceptionType) {
                     excType = checkExpr(h.exceptionType.get());
                     if (excType->kind != TypeKind::Struct)
-                        error(h.exceptionType->loc,
-                            "except type must be an exception class");
+                        error(h.exceptionType->loc, "except type must be an exception class");
                     bool isExc = false;
                     for (TypePtr c = excType; c; c = c->parent)
                         if (c->name == "Exception") { isExc = true; break; }
                     if (!isExc)
-                        error(h.exceptionType->loc,
-                            "'" + excType->name + "' is not an exception class");
+                        error(h.exceptionType->loc, "'" + excType->name + "' is not an exception class");
                 }
-
                 pushScope();
                 if (!h.varName.empty()) defineVar(h.varName, excType);
                 for (auto& st : h.body.stmts) checkStmt(st.get());
                 popScope();
             }
-
             if (n->finallyBody) checkBlock(*n->finallyBody);
             return;
         }
-
-                          // -------------------------------------------------------------------
-                          // raise
-                          // -------------------------------------------------------------------
         case StmtKind::Raise: {
             auto* n = static_cast<const RaiseStmt*>(s);
             if (n->exception) checkExpr(n->exception.get());
             return;
         }
-
+        case StmtKind::Import: {
+            auto* n = static_cast<const ImportStmt*>(s);
+            const std::string& bind = n->alias.empty() ? n->moduleName : n->alias;
+            defineVar(bind, Types::Any());
+            return;
+        }
+        case StmtKind::FromImport: {
+            auto* n = static_cast<const FromImportStmt*>(s);
+            for (auto& item : n->items) {
+                const std::string& bind = item.alias.empty() ? item.name : item.alias;
+                defineVar(bind, Types::Any());
+            }
+            return;
+        }
         case StmtKind::Pass: return;
         case StmtKind::Break:
         case StmtKind::Continue:
@@ -581,7 +535,6 @@ namespace nova {
         case ExprKind::CharLit: return Types::Char();
         case ExprKind::BoolLit: return Types::Bool();
         case ExprKind::NoneLit: return Types::None();
-
         case ExprKind::NameRef: {
             auto* n = static_cast<const NameRefExpr*>(e);
             if (TypePtr t = lookupVar(n->name)) return t;
@@ -589,7 +542,6 @@ namespace nova {
             if (it != structs_.end()) return it->second;
             error(n->loc, "name '" + n->name + "' is not defined");
         }
-
         case ExprKind::Grouping:
             return checkExpr(static_cast<const GroupingExpr*>(e)->inner.get());
 
@@ -603,7 +555,6 @@ namespace nova {
             }
             return Types::List(elem);
         }
-
         case ExprKind::MapLit: {
             auto* n = static_cast<const MapLitExpr*>(e);
             if (n->entries.empty()) return Types::Map(Types::Str(), Types::Any());
@@ -618,7 +569,14 @@ namespace nova {
             }
             return Types::Map(Types::Str(), valType);
         }
-
+        case ExprKind::Lambda: {
+            auto* n = static_cast<const LambdaExpr*>(e);
+            pushScope();
+            for (auto& p : n->params) defineVar(p, Types::Any());
+            checkExpr(n->body.get());
+            popScope();
+            return Types::Any();
+        }
         case ExprKind::Unary: {
             auto* n = static_cast<const UnaryExpr*>(e);
             TypePtr t = checkExpr(n->operand.get());
@@ -633,7 +591,6 @@ namespace nova {
             }
             return Types::Error();
         }
-
         case ExprKind::Binary: {
             auto* n = static_cast<const BinaryExpr*>(e);
             if (n->op == BinOp::And || n->op == BinOp::Or) {
@@ -642,17 +599,14 @@ namespace nova {
             }
             TypePtr lt = checkExpr(n->lhs.get()), rt = checkExpr(n->rhs.get());
             if (lt->kind == TypeKind::Error || rt->kind == TypeKind::Error) return Types::Error();
-
             if (n->op == BinOp::In) {
                 if (rt->kind == TypeKind::List || rt->kind == TypeKind::Map) {
                     if (lt->kind != TypeKind::Any && rt->params.size() > 0 &&
                         !isAssignable(rt->params[0], lt))
-                        error(n->loc, "cannot check if " + lt->toString() +
-                            " is in " + rt->toString());
+                        error(n->loc, "cannot check if " + lt->toString() + " is in " + rt->toString());
                     return Types::Bool();
                 }
-                if (rt->kind == TypeKind::Str && lt->kind == TypeKind::Str)
-                    return Types::Bool();
+                if (rt->kind == TypeKind::Str && lt->kind == TypeKind::Str) return Types::Bool();
                 if (rt->kind == TypeKind::Any) return Types::Bool();
                 error(n->loc, "'in' requires a list, map, or str on the right");
             }
@@ -674,8 +628,7 @@ namespace nova {
                 if (lt->kind == TypeKind::Str && rt->kind == TypeKind::Str) return Types::Str();
                 if (lt->kind == TypeKind::List && rt->kind == TypeKind::List) {
                     if (!lt->params[0]->equals(rt->params[0]))
-                        error(n->loc, "cannot concatenate " + lt->toString() +
-                            " and " + rt->toString());
+                        error(n->loc, "cannot concatenate " + lt->toString() + " and " + rt->toString());
                     return lt;
                 }
                 error(n->loc, "cannot add " + lt->toString() + " and " + rt->toString());
@@ -716,13 +669,11 @@ namespace nova {
             default: return Types::Error();
             }
         }
-
         case ExprKind::Index: {
             auto* n = static_cast<const IndexExpr*>(e);
             TypePtr tgt = checkExpr(n->target.get());
             TypePtr idx = checkExpr(n->index.get());
-            if (tgt->kind == TypeKind::Error || idx->kind == TypeKind::Error)
-                return Types::Error();
+            if (tgt->kind == TypeKind::Error || idx->kind == TypeKind::Error) return Types::Error();
             if (tgt->kind == TypeKind::Any) return Types::Any();
             if (tgt->kind == TypeKind::List) {
                 if (idx->kind != TypeKind::Int && idx->kind != TypeKind::Any)
@@ -731,8 +682,7 @@ namespace nova {
             }
             if (tgt->kind == TypeKind::Map) {
                 if (!isAssignable(tgt->params[0], idx))
-                    error(n->loc, "map key must be " + tgt->params[0]->toString() +
-                        ", got " + idx->toString());
+                    error(n->loc, "map key must be " + tgt->params[0]->toString() + ", got " + idx->toString());
                 return tgt->params.size() > 1 ? tgt->params[1] : Types::Any();
             }
             if (tgt->kind == TypeKind::Str) {
@@ -742,19 +692,16 @@ namespace nova {
             }
             error(n->loc, "cannot index value of type " + tgt->toString());
         }
-
         case ExprKind::Attr: {
             auto* n = static_cast<const AttrExpr*>(e);
             TypePtr t = checkExpr(n->target.get());
             if (t->kind == TypeKind::Error) return t;
             if (t->kind == TypeKind::Any)   return Types::Any();
-
             if (t->kind == TypeKind::List || t->kind == TypeKind::Map ||
                 t->kind == TypeKind::Str) {
                 TypePtr m = lookupCollectionMethod(t, n->name, n->loc);
                 if (m) return m;
             }
-
             if (t->kind != TypeKind::Struct)
                 error(n->loc, "cannot read field or method '" + n->name +
                     "' on value of type " + t->toString());
@@ -765,20 +712,16 @@ namespace nova {
             }
             error(n->loc, "type '" + t->name + "' has no field or method '" + n->name + "'");
         }
-
         case ExprKind::Call: {
             auto* n = static_cast<const CallExpr*>(e);
 
             if (n->callee->kind == ExprKind::NameRef) {
                 const auto* nm = static_cast<const NameRefExpr*>(n->callee.get());
-
                 if (nm->name == "super") {
                     if (!currentClass_) error(n->loc, "'super()' outside method");
-                    if (!currentClass_->parent)
-                        error(n->loc, "class '" + currentClass_->name + "' has no parent");
+                    if (!currentClass_->parent) error(n->loc, "class '" + currentClass_->name + "' has no parent");
                     return currentClass_->parent;
                 }
-
                 auto sit = structs_.find(nm->name);
                 if (sit != structs_.end()) {
                     TypePtr ct = sit->second;
@@ -786,8 +729,7 @@ namespace nova {
                     if (initSig) {
                         for (const auto& a : n->args)
                             if (!a.name.empty())
-                                error(a.loc, "class '" + nm->name +
-                                    "' __init__ does not accept keyword arguments");
+                                error(a.loc, "class '" + nm->name + "' __init__ does not accept keyword arguments");
                         if (n->args.size() != initSig->params.size() - 1)
                             error(n->loc, "class '" + nm->name + "' constructor expects " +
                                 std::to_string(initSig->params.size() - 1) +
@@ -796,28 +738,23 @@ namespace nova {
                             TypePtr at = checkExpr(n->args[i].value.get());
                             if (!isAssignable(initSig->params[i + 1], at))
                                 error(n->args[i].loc, "argument " + std::to_string(i + 1) +
-                                    ": expected " +
-                                    initSig->params[i + 1]->toString() +
+                                    ": expected " + initSig->params[i + 1]->toString() +
                                     ", got " + at->toString());
                         }
                         return ct;
                     }
-                    // field-matching construction (structs + builtin exceptions)
                     std::vector<StructFieldInfo> all;
                     for (TypePtr c = ct; c; c = c->parent)
                         for (auto& f : c->fields) all.push_back(f);
-
                     std::vector<bool> seen(all.size(), false);
                     size_t pos = 0;
                     for (const auto& arg : n->args) {
                         TypePtr at = checkExpr(arg.value.get());
                         if (arg.name.empty()) {
-                            if (pos >= all.size())
-                                error(arg.loc, "too many positional arguments");
+                            if (pos >= all.size()) error(arg.loc, "too many positional arguments");
                             if (!isAssignable(all[pos].type, at))
-                                error(arg.loc, "field '" + all[pos].name +
-                                    "' expects " + all[pos].type->toString() +
-                                    ", got " + at->toString());
+                                error(arg.loc, "field '" + all[pos].name + "' expects " +
+                                    all[pos].type->toString() + ", got " + at->toString());
                             seen[pos] = true; ++pos;
                         }
                         else {
@@ -828,8 +765,7 @@ namespace nova {
                             if (seen[idx]) error(arg.loc, "field given twice");
                             if (!isAssignable(all[idx].type, at))
                                 error(arg.loc, "field '" + arg.name + "' expects " +
-                                    all[idx].type->toString() + ", got " +
-                                    at->toString());
+                                    all[idx].type->toString() + ", got " + at->toString());
                             seen[idx] = true;
                         }
                     }
@@ -840,19 +776,14 @@ namespace nova {
             }
 
             TypePtr callee = checkExpr(n->callee.get());
-            std::vector<TypePtr> argTypes;
-            for (auto& a : n->args) argTypes.push_back(checkExpr(a.value.get()));
 
-            if (callee->kind == TypeKind::Error) return Types::Error();
-            if (callee->kind == TypeKind::Any)   return Types::Any();
-            if (callee->kind != TypeKind::Function)
-                error(n->loc, "cannot call value of type " + callee->toString());
-
-            // Methods with an optional trailing argument: `.split()` / `.split(sep)`
-            // and `.strip()` / `.strip(chars)`.
+            // .split / .strip accept 0 or 1 arguments — special-case before
+            // arity checking.
             if (n->callee->kind == ExprKind::Attr) {
                 auto* attr = static_cast<const AttrExpr*>(n->callee.get());
                 if (attr->name == "split" || attr->name == "strip") {
+                    std::vector<TypePtr> argTypes;
+                    for (auto& a : n->args) argTypes.push_back(checkExpr(a.value.get()));
                     if (argTypes.size() > 1)
                         error(n->loc, "method takes 0 or 1 argument(s), got " +
                             std::to_string(argTypes.size()));
@@ -863,12 +794,20 @@ namespace nova {
                 }
             }
 
+            std::vector<TypePtr> argTypes;
+            for (auto& a : n->args) argTypes.push_back(checkExpr(a.value.get()));
+
+            if (callee->kind == TypeKind::Error) return Types::Error();
+            if (callee->kind == TypeKind::Any)   return Types::Any();
+            if (callee->kind != TypeKind::Function)
+                error(n->loc, "cannot call value of type " + callee->toString());
+
             const NameRefExpr* nm =
                 (n->callee->kind == ExprKind::NameRef)
                 ? static_cast<const NameRefExpr*>(n->callee.get()) : nullptr;
             if (nm && (nm->name == "print" || nm->name == "min" ||
                 nm->name == "max" || nm->name == "range" ||
-                nm->name == "list"))
+                nm->name == "list" || nm->name == "sorted"))
                 return callee->returnType ? callee->returnType : Types::None();
 
             if (argTypes.size() != callee->params.size())
@@ -881,7 +820,6 @@ namespace nova {
                         ", got " + argTypes[i]->toString());
             return callee->returnType ? callee->returnType : Types::None();
         }
-
         case ExprKind::GenericType:
             error(e->loc, "generic type expression used where a value was expected");
         }

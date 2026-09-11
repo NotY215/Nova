@@ -8,7 +8,7 @@
 namespace nova {
 
     // ===========================================================================
-    // Expressions
+    // Expressions (unchanged from 3H)
     // ===========================================================================
 
     enum class ExprKind {
@@ -17,6 +17,7 @@ namespace nova {
         Unary, Binary, Grouping,
         Call, Attr, Index,
         ListLit, MapLit,
+        Lambda,
         GenericType,
     };
 
@@ -124,6 +125,12 @@ namespace nova {
         explicit MapLitExpr(SourceLocation l) : Expr(ExprKind::MapLit, l) {}
     };
 
+    struct LambdaExpr : Expr {
+        std::vector<std::string> params;
+        ExprPtr                  body;
+        explicit LambdaExpr(SourceLocation l) : Expr(ExprKind::Lambda, l) {}
+    };
+
     struct GenericTypeExpr : Expr {
         std::string          name;
         std::vector<ExprPtr> typeArgs;
@@ -145,6 +152,7 @@ namespace nova {
         If, While, Def, Return,
         Struct, Class, For,
         Try, Raise,
+        Import, FromImport,          // <-- NEW
         Pass, Break, Continue,
     };
 
@@ -240,13 +248,11 @@ namespace nova {
         }
     };
 
-    // --- try / except / finally ---
     struct ExceptClause {
-        ExprPtr     exceptionType;   // may be null (bare `except:`)
-        std::string varName;         // empty if no `as e`
+        ExprPtr     exceptionType;
+        std::string varName;
         Block       body;
     };
-
     struct TryStmt : Stmt {
         Block                     tryBody;
         std::vector<ExceptClause> handlers;
@@ -255,11 +261,33 @@ namespace nova {
             : Stmt(StmtKind::Try, l), tryBody(std::move(tb)) {
         }
     };
-
     struct RaiseStmt : Stmt {
-        ExprPtr exception;   // may be null (bare `raise` = re-raise)
+        ExprPtr exception;
         RaiseStmt(ExprPtr e, SourceLocation l)
             : Stmt(StmtKind::Raise, l), exception(std::move(e)) {
+        }
+    };
+
+    // --- module imports ---
+    struct ImportStmt : Stmt {
+        std::string moduleName;
+        std::string alias;       // empty if none
+        ImportStmt(std::string m, std::string a, SourceLocation l)
+            : Stmt(StmtKind::Import, l),
+            moduleName(std::move(m)), alias(std::move(a)) {
+        }
+    };
+
+    struct ImportItem {
+        std::string name;
+        std::string alias;
+    };
+    struct FromImportStmt : Stmt {
+        std::string             moduleName;
+        std::vector<ImportItem> items;
+        FromImportStmt(std::string m, std::vector<ImportItem> i, SourceLocation l)
+            : Stmt(StmtKind::FromImport, l),
+            moduleName(std::move(m)), items(std::move(i)) {
         }
     };
 

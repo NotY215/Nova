@@ -139,6 +139,18 @@ namespace nova {
                 prExpr(n->entries[i].value.get(), childPrefix(ep, true), true);
             } break;
         }
+        case ExprKind::Lambda: {
+            auto* n = static_cast<const LambdaExpr*>(e);
+            std::string hdr = "Lambda(";
+            for (size_t i = 0; i < n->params.size(); ++i) {
+                if (i) hdr += ", ";
+                hdr += n->params[i];
+            }
+            hdr += ")";
+            putLabel(prefix, isLast, hdr);
+            prExpr(n->body.get(), childPrefix(prefix, isLast), true);
+            break;
+        }
         case ExprKind::GenericType: {
             auto* n = static_cast<const GenericTypeExpr*>(e);
             std::string s = "GenericType(" + n->name + "<";
@@ -315,6 +327,24 @@ namespace nova {
             putLabel(prefix, isLast, n->exception ? "Raise" : "Raise (re-raise)");
             if (n->exception)
                 prExpr(n->exception.get(), childPrefix(prefix, isLast), true);
+            break;
+        }
+        case StmtKind::Import: {
+            auto* n = static_cast<const ImportStmt*>(s);
+            std::string lbl = "Import " + n->moduleName;
+            if (!n->alias.empty()) lbl += " as " + n->alias;
+            putLabel(prefix, isLast, lbl); break;
+        }
+        case StmtKind::FromImport: {
+            auto* n = static_cast<const FromImportStmt*>(s);
+            putLabel(prefix, isLast, "FromImport " + n->moduleName);
+            std::string cp = childPrefix(prefix, isLast);
+            for (size_t i = 0; i < n->items.size(); ++i) {
+                bool last = (i + 1 == n->items.size());
+                std::string lbl = n->items[i].name;
+                if (!n->items[i].alias.empty()) lbl += " as " + n->items[i].alias;
+                putLabel(cp, last, lbl);
+            }
             break;
         }
         case StmtKind::Pass:     putLabel(prefix, isLast, "Pass"); break;

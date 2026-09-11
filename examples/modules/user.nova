@@ -1,0 +1,14 @@
+import math_helpers
+
+struct User:
+    name: str
+    age: int
+
+def make_user(name: str, age: int) -> User:
+    return User(name=name, age=age)
+
+def describe(u: User) -> str:
+    return u.name + " is " + str(u.age)
+
+# Exercise a nested import at module load time
+SQUARE_OF_FIVE = math_helpers.square(5)

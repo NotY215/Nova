@@ -17,8 +17,6 @@ namespace nova {
             : std::runtime_error(std::move(msg)), loc(l) {}
     };
 
-    /// Thrown by `raise` statements and re-thrown by try/except handling.
-    /// Not a std::exception — a plain value carry struct.
     struct NovaException {
         Value          value;
         SourceLocation loc;
@@ -26,24 +24,34 @@ namespace nova {
 
     class Interpreter {
     public:
+        static Interpreter* current_;
+
         Interpreter();
         void run(const Block& program);
         Value callValue(const Value& callee, const std::vector<Value>& args,
             SourceLocation loc);
         std::shared_ptr<Environment> globals() const { return globals_; }
 
-        /// Used by driver when reporting uncaught exceptions.
+        /// Directory to search first when resolving module imports.
+        /// Should include a trailing separator.  Empty means "current directory".
+        void setSourceDir(const std::string& dir) { sourceDir_ = dir; }
+
         static std::string exceptionTypeName(const Value& v);
         static std::string exceptionMessage(const Value& v);
 
     private:
         std::shared_ptr<Environment> globals_;
         std::shared_ptr<Environment> env_;
+        std::string                  sourceDir_;
 
         std::unordered_map<std::string, std::shared_ptr<ClassObject>> classes_;
         std::unordered_map<std::string, const ClassStmt*>             classDecls_;
 
-        // Stack of currently-executing exceptions (for bare `raise`).
+        std::unordered_map<std::string, std::shared_ptr<ModuleValue>> moduleCache_;
+        // Persists module ASTs so that DefStmt / ClassStmt pointers held by
+        // Callables and classDecls_ stay valid for the interpreter's lifetime.
+        std::vector<std::unique_ptr<Block>> moduleAsts_;
+
         std::vector<Value> activeExceptions_;
 
         void  exec(const Stmt* s);
@@ -59,10 +67,16 @@ namespace nova {
         void  execFor(const ForStmt* n);
         void  execTry(const TryStmt* t);
         void  execRaise(const RaiseStmt* r);
+        void  execImport(const ImportStmt* n);
+        void  execFromImport(const FromImportStmt* n);
+
+        Value loadModule(const std::string& name, SourceLocation loc);
+        bool  findModuleFile(const std::string& name, std::string& pathOut) const;
 
         Value callUser(const std::shared_ptr<Callable>& fn,
-            const std::vector<Value>& args,
-            SourceLocation loc);
+            const std::vector<Value>& args, SourceLocation loc);
+        Value callLambda(const std::shared_ptr<Callable>& fn,
+            const std::vector<Value>& args, SourceLocation loc);
         Value callListMethod(const std::shared_ptr<Callable>& fn,
             const std::vector<Value>& args, SourceLocation loc);
         Value callMapMethod(const std::shared_ptr<Callable>& fn,

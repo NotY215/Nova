@@ -1,0 +1,109 @@
+# ---- Basic lambdas ----
+double = lambda x: x * 2
+print(double(5))            # 10
+
+add = lambda a, b: a + b
+print(add(3, 4))            # 7
+
+no_args = lambda: 42
+print(no_args())            # 42
+
+# ---- Closures ----
+def make_adder(n: int):
+    return lambda x: x + n
+
+add5 = make_adder(5)
+add10 = make_adder(10)
+print(add5(1))              # 6
+print(add10(1))             # 11
+
+# ---- map ----
+nums = [1, 2, 3, 4, 5]
+doubled = map(lambda x: x * 2, nums)
+print(doubled)              # [2, 4, 6, 8, 10]
+
+squared = map(lambda x: x * x, [1, 2, 3, 4])
+print(squared)              # [1, 4, 9, 16]
+
+words = ["hello", "world", "nova"]
+upper = map(lambda s: s.upper(), words)
+print(upper)                # ["HELLO", "WORLD", "NOVA"]
+
+# ---- filter ----
+evens = filter(lambda x: x % 2 == 0, nums)
+print(evens)                # [2, 4]
+
+long_words = filter(lambda s: len(s) > 4, words)
+print(long_words)           # ["hello", "world"]
+
+# ---- reduce ----
+total = reduce(lambda acc, x: acc + x, [1, 2, 3, 4, 5])
+print(total)                # 15
+
+product = reduce(lambda a, b: a * b, [1, 2, 3, 4, 5])
+print(product)              # 120
+
+# ---- sorted ----
+print(sorted([3, 1, 4, 1, 5, 9, 2, 6]))     # [1, 1, 2, 3, 4, 5, 6, 9]
+print(sorted(["banana", "apple", "cherry"])) # ["apple", "banana", "cherry"]
+
+# sorted by key
+people = ["Charlie", "alice", "Bob"]
+by_lower = sorted(people, lambda s: s.lower())
+print(by_lower)             # ["alice", "Bob", "Charlie"]
+
+nums2 = [-3, 1, -5, 2, -4]
+by_abs = sorted(nums2, lambda x: abs(x))
+print(by_abs)               # [1, 2, -3, -4, -5]
+
+# ---- any / all ----
+print(any([false, false, true]))   # true
+print(any([false, false, false]))  # false
+print(all([true, true, true]))     # true
+print(all([true, false, true]))    # false
+print(any([0, 0, 5]))              # true
+print(all([1, 2, 3]))              # true
+
+# ---- sum ----
+print(sum([1, 2, 3, 4, 5]))        # 15
+print(sum([1.5, 2.5, 3.0]))        # 7.0
+print(sum([]))                     # 0
+
+# ---- chained ----
+result = reduce(lambda a, b: a + b,
+                map(lambda x: x * x,
+                    filter(lambda x: x % 2 == 1, range(10))))
+print(result)               # 1 + 9 + 25 + 49 + 81 = 165
+
+# ---- lambda in data ----
+ops = {
+    "add": lambda a, b: a + b,
+    "sub": lambda a, b: a - b,
+    "mul": lambda a, b: a * b,
+}
+print(ops["add"](10, 5))    # 15
+print(ops["sub"](10, 5))    # 5
+print(ops["mul"](10, 5))    # 50
+
+# ---- HOF (function returning function) ----
+def compose(f, g):
+    return lambda x: f(g(x))
+
+inc = lambda x: x + 1
+twice = lambda x: x * 2
+inc_then_twice = compose(twice, inc)
+print(inc_then_twice(5))    # (5 + 1) * 2 = 12
+
+# ---- practical: word count sorted by frequency ----
+text = "the quick brown fox jumps over the lazy dog the fox"
+words2 = text.split()
+counts = {}
+for w in words2:
+    if w in counts:
+        counts[w] = counts[w] + 1
+    else:
+        counts[w] = 1
+
+sortedWords = sorted(counts.keys(), lambda w: -counts[w])
+print(sortedWords[0])       # "the"
+print(sortedWords[1])       # "fox"

@@ -34,7 +34,10 @@ namespace nova {
         }
 
         std::shared_ptr<Environment> parent() const { return parent_; }
-
+        /// Names bound directly in this scope (not parents).
+        const std::unordered_map<std::string, Value>& localVars() const {
+            return vars_;
+        }
     private:
         std::unordered_map<std::string, Value> vars_;
         std::shared_ptr<Environment>           parent_;

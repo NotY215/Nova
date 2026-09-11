@@ -43,12 +43,15 @@ namespace nova {
         StmtPtr  parseClass();
         StmtPtr  parseTry();
         StmtPtr  parseRaise();
+        StmtPtr  parseImport();       // NEW
+        StmtPtr  parseFromImport();   // NEW
         StmtPtr  parseAnnotatedAssign();
         StmtPtr  parseExprOrAssign();
         Param    parseParam();
         FieldDef parseFieldDef();
 
         ExprPtr  parseExpression();
+        ExprPtr  parseLambda();
         ExprPtr  parseBinary(int minPrec);
         ExprPtr  parseUnary();
         ExprPtr  parsePostfix();

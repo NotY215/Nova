@@ -1,0 +1,17 @@
+import math_helpers
+import math_helpers as mh
+from math_helpers import square, cube as cb, greet
+
+print(math_helpers.square(5))       # 25
+print(mh.square(6))                 # 36
+print(square(7))                    # 49
+print(cb(3))                        # 27
+print(greet("Nova"))                # Hello, Nova!
+
+print(math_helpers.PI)              # 3.14159
+print(mh.circle_area(1.0))          # 3.14159
+
+# nested import
+import user
+u = user.make_user("Alice", 30)
+print(u)                            # User(name="Alice", age=30)

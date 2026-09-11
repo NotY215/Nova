@@ -98,8 +98,17 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // Determine the source directory so that `import foo` finds `foo.nova`
+    // alongside the main file.
+    std::string srcDir;
+    {
+        auto slash = file.find_last_of("/\\");
+        if (slash != std::string::npos) srcDir = file.substr(0, slash + 1);
+    }
+
     try {
         nova::Interpreter interp;
+        interp.setSourceDir(srcDir);
         interp.run(program);
     }
     catch (const nova::NovaException& e) {

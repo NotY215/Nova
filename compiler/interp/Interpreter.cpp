@@ -2,10 +2,16 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <sstream>
+#include "lexer/Lexer.hpp"
+#include "parser/Parser.hpp"
+#include <fstream>
 
 namespace nova {
+
+    Interpreter* Interpreter::current_ = nullptr;
 
     struct ReturnSignal { Value value; };
     struct BreakSignal {};
@@ -21,7 +27,6 @@ namespace nova {
             }
             ~EnvGuard() { slot = std::move(saved); }
         };
-
         struct ActiveExcGuard {
             std::vector<Value>& vec;
             ActiveExcGuard(std::vector<Value>& v, Value e) : vec(v) {
@@ -29,7 +34,6 @@ namespace nova {
             }
             ~ActiveExcGuard() { vec.pop_back(); }
         };
-
         bool valueEquals(const Value& a, const Value& b) {
             if (a.isNumber() && b.isNumber()) return a.asDouble() == b.asDouble();
             if (a.isString() && b.isString()) return a.asString() == b.asString();
@@ -42,11 +46,8 @@ namespace nova {
         }
     } // namespace
 
-    // ===========================================================================
-    // Constructor / registry
-    // ===========================================================================
-
     Interpreter::Interpreter() {
+        current_ = this;
         globals_ = std::make_shared<Environment>(nullptr);
         env_ = globals_;
         installExceptionClasses();
@@ -83,24 +84,19 @@ namespace nova {
     }
 
     // ===========================================================================
-    // Exception plumbing
+    // Exceptions
     // ===========================================================================
 
     void Interpreter::installExceptionClasses() {
-        // Only Exception declares `message`; subclasses inherit it via the parent
-        // chain in StructInstance construction.
         auto base = std::make_shared<ClassObject>();
         base->name = "Exception";
         base->fieldOrder = { "message" };
         classes_["Exception"] = base;
-
-        auto mkClass = [&](const std::string& name,
-            std::shared_ptr<ClassObject> parent) {
-                auto c = std::make_shared<ClassObject>();
-                c->name = name;
-                c->parent = std::move(parent);
-                classes_[name] = c;
-                return c;
+        auto mkClass = [&](const std::string& name, std::shared_ptr<ClassObject> parent) {
+            auto c = std::make_shared<ClassObject>();
+            c->name = name; c->parent = std::move(parent);
+            classes_[name] = c;
+            return c;
             };
         mkClass("ValueError", base);
         mkClass("TypeError", base);
@@ -115,9 +111,8 @@ namespace nova {
     bool Interpreter::valueIsInstanceOf(const Value& v,
         const std::shared_ptr<ClassObject>& cls) const {
         if (!v.isInstance()) return false;
-        for (auto c = v.asInstance()->cls; c; c = c->parent) {
+        for (auto c = v.asInstance()->cls; c; c = c->parent)
             if (c == cls || c->name == cls->name) return true;
-        }
         return false;
     }
 
@@ -184,7 +179,8 @@ namespace nova {
         case StmtKind::For:   execFor(static_cast<const ForStmt*>(s));  return;
         case StmtKind::Try:   execTry(static_cast<const TryStmt*>(s));  return;
         case StmtKind::Raise: execRaise(static_cast<const RaiseStmt*>(s));return;
-
+        case StmtKind::Import:     execImport(static_cast<const ImportStmt*>(s));     return;
+        case StmtKind::FromImport: execFromImport(static_cast<const FromImportStmt*>(s)); return;
         case StmtKind::Def: {
             auto* n = static_cast<const DefStmt*>(s);
             auto fn = std::make_shared<Callable>();
@@ -203,7 +199,6 @@ namespace nova {
         }
         case StmtKind::Struct:
         case StmtKind::Class: return;
-
         case StmtKind::Pass:     return;
         case StmtKind::Break:    throw BreakSignal{};
         case StmtKind::Continue: throw ContinueSignal{};
@@ -212,20 +207,143 @@ namespace nova {
 
     void Interpreter::execRaise(const RaiseStmt* r) {
         Value v;
-        if (r->exception) {
-            v = eval(r->exception.get());
-        }
+        if (r->exception) v = eval(r->exception.get());
         else {
             if (activeExceptions_.empty())
                 throw RuntimeError("no active exception to re-raise", r->loc);
             v = activeExceptions_.back();
         }
-
-        // If it's not already an exception instance, wrap it.
-        if (!v.isInstance()) {
-            v = makeException("Exception", v.toString());
-        }
+        if (!v.isInstance()) v = makeException("Exception", v.toString());
         throw NovaException{ v, r->loc };
+    }
+
+    // ===========================================================================
+// Module loading
+// ===========================================================================
+
+    bool Interpreter::findModuleFile(const std::string& name, std::string& pathOut) const {
+        // 1. source directory of the importing file
+        if (!sourceDir_.empty()) {
+            std::string p = sourceDir_;
+            if (p.back() != '/' && p.back() != '\\') p += '/';
+            p += name + ".nova";
+            std::ifstream in(p, std::ios::binary);
+            if (in) { pathOut = p; return true; }
+        }
+        // 2. current working directory
+        {
+            std::string p = name + ".nova";
+            std::ifstream in(p, std::ios::binary);
+            if (in) { pathOut = p; return true; }
+        }
+        return false;
+    }
+
+    Value Interpreter::loadModule(const std::string& name, SourceLocation loc) {
+        // Already loaded?
+        auto cached = moduleCache_.find(name);
+        if (cached != moduleCache_.end()) return Value(cached->second);
+
+        // Builtin module already in globals?
+        if (Value* existing = globals_->lookup(name)) {
+            if (existing->isModule()) {
+                moduleCache_[name] = existing->asModule();
+                return *existing;
+            }
+        }
+
+        std::string path;
+        if (!findModuleFile(name, path))
+            throw RuntimeError("cannot find module '" + name + "' (looked for '" +
+                name + ".nova')", loc);
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in) throw RuntimeError("cannot open module file '" + path + "'", loc);
+        std::stringstream ss; ss << in.rdbuf();
+        std::string src = ss.str();
+
+        // Parse
+        Block program;
+        try {
+            Lexer lexer(std::move(src));
+            auto tokens = lexer.tokenize();
+            Parser parser(std::move(tokens));
+            program = parser.parseProgram();
+        }
+        catch (const ParseError& e) {
+            throw RuntimeError("parse error in module '" + name + "' at line " +
+                std::to_string(e.loc.line) + ": " + e.what(), loc);
+        }
+
+        // Move the AST into persistent storage.  DefStmt / ClassStmt pointers
+        // inside Callables and classDecls_ point into this Block, so it must
+        // outlive the interpreter run.
+        moduleAsts_.push_back(std::make_unique<Block>(std::move(program)));
+        Block& programRef = *moduleAsts_.back();
+
+        // Fresh module environment, parent = globals_ so builtins are visible
+        auto modEnv = std::make_shared<Environment>(globals_);
+
+        // Swap sourceDir_ to the module's own directory so nested imports resolve
+        // relative to the module file.
+        std::string moduleDir;
+        {
+            auto slash = path.find_last_of("/\\");
+            moduleDir = (slash == std::string::npos) ? std::string{} : path.substr(0, slash + 1);
+        }
+        std::string savedDir = sourceDir_;
+        sourceDir_ = moduleDir;
+
+        // Swap env_ for the module's env
+        auto savedEnv = env_;
+        env_ = modEnv;
+        try {
+            for (auto& s2 : programRef.stmts) {
+                if (s2->kind == StmtKind::Struct)
+                    registerStruct(static_cast<const StructStmt*>(s2.get()));
+                if (s2->kind == StmtKind::Class)
+                    registerClass(static_cast<const ClassStmt*>(s2.get()));
+            }
+            execBlock(programRef);
+        }
+        catch (...) {
+            env_ = savedEnv;
+            sourceDir_ = savedDir;
+            throw;
+        }
+        env_ = savedEnv;
+        sourceDir_ = savedDir;
+
+        // Build module value
+        auto mod = std::make_shared<ModuleValue>();
+        mod->name = name;
+        for (auto& [k, v] : modEnv->localVars()) {
+            mod->members[k] = v;
+        }
+
+        moduleCache_[name] = mod;
+        return Value(mod);
+    }
+
+    void Interpreter::execImport(const ImportStmt* n) {
+        Value mod = loadModule(n->moduleName, n->loc);
+        const std::string& bind = n->alias.empty() ? n->moduleName : n->alias;
+        env_->define(bind, mod);
+    }
+
+    void Interpreter::execFromImport(const FromImportStmt* n) {
+        Value mod = loadModule(n->moduleName, n->loc);
+        if (!mod.isModule())
+            throw RuntimeError("'" + n->moduleName + "' is not a module", n->loc);
+        auto mv = mod.asModule();
+        for (auto& item : n->items) {
+            auto it = mv->members.find(item.name);
+            if (it == mv->members.end())
+                throw RuntimeError("module '" + n->moduleName +
+                    "' has no member '" + item.name + "'", n->loc);
+            const std::string& bind = item.alias.empty() ? item.name : item.alias;
+            env_->define(bind, it->second);
+        }
     }
 
     void Interpreter::execTry(const TryStmt* t) {
@@ -235,13 +353,10 @@ namespace nova {
             finallyRan = true;
             if (t->finallyBody) execBlock(*t->finallyBody);
             };
-
         auto dispatch = [&](const NovaException& ne) -> bool {
             for (auto& h : t->handlers) {
                 bool matches = false;
-                if (!h.exceptionType) {
-                    matches = true;
-                }
+                if (!h.exceptionType) matches = true;
                 else {
                     Value expected = eval(h.exceptionType.get());
                     std::shared_ptr<ClassObject> cls;
@@ -249,9 +364,8 @@ namespace nova {
                     else if (expected.isCallable() &&
                         expected.asCallable()->kind == Callable::Kind::ClassCtor)
                         cls = expected.asCallable()->classObj;
-                    else
-                        throw RuntimeError("except type must be a class",
-                            h.exceptionType->loc);
+                    else throw RuntimeError("except type must be a class",
+                        h.exceptionType->loc);
                     matches = valueIsInstanceOf(ne.value, cls);
                 }
                 if (matches) {
@@ -263,10 +377,7 @@ namespace nova {
             }
             return false;
             };
-
-        try {
-            execBlock(t->tryBody);
-        }
+        try { execBlock(t->tryBody); }
         catch (ReturnSignal&) { runFinally(); throw; }
         catch (BreakSignal&) { runFinally(); throw; }
         catch (ContinueSignal&) { runFinally(); throw; }
@@ -288,7 +399,6 @@ namespace nova {
 
     void Interpreter::execAssign(const AssignStmt* n) {
         Value v = eval(n->value.get());
-
         if (n->target->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
             if (!env_->assign(nm->name, v)) env_->define(nm->name, std::move(v));
@@ -306,7 +416,6 @@ namespace nova {
             auto* ix = static_cast<const IndexExpr*>(n->target.get());
             Value tgt = eval(ix->target.get());
             Value idx = eval(ix->index.get());
-
             if (tgt.isList()) {
                 if (!idx.isInt())
                     throw RuntimeError("list index must be int, got " + idx.typeName(), ix->loc);
@@ -333,7 +442,6 @@ namespace nova {
 
     void Interpreter::execFor(const ForStmt* n) {
         Value iterable = eval(n->iterable.get());
-
         auto bindVar = [&](Value v) {
             if (!env_->assign(n->targetName, v)) env_->define(n->targetName, std::move(v));
             };
@@ -343,7 +451,6 @@ namespace nova {
             catch (ContinueSignal&) { return true; }
             return true;
             };
-
         if (iterable.isList()) {
             auto lst = iterable.asList();
             size_t count = lst->items.size();
@@ -374,7 +481,7 @@ namespace nova {
     }
 
     // ===========================================================================
-    // Expression evaluation
+    // Expressions
     // ===========================================================================
 
     Value Interpreter::eval(const Expr* e) {
@@ -402,7 +509,6 @@ namespace nova {
         }
         case ExprKind::Grouping:
             return eval(static_cast<const GroupingExpr*>(e)->inner.get());
-
         case ExprKind::Unary: {
             auto* n = static_cast<const UnaryExpr*>(e);
             Value v = eval(n->operand.get());
@@ -425,6 +531,15 @@ namespace nova {
         case ExprKind::ListLit:return evalListLit(static_cast<const ListLitExpr*>(e));
         case ExprKind::MapLit: return evalMapLit(static_cast<const MapLitExpr*>(e));
 
+        case ExprKind::Lambda: {
+            auto* n = static_cast<const LambdaExpr*>(e);
+            auto fn = std::make_shared<Callable>();
+            fn->kind = Callable::Kind::Lambda;
+            fn->name = "<lambda>";
+            fn->lambdaExpr = n;
+            fn->closure = env_;
+            return Value(fn);
+        }
         case ExprKind::GenericType:
             throw RuntimeError("generic type expression used as a value", e->loc);
         }
@@ -437,7 +552,6 @@ namespace nova {
         for (auto& el : n->elements) lst->items.push_back(eval(el.get()));
         return Value(lst);
     }
-
     Value Interpreter::evalMapLit(const MapLitExpr* n) {
         auto m = std::make_shared<MapValue>();
         for (auto& entry : n->entries) {
@@ -448,11 +562,9 @@ namespace nova {
         }
         return Value(m);
     }
-
     Value Interpreter::evalIndex(const IndexExpr* ix) {
         Value tgt = eval(ix->target.get());
         Value idx = eval(ix->index.get());
-
         if (tgt.isList()) {
             if (!idx.isInt())
                 throw RuntimeError("list index must be int, got " + idx.typeName(), ix->loc);
@@ -487,18 +599,14 @@ namespace nova {
 
     Value Interpreter::evalAttr(const AttrExpr* a) {
         Value base = eval(a->target.get());
-
         if (base.isCallable() && base.asCallable()->kind == Callable::Kind::SuperMethod) {
             auto sp = base.asCallable();
             std::shared_ptr<ClassObject> dummy;
             auto m = findMethod(sp->superParent, a->name, &dummy);
             if (!m) throw RuntimeError("parent class has no method '" + a->name + "'", a->loc);
             auto bm = std::make_shared<Callable>();
-            bm->kind = Callable::Kind::BoundMethod;
-            bm->name = a->name;
-            bm->boundSelf = sp->boundSelf;
-            bm->methodFn = m;
-            bm->definingClass = dummy;
+            bm->kind = Callable::Kind::BoundMethod; bm->name = a->name;
+            bm->boundSelf = sp->boundSelf; bm->methodFn = m; bm->definingClass = dummy;
             return Value(bm);
         }
         if (base.isModule()) {
@@ -511,43 +619,32 @@ namespace nova {
         }
         if (base.isString()) {
             auto c = std::make_shared<Callable>();
-            c->kind = Callable::Kind::StringMethod;
-            c->name = a->name;
-            c->boundStr = base.asString();
+            c->kind = Callable::Kind::StringMethod; c->name = a->name; c->boundStr = base.asString();
             return Value(c);
         }
         if (base.isList()) {
             auto c = std::make_shared<Callable>();
-            c->kind = Callable::Kind::ListMethod;
-            c->name = a->name;
-            c->boundList = base.asList();
+            c->kind = Callable::Kind::ListMethod; c->name = a->name; c->boundList = base.asList();
             return Value(c);
         }
         if (base.isMap()) {
             auto c = std::make_shared<Callable>();
-            c->kind = Callable::Kind::MapMethod;
-            c->name = a->name;
-            c->boundMap = base.asMap();
+            c->kind = Callable::Kind::MapMethod; c->name = a->name; c->boundMap = base.asMap();
             return Value(c);
         }
         if (!base.isInstance())
             throw RuntimeError("cannot read '" + a->name + "' on value of type " +
                 base.typeName(), a->loc);
         auto si = base.asInstance();
-
         auto fit = si->fields.find(a->name);
         if (fit != si->fields.end()) return fit->second;
-
         if (si->cls) {
             std::shared_ptr<ClassObject> defCls;
             auto m = findMethod(si->cls, a->name, &defCls);
             if (m) {
                 auto bm = std::make_shared<Callable>();
-                bm->kind = Callable::Kind::BoundMethod;
-                bm->name = a->name;
-                bm->boundSelf = si;
-                bm->methodFn = m;
-                bm->definingClass = defCls;
+                bm->kind = Callable::Kind::BoundMethod; bm->name = a->name;
+                bm->boundSelf = si; bm->methodFn = m; bm->definingClass = defCls;
                 return Value(bm);
             }
         }
@@ -566,9 +663,7 @@ namespace nova {
             for (auto& m : it->second->methods) {
                 if (m->name == name) {
                     auto fn = std::make_shared<Callable>();
-                    fn->kind = Callable::Kind::User;
-                    fn->name = name;
-                    fn->decl = m.get();
+                    fn->kind = Callable::Kind::User; fn->name = name; fn->decl = m.get();
                     if (definingClass) *definingClass = c;
                     return fn;
                 }
@@ -581,26 +676,20 @@ namespace nova {
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             if (nm->name == "super") {
-                if (!c->args.empty())
-                    throw RuntimeError("super() takes no arguments", c->loc);
+                if (!c->args.empty()) throw RuntimeError("super() takes no arguments", c->loc);
                 Value* s = env_->lookup("self");
                 Value* k = env_->lookup("__class__");
                 if (!s || !k || !s->isInstance() || !k->isClass())
                     throw RuntimeError("super() outside method", c->loc);
                 auto sup = std::make_shared<Callable>();
-                sup->kind = Callable::Kind::SuperMethod;
-                sup->name = "super";
-                sup->boundSelf = s->asInstance();
-                sup->superParent = k->asClass()->parent;
+                sup->kind = Callable::Kind::SuperMethod; sup->name = "super";
+                sup->boundSelf = s->asInstance(); sup->superParent = k->asClass()->parent;
                 if (!sup->superParent)
-                    throw RuntimeError("class '" + k->asClass()->name +
-                        "' has no parent", c->loc);
+                    throw RuntimeError("class '" + k->asClass()->name + "' has no parent", c->loc);
                 return Value(sup);
             }
         }
-
         Value callee = eval(c->callee.get());
-
         if (callee.isCallable() && callee.asCallable()->kind == Callable::Kind::ClassCtor) {
             std::vector<std::pair<std::string, Value>> kwargs;
             for (auto& a : c->args) kwargs.emplace_back(a.name, eval(a.value.get()));
@@ -608,7 +697,6 @@ namespace nova {
         }
         if (callee.isCallable() && callee.asCallable()->kind == Callable::Kind::SuperMethod)
             throw RuntimeError("cannot call super() directly", c->loc);
-
         std::vector<Value> args;
         args.reserve(c->args.size());
         for (auto& a : c->args) {
@@ -630,7 +718,6 @@ namespace nova {
     {
         auto inst = std::make_shared<StructInstance>();
         inst->cls = cls;
-
         const DefStmt* initDecl = nullptr;
         std::shared_ptr<ClassObject> initOwner;
         for (auto c = cls; c; c = c->parent) {
@@ -641,7 +728,6 @@ namespace nova {
             }
             if (initDecl) break;
         }
-
         if (initDecl) {
             std::vector<Value> callArgs;
             callArgs.push_back(Value(inst));
@@ -651,19 +737,14 @@ namespace nova {
                 callArgs.push_back(v);
             }
             auto fn = std::make_shared<Callable>();
-            fn->kind = Callable::Kind::User;
-            fn->name = "__init__";
-            fn->decl = initDecl;
-            fn->closure = env_;
-            fn->definingClass = initOwner;
+            fn->kind = Callable::Kind::User; fn->name = "__init__";
+            fn->decl = initDecl; fn->closure = env_; fn->definingClass = initOwner;
             callUser(fn, callArgs, loc);
             return Value(inst);
         }
-
         std::vector<std::string> allFields;
         for (auto c = cls; c; c = c->parent)
             for (auto& f : c->fieldOrder) allFields.push_back(f);
-
         size_t positional = 0;
         for (auto& [k, v] : args) {
             if (k.empty()) {
@@ -684,23 +765,16 @@ namespace nova {
             if (!inst->fields.count(f))
                 throw RuntimeError("class '" + cls->name +
                     "' is missing value for field '" + f + "'", loc);
-
         return Value(inst);
     }
 
     // ===========================================================================
-    // Binary operators
+    // Binary
     // ===========================================================================
 
     Value Interpreter::evalBinary(const BinaryExpr* b) {
-        if (b->op == BinOp::And) {
-            Value l = eval(b->lhs.get());
-            return l.truthy() ? eval(b->rhs.get()) : l;
-        }
-        if (b->op == BinOp::Or) {
-            Value l = eval(b->lhs.get());
-            return l.truthy() ? l : eval(b->rhs.get());
-        }
+        if (b->op == BinOp::And) { Value l = eval(b->lhs.get()); return l.truthy() ? eval(b->rhs.get()) : l; }
+        if (b->op == BinOp::Or) { Value l = eval(b->lhs.get()); return l.truthy() ? l : eval(b->rhs.get()); }
 
         if (b->op == BinOp::In) {
             Value l = eval(b->lhs.get());
@@ -721,12 +795,10 @@ namespace nova {
 
         Value l = eval(b->lhs.get());
         Value r = eval(b->rhs.get());
-
         auto numFail = [&]() -> void {
             throw RuntimeError(std::string("cannot apply '") + binOpName(b->op) +
                 "' to " + l.typeName() + " and " + r.typeName(), b->loc);
             };
-
         if (b->op == BinOp::Eq || b->op == BinOp::NotEq) {
             bool eq = valueEquals(l, r);
             return Value(b->op == BinOp::Eq ? eq : !eq);
@@ -737,27 +809,22 @@ namespace nova {
             if (l.isNumber() && r.isNumber()) {
                 double a = l.asDouble(), c = r.asDouble();
                 switch (b->op) {
-                case BinOp::Lt: res = a < c; break;
-                case BinOp::Gt: res = a > c; break;
-                case BinOp::LtEq: res = a <= c; break;
-                case BinOp::GtEq: res = a >= c; break;
+                case BinOp::Lt: res = a < c; break; case BinOp::Gt: res = a > c; break;
+                case BinOp::LtEq: res = a <= c; break; case BinOp::GtEq: res = a >= c; break;
                 default: break;
                 }
             }
             else if (l.isString() && r.isString()) {
                 const auto& a = l.asString(); const auto& c = r.asString();
                 switch (b->op) {
-                case BinOp::Lt: res = a < c; break;
-                case BinOp::Gt: res = a > c; break;
-                case BinOp::LtEq: res = a <= c; break;
-                case BinOp::GtEq: res = a >= c; break;
+                case BinOp::Lt: res = a < c; break; case BinOp::Gt: res = a > c; break;
+                case BinOp::LtEq: res = a <= c; break; case BinOp::GtEq: res = a >= c; break;
                 default: break;
                 }
             }
             else numFail();
             return Value(res);
         }
-
         switch (b->op) {
         case BinOp::Add:
             if (l.isInt() && r.isInt()) return Value(l.asInt() + r.asInt());
@@ -859,7 +926,8 @@ namespace nova {
             for (auto& a : args) kwargs.emplace_back("", a);
             return constructInstance(fn->classObj, kwargs, loc);
         }
-        case Callable::Kind::User: return callUser(fn, args, loc);
+        case Callable::Kind::User:   return callUser(fn, args, loc);
+        case Callable::Kind::Lambda: return callLambda(fn, args, loc);
         case Callable::Kind::BoundMethod: {
             std::vector<Value> all;
             all.reserve(args.size() + 1);
@@ -879,12 +947,29 @@ namespace nova {
         return Value();
     }
 
+    Value Interpreter::callLambda(const std::shared_ptr<Callable>& fn,
+        const std::vector<Value>& args,
+        SourceLocation loc) {
+        const LambdaExpr* lam = fn->lambdaExpr;
+        if (args.size() != lam->params.size())
+            throw RuntimeError("lambda expects " + std::to_string(lam->params.size()) +
+                " argument(s), got " + std::to_string(args.size()), loc);
+        auto callEnv = std::make_shared<Environment>(fn->closure ? fn->closure : globals_);
+        for (size_t i = 0; i < args.size(); ++i)
+            callEnv->define(lam->params[i], args[i]);
+        EnvGuard guard(env_, callEnv);
+        return eval(lam->body.get());
+    }
+
+    // ===========================================================================
+    // List / Map / String methods
+    // ===========================================================================
+
     Value Interpreter::callListMethod(const std::shared_ptr<Callable>& fn,
         const std::vector<Value>& args,
         SourceLocation loc) {
         auto lst = fn->boundList;
         const std::string& m = fn->name;
-
         if (m == "append") {
             if (args.size() != 1) throw RuntimeError("append() takes 1 argument", loc);
             lst->items.push_back(args[0]); return Value();
@@ -922,22 +1007,19 @@ namespace nova {
             if (args.size() != 1) throw RuntimeError("remove() takes 1 argument", loc);
             for (size_t i = 0; i < lst->items.size(); ++i)
                 if (valueEquals(lst->items[i], args[0])) {
-                    lst->items.erase(lst->items.begin() + i);
-                    return Value();
+                    lst->items.erase(lst->items.begin() + i); return Value();
                 }
             throw RuntimeError("remove(): value not in list", loc);
         }
         if (m == "contains") {
             if (args.size() != 1) throw RuntimeError("contains() takes 1 argument", loc);
-            for (auto& v : lst->items)
-                if (valueEquals(v, args[0])) return Value(true);
+            for (auto& v : lst->items) if (valueEquals(v, args[0])) return Value(true);
             return Value(false);
         }
         if (m == "index") {
             if (args.size() != 1) throw RuntimeError("index() takes 1 argument", loc);
             for (size_t i = 0; i < lst->items.size(); ++i)
-                if (valueEquals(lst->items[i], args[0]))
-                    return Value((long long)i);
+                if (valueEquals(lst->items[i], args[0])) return Value((long long)i);
             throw RuntimeError("index(): value not in list", loc);
         }
         throw RuntimeError("list has no method '" + m + "'", loc);
@@ -948,12 +1030,10 @@ namespace nova {
         SourceLocation loc) {
         auto m = fn->boundMap;
         const std::string& name = fn->name;
-
         if (name == "put") {
             if (args.size() != 2 || !args[0].isString())
                 throw RuntimeError("put(key, value) takes (str, T)", loc);
-            m->entries[args[0].asString()] = args[1];
-            return Value();
+            m->entries[args[0].asString()] = args[1]; return Value();
         }
         if (name == "get") {
             if (args.size() != 1 || !args[0].isString())
@@ -969,8 +1049,7 @@ namespace nova {
             auto it = m->entries.find(args[0].asString());
             if (it == m->entries.end())
                 throw RuntimeError("map has no key '" + args[0].asString() + "'", loc);
-            m->entries.erase(it);
-            return Value();
+            m->entries.erase(it); return Value();
         }
         if (name == "contains") {
             if (args.size() != 1 || !args[0].isString())
@@ -996,10 +1075,6 @@ namespace nova {
         throw RuntimeError("map has no method '" + name + "'", loc);
     }
 
-    // ===========================================================================
-    // String methods
-    // ===========================================================================
-
     namespace {
         std::string toLower(const std::string& s) {
             std::string r = s;
@@ -1019,16 +1094,12 @@ namespace nova {
         SourceLocation loc) {
         const std::string& s = fn->boundStr;
         const std::string& m = fn->name;
-
-        auto noArgs = [&]() {
-            if (!args.empty()) throw RuntimeError(m + "() takes no arguments", loc);
-            };
+        auto noArgs = [&]() { if (!args.empty()) throw RuntimeError(m + "() takes no arguments", loc); };
         auto oneStr = [&](const char* what) -> const std::string& {
             if (args.size() != 1 || !args[0].isString())
                 throw RuntimeError(std::string(m) + "() takes one str argument (" + what + ")", loc);
             return args[0].asString();
             };
-
         if (m == "upper") { noArgs(); return Value(toUpper(s)); }
         if (m == "lower") { noArgs(); return Value(toLower(s)); }
         if (m == "strip") {
@@ -1047,18 +1118,8 @@ namespace nova {
             }
             throw RuntimeError("strip() takes 0 or 1 str argument", loc);
         }
-        if (m == "lstrip") {
-            noArgs();
-            size_t a = 0;
-            while (a < s.size() && isWS(s[a])) ++a;
-            return Value(s.substr(a));
-        }
-        if (m == "rstrip") {
-            noArgs();
-            size_t b = s.size();
-            while (b > 0 && isWS(s[b - 1])) --b;
-            return Value(s.substr(0, b));
-        }
+        if (m == "lstrip") { noArgs(); size_t a = 0; while (a < s.size() && isWS(s[a])) ++a; return Value(s.substr(a)); }
+        if (m == "rstrip") { noArgs(); size_t b = s.size(); while (b > 0 && isWS(s[b - 1])) --b; return Value(s.substr(0, b)); }
         if (m == "split") {
             auto lst = std::make_shared<ListValue>();
             if (args.empty()) {
@@ -1092,8 +1153,7 @@ namespace nova {
             std::string out;
             for (size_t i = 0; i < lst->items.size(); ++i) {
                 if (i) out += s;
-                if (!lst->items[i].isString())
-                    throw RuntimeError("join(): all elements must be str", loc);
+                if (!lst->items[i].isString()) throw RuntimeError("join(): all elements must be str", loc);
                 out += lst->items[i].asString();
             }
             return Value(std::move(out));
@@ -1107,63 +1167,30 @@ namespace nova {
             std::string out;
             size_t pos = 0, next;
             while ((next = s.find(oldS, pos)) != std::string::npos) {
-                out += s.substr(pos, next - pos);
-                out += newS;
-                pos = next + oldS.size();
+                out += s.substr(pos, next - pos); out += newS; pos = next + oldS.size();
             }
             out += s.substr(pos);
             return Value(std::move(out));
         }
-        if (m == "find") {
-            const std::string& sub = oneStr("substring");
-            auto pos = s.find(sub);
-            return Value(pos == std::string::npos ? (long long)-1 : (long long)pos);
-        }
-        if (m == "contains") {
-            const std::string& sub = oneStr("substring");
-            return Value(s.find(sub) != std::string::npos);
-        }
-        if (m == "starts_with") {
-            const std::string& p = oneStr("prefix");
-            return Value(s.size() >= p.size() && s.compare(0, p.size(), p) == 0);
-        }
-        if (m == "ends_with") {
-            const std::string& p = oneStr("suffix");
-            return Value(s.size() >= p.size() &&
-                s.compare(s.size() - p.size(), p.size(), p) == 0);
-        }
-        if (m == "is_digit") {
-            noArgs();
-            if (s.empty()) return Value(false);
-            for (char c : s) if (!std::isdigit((unsigned char)c)) return Value(false);
-            return Value(true);
-        }
-        if (m == "is_alpha") {
-            noArgs();
-            if (s.empty()) return Value(false);
-            for (char c : s) if (!std::isalpha((unsigned char)c)) return Value(false);
-            return Value(true);
-        }
-        if (m == "is_space") {
-            noArgs();
-            if (s.empty()) return Value(false);
-            for (char c : s) if (!isWS(c)) return Value(false);
-            return Value(true);
-        }
+        if (m == "find") { const std::string& sub = oneStr("substring"); auto p = s.find(sub); return Value(p == std::string::npos ? (long long)-1 : (long long)p); }
+        if (m == "contains") { const std::string& sub = oneStr("substring"); return Value(s.find(sub) != std::string::npos); }
+        if (m == "starts_with") { const std::string& p = oneStr("prefix"); return Value(s.size() >= p.size() && s.compare(0, p.size(), p) == 0); }
+        if (m == "ends_with") { const std::string& p = oneStr("suffix"); return Value(s.size() >= p.size() && s.compare(s.size() - p.size(), p.size(), p) == 0); }
+        if (m == "is_digit") { noArgs(); if (s.empty()) return Value(false); for (char c : s) if (!std::isdigit((unsigned char)c)) return Value(false); return Value(true); }
+        if (m == "is_alpha") { noArgs(); if (s.empty()) return Value(false); for (char c : s) if (!std::isalpha((unsigned char)c)) return Value(false); return Value(true); }
+        if (m == "is_space") { noArgs(); if (s.empty()) return Value(false); for (char c : s) if (!isWS(c)) return Value(false); return Value(true); }
         if (m == "char_at") {
-            if (args.size() != 1 || !args[0].isInt())
-                throw RuntimeError("char_at(i) takes one int argument", loc);
+            if (args.size() != 1 || !args[0].isInt()) throw RuntimeError("char_at(i) takes one int argument", loc);
             long long i = args[0].asInt();
             if (i < 0) i += (long long)s.size();
-            if (i < 0 || i >= (long long)s.size())
-                throw RuntimeError("char_at: index out of range", loc);
+            if (i < 0 || i >= (long long)s.size()) throw RuntimeError("char_at: index out of range", loc);
             return Value(std::string(1, s[(size_t)i]));
         }
         throw RuntimeError("str has no method '" + m + "'", loc);
     }
 
     // ===========================================================================
-    // User calls
+    // User / method calls
     // ===========================================================================
 
     Value Interpreter::callUser(const std::shared_ptr<Callable>& fn,
@@ -1174,14 +1201,10 @@ namespace nova {
             throw RuntimeError("function '" + fn->name + "' expects " +
                 std::to_string(d->params.size()) + " argument(s), got " +
                 std::to_string(args.size()), loc);
-
         auto callEnv = std::make_shared<Environment>(fn->closure ? fn->closure : globals_);
         for (size_t i = 0; i < args.size(); ++i)
             callEnv->define(d->params[i].name, args[i]);
-
-        if (fn->definingClass)
-            callEnv->define("__class__", Value(fn->definingClass));
-
+        if (fn->definingClass) callEnv->define("__class__", Value(fn->definingClass));
         EnvGuard guard(env_, callEnv);
         try { execBlock(d->body); }
         catch (ReturnSignal& r) { return r.value; }
@@ -1189,7 +1212,7 @@ namespace nova {
     }
 
     // ===========================================================================
-    // Builtins + math module
+    // Builtins
     // ===========================================================================
 
     namespace {
@@ -1206,9 +1229,9 @@ namespace nova {
         Value bi_int(const std::vector<Value>& a) {
             if (a.empty()) return Value(0LL);
             const Value& v = a[0];
-            if (v.isInt())    return v;
-            if (v.isFloat())  return Value((long long)v.asFloat());
-            if (v.isBool())   return Value((long long)(v.asBool() ? 1 : 0));
+            if (v.isInt()) return v;
+            if (v.isFloat()) return Value((long long)v.asFloat());
+            if (v.isBool()) return Value((long long)(v.asBool() ? 1 : 0));
             if (v.isString()) { try { return Value((long long)std::stoll(v.asString())); } catch (...) {} }
             throw std::runtime_error("int(): cannot convert " + v.typeName());
         }
@@ -1216,8 +1239,8 @@ namespace nova {
             if (a.empty()) return Value(0.0);
             const Value& v = a[0];
             if (v.isFloat()) return v;
-            if (v.isInt())   return Value((double)v.asInt());
-            if (v.isBool())  return Value(v.asBool() ? 1.0 : 0.0);
+            if (v.isInt()) return Value((double)v.asInt());
+            if (v.isBool()) return Value(v.asBool() ? 1.0 : 0.0);
             if (v.isString()) { try { return Value(std::stod(v.asString())); } catch (...) {} }
             throw std::runtime_error("float(): cannot convert " + v.typeName());
         }
@@ -1264,13 +1287,11 @@ namespace nova {
                 stop = a[0].asInt();
             }
             else if (a.size() == 2) {
-                if (!a[0].isInt() || !a[1].isInt())
-                    throw std::runtime_error("range() requires int arguments");
+                if (!a[0].isInt() || !a[1].isInt()) throw std::runtime_error("range() requires int arguments");
                 start = a[0].asInt(); stop = a[1].asInt();
             }
             else {
-                if (!a[0].isInt() || !a[1].isInt() || !a[2].isInt())
-                    throw std::runtime_error("range() requires int arguments");
+                if (!a[0].isInt() || !a[1].isInt() || !a[2].isInt()) throw std::runtime_error("range() requires int arguments");
                 start = a[0].asInt(); stop = a[1].asInt(); step = a[2].asInt();
                 if (step == 0) throw std::runtime_error("range() step cannot be 0");
             }
@@ -1285,11 +1306,9 @@ namespace nova {
             return Value((long long)(unsigned char)a[0].asString()[0]);
         }
         Value bi_chr(const std::vector<Value>& a) {
-            if (a.size() != 1 || !a[0].isInt())
-                throw std::runtime_error("chr() takes one int argument");
+            if (a.size() != 1 || !a[0].isInt()) throw std::runtime_error("chr() takes one int argument");
             long long code = a[0].asInt();
-            if (code < 0 || code > 255)
-                throw std::runtime_error("chr() argument out of range (0-255)");
+            if (code < 0 || code > 255) throw std::runtime_error("chr() argument out of range (0-255)");
             return Value(std::string(1, (char)code));
         }
         Value bi_list(const std::vector<Value>& a) {
@@ -1302,6 +1321,92 @@ namespace nova {
                 return Value(lst);
             }
             throw std::runtime_error("list(): cannot convert " + v.typeName());
+        }
+
+        // ---- higher-order ----
+        Value bi_map(const std::vector<Value>& args) {
+            if (args.size() != 2) throw std::runtime_error("map() takes exactly 2 arguments");
+            if (!args[0].isCallable()) throw std::runtime_error("map() first argument must be callable");
+            if (!args[1].isList())     throw std::runtime_error("map() second argument must be a list");
+            auto out = std::make_shared<ListValue>();
+            out->items.reserve(args[1].asList()->items.size());
+            for (auto& v : args[1].asList()->items)
+                out->items.push_back(Interpreter::current_->callValue(args[0], { v }, SourceLocation{}));
+            return Value(out);
+        }
+        Value bi_filter(const std::vector<Value>& args) {
+            if (args.size() != 2) throw std::runtime_error("filter() takes exactly 2 arguments");
+            if (!args[0].isCallable()) throw std::runtime_error("filter() first argument must be callable");
+            if (!args[1].isList())     throw std::runtime_error("filter() second argument must be a list");
+            auto out = std::make_shared<ListValue>();
+            for (auto& v : args[1].asList()->items) {
+                Value keep = Interpreter::current_->callValue(args[0], { v }, SourceLocation{});
+                if (keep.truthy()) out->items.push_back(v);
+            }
+            return Value(out);
+        }
+        Value bi_sorted(const std::vector<Value>& args) {
+            if (args.empty() || args.size() > 2)
+                throw std::runtime_error("sorted() takes 1 or 2 arguments");
+            if (!args[0].isList())
+                throw std::runtime_error("sorted() first argument must be a list");
+            auto out = std::make_shared<ListValue>();
+            out->items = args[0].asList()->items;
+            std::function<Value(const Value&)> keyFn;
+            if (args.size() == 2) {
+                if (!args[1].isCallable())
+                    throw std::runtime_error("sorted() second argument must be callable");
+                Value f = args[1];
+                keyFn = [f](const Value& v) {
+                    return Interpreter::current_->callValue(f, { v }, SourceLocation{});
+                    };
+            }
+            auto cmp = [&](const Value& a, const Value& b) -> bool {
+                Value ka = keyFn ? keyFn(a) : a;
+                Value kb = keyFn ? keyFn(b) : b;
+                if (ka.isNumber() && kb.isNumber()) return ka.asDouble() < kb.asDouble();
+                if (ka.isString() && kb.isString()) return ka.asString() < kb.asString();
+                throw std::runtime_error("sorted(): elements are not comparable");
+                };
+            std::stable_sort(out->items.begin(), out->items.end(), cmp);
+            return Value(out);
+        }
+        Value bi_reduce(const std::vector<Value>& args) {
+            if (args.size() != 2) throw std::runtime_error("reduce() takes exactly 2 arguments");
+            if (!args[0].isCallable()) throw std::runtime_error("reduce() first argument must be callable");
+            if (!args[1].isList())     throw std::runtime_error("reduce() second argument must be a list");
+            const auto& items = args[1].asList()->items;
+            if (items.empty()) throw std::runtime_error("reduce() of empty list");
+            Value acc = items[0];
+            for (size_t i = 1; i < items.size(); ++i)
+                acc = Interpreter::current_->callValue(args[0], { acc, items[i] }, SourceLocation{});
+            return acc;
+        }
+        Value bi_any(const std::vector<Value>& a) {
+            if (a.size() != 1 || !a[0].isList())
+                throw std::runtime_error("any() takes one list argument");
+            for (auto& v : a[0].asList()->items) if (v.truthy()) return Value(true);
+            return Value(false);
+        }
+        Value bi_all(const std::vector<Value>& a) {
+            if (a.size() != 1 || !a[0].isList())
+                throw std::runtime_error("all() takes one list argument");
+            for (auto& v : a[0].asList()->items) if (!v.truthy()) return Value(false);
+            return Value(true);
+        }
+        Value bi_sum(const std::vector<Value>& a) {
+            if (a.size() != 1 || !a[0].isList())
+                throw std::runtime_error("sum() takes one list argument");
+            long long iAcc = 0;
+            double    dAcc = 0.0;
+            bool      anyFloat = false;
+            for (auto& v : a[0].asList()->items) {
+                if (!v.isNumber()) throw std::runtime_error("sum(): list contains non-number");
+                if (v.isFloat()) { anyFloat = true; dAcc += v.asFloat(); }
+                else iAcc += v.asInt();
+            }
+            if (anyFloat) return Value(dAcc + (double)iAcc);
+            return Value(iAcc);
         }
 
         // ---- math ----
@@ -1369,6 +1474,13 @@ namespace nova {
         add("ord", bi_ord);
         add("chr", bi_chr);
         add("list", bi_list);
+        add("map", bi_map);
+        add("filter", bi_filter);
+        add("sorted", bi_sorted);
+        add("reduce", bi_reduce);
+        add("any", bi_any);
+        add("all", bi_all);
+        add("sum", bi_sum);
     }
 
     void Interpreter::installMathModule() {
@@ -1383,7 +1495,6 @@ namespace nova {
         addFn("tan", m_tan);    addFn("log", m_log);   addFn("log2", m_log2);
         addFn("log10", m_log10);  addFn("exp", m_exp);   addFn("floor", m_floor);
         addFn("ceil", m_ceil);   addFn("pow", m_pow);
-
         mod->members["pi"] = Value(3.14159265358979323846);
         mod->members["e"] = Value(2.71828182845904523536);
         globals_->define("math", Value(mod));
