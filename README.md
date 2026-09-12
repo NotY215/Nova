@@ -1,6 +1,8 @@
 <div align="center">
 
-<a href="https://vayu.gt.tc"><img src="assets/logo.svg" alt="Vayu Logo" width="180"></a>
+<a href="https://vayu.gt.tc">
+  <img src="assets/logo.svg" alt="Vayu Logo" width="150">
+</a>
 
 # Vayu
 
@@ -8,7 +10,30 @@
 
 **A modern general-purpose programming language designed to combine simplicity, performance, portability, and powerful application development.**
 
-[Website](https://vayu.gt.tc) • [Syntax](docs/syntax.md) • [AI & ML](docs/ai.md) • [Package Manager](docs/package.md) • [Vision](docs/vision.md) • [Benchmarks](https://vayu.gt.tc)
+<p>
+  <a href="https://vayu.gt.tc"><img src="https://img.shields.io/badge/Website-vayu.gt.tc-111827?style=for-the-badge" alt="Vayu Website"></a>
+  <a href="docs/syntax.md"><img src="https://img.shields.io/badge/Syntax-.vyu-111827?style=for-the-badge" alt="Vayu Syntax"></a>
+  <a href="https://vayu.gt.tc"><img src="https://img.shields.io/badge/Benchmarks-View-111827?style=for-the-badge" alt="Vayu Benchmarks"></a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/Language-Vayu-111827?style=flat-square" alt="Vayu">
+  <img src="https://img.shields.io/badge/Status-Early%20Stage-111827?style=flat-square" alt="Early Stage">
+  <img src="https://img.shields.io/badge/Source%20Extension-.vyu-111827?style=flat-square" alt=".vyu">
+  <img src="https://img.shields.io/badge/License-See%20LICENSE-111827?style=flat-square" alt="License">
+</p>
+
+</div>
+
+---
+
+<div align="center">
+
+## ⚡ Write Simple. Run Native. Control Everything.
+
+**Vayu** brings together Python-inspired readability, native-performance goals, low-level control, modern typing, AI/ML ambitions, and application-development capabilities in one language.
+
+**[🌐 Official Website](https://vayu.gt.tc) · [📖 Syntax](docs/syntax.md) · [🤖 AI & ML](docs/ai.md) · [📦 Packages](docs/package.md) · [🧭 Roadmap](docs/vision.md) · [📊 Benchmarks](https://vayu.gt.tc)**
 
 </div>
 
@@ -18,7 +43,7 @@
 
 **[Visit the official Vayu website →](https://vayu.gt.tc)**
 
-The website is the primary place for the latest Vayu information, roadmap, syntax references, benchmark information, and project updates. The Vayu logo at the top of this README is also clickable and links directly to the website.
+The website is the primary place for the latest Vayu information, roadmap, syntax references, benchmark information, and project updates. The Vayu logo and the banner links at the top of this README are clickable and lead directly to the website.
 
 ---
 
@@ -26,7 +51,7 @@ The website is the primary place for the latest Vayu information, roadmap, synta
 
 Vayu includes benchmarking as part of its development and performance evaluation process. Benchmarks are used to track compiler/runtime progress and compare representative workloads as the implementation evolves.
 
-**[→ View the Vayu website and benchmark information](https://vayu.gt.tc)**
+**[→ View the Vayu website and current benchmark information](https://vayu.gt.tc)**
 
 > Benchmark numbers are implementation- and environment-dependent. The website should be treated as the current source for published benchmark results rather than treating README numbers as permanent guarantees.
 
@@ -318,6 +343,7 @@ The official language name is **Vayu** and the official source extension is **`.
 | [`docs/package.md`](docs/package.md) | Package manager and ecosystem |
 | [`docs/ai.md`](docs/ai.md) | AI/ML direction and ecosystem |
 | [`docs/vision.md`](docs/vision.md) | Long-term vision and future roadmap |
+| [`CODE OF CONDUCT.md`](CODE%20OF%20CONDUCT.md) | Community standards and contributor conduct |
 
 ---
 
@@ -363,6 +389,14 @@ There is:
 Vayu is being developed as an independent project driven by experimentation, learning, engineering, and the goal of creating a language that combines ideas from several ecosystems.
 
 > **Small team. Big vision.**
+
+---
+
+# 🤝 Contributing
+
+Contributions, ideas, bug reports, documentation improvements, and language-design discussions are welcome.
+
+Before contributing, please read **[CODE OF CONDUCT.md](CODE%20OF%20CONDUCT.md)** and follow the project's community standards.
 
 ---
 
@@ -582,5 +616,7 @@ But the goal is simple:
 **Write simple. Run native. Control everything.**
 
 Made independently with ❤️, code, experimentation, and a lot of debugging.
+
+**[🌐 vayu.gt.tc](https://vayu.gt.tc)**
 
 </div>
