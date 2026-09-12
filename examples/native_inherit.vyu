@@ -1,0 +1,44 @@
+class Animal:
+    name: str
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def speak(self) -> str:
+        return self.name + " makes a sound"
+
+    def breathe(self) -> str:
+        return self.name + " breathes"
+
+class Dog(Animal):
+    def speak(self) -> str:
+        return self.name + " says woof"
+
+    def fetch(self) -> str:
+        return self.name + " fetches"
+
+class Puppy(Dog):
+    def speak(self) -> str:
+        return super().speak() + " (puppy)"
+
+# ---- inherited __init__ and field ----
+d = Dog("Rex")
+print(d.name)          # Rex
+print(d.speak())       # Rex says woof
+print(d.breathe())     # Rex breathes (inherited)
+print(d.fetch())       # Rex fetches
+
+# ---- multi-level ----
+p = Puppy("Bud")
+print(p.name)          # Bud
+print(p.speak())       # Bud says woof (puppy)
+print(p.fetch())       # Bud fetches
+
+# ---- explicit super().__init__ ----
+class Cat(Animal):
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+
+c = Cat("Whiskers")
+print(c.name)          # Whiskers
+print(c.speak())       # Whiskers makes a sound

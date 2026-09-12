@@ -23,10 +23,6 @@
 
 namespace vayu {
 
-    // ===========================================================================
-    // Constructor
-    // ===========================================================================
-
     NativeCompiler::NativeCompiler() {
 #ifdef _WIN32
         qbePath_ = "tools\\qbe.exe";
@@ -42,10 +38,6 @@ namespace vayu {
         if (const char* p = std::getenv("VAYU_QBE_TARGET")) qbeTarget_ = p;
     }
 
-    // ===========================================================================
-    // Emitter
-    // ===========================================================================
-
     namespace {
 
         enum class VType { Int, Bool, Str, List, Map, Obj, Exc, Void, Unknown };
@@ -60,14 +52,15 @@ namespace vayu {
         struct ClassInfo {
             std::string                                       name;
             std::string                                       parentName;
-            std::vector<std::string>                          fields;
+            std::vector<std::string>                          fields;      // own + inherited
             std::unordered_map<std::string, int>              fieldOffsets;
             int                                               totalSize = 0;
             const ClassStmt* decl = nullptr;
-            std::unordered_map<std::string, const DefStmt*>   methods;
+            std::unordered_map<std::string, const DefStmt*>   methods;     // own methods only
             const ClassInfo* parent = nullptr;
             bool                                              hasInit = false;
             const DefStmt* initDecl = nullptr;
+            const ClassInfo* initOwner = nullptr;
         };
 
         static bool isExceptionName(const std::string& n) {
@@ -81,39 +74,22 @@ namespace vayu {
         public:
             std::string emit(const Block& program, const std::string& sourceDir) {
                 sourceDir_ = sourceDir;
-
-                // Pre-load imported modules.
                 loadImports(program);
 
-                // Combine into a single program: modules first, then main.
-                // Modules' top-level defs and vars are prefixed "mod_".
-                for (auto& [modName, modBlock] : modules_) {
-                    emitModuleUnit(modName, modBlock);
-                }
-
                 collectClasses(program);
-
-                // Also collect classes from modules so cross-module classes work.
-                for (auto& [modName, modBlock] : modules_) {
-                    collectClasses(modBlock);
-                }
+                for (auto& kv : modules_) collectClasses(kv.second);
 
                 collectStringLiterals(program);
-                for (auto& [_, modBlock] : modules_) collectStringLiterals(modBlock);
+                for (auto& kv : modules_) collectStringLiterals(kv.second);
                 collectExceptionLiterals();
 
-                // ---------- data section ----------
-                if (!strLitData_.empty()) {
-                    raw(strLitData_);
-                    raw("");
-                }
+                if (!strLitData_.empty()) { raw(strLitData_); raw(""); }
 
                 // ---------- $vayu_main ----------
                 resetFunctionState();
                 raw("export function $vayu_main() {");
                 raw("@start");
 
-                // Allocate top-level module variables + main vars.
                 std::unordered_set<std::string> topVars;
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Def) continue;
@@ -126,13 +102,9 @@ namespace vayu {
                     line("storel 0, " + slot);
                 }
 
-                // Emit module top-level code first (their vars/procs must run before
-                // main uses them).
-                for (auto& [modName, modBlock] : modules_) {
-                    emitModuleTopLevel(modName, modBlock);
-                }
+                for (auto& kv : modules_)
+                    emitModuleTopLevel(kv.first, kv.second);
 
-                // Emit main.
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Def) continue;
                     if (s->kind == StmtKind::Struct || s->kind == StmtKind::Class) continue;
@@ -144,15 +116,15 @@ namespace vayu {
                 raw("}");
                 raw("");
 
-                // ---------- user functions (main + modules) ----------
+                // ---------- user functions ----------
                 for (auto& s : program.stmts) {
                     if (s->kind != StmtKind::Def) continue;
                     emitFunction(static_cast<const DefStmt*>(s.get()), nullptr, "");
                     raw("");
                 }
-                for (auto& [modName, modBlock] : modules_) {
-                    std::string prefix = mangle(modName) + "_";
-                    for (auto& s : modBlock.stmts) {
+                for (auto& kv : modules_) {
+                    std::string prefix = mangle(kv.first) + "_";
+                    for (auto& s : kv.second.stmts) {
                         if (s->kind != StmtKind::Def) continue;
                         emitFunction(static_cast<const DefStmt*>(s.get()), nullptr, prefix);
                         raw("");
@@ -160,7 +132,8 @@ namespace vayu {
                 }
 
                 // ---------- methods ----------
-                for (auto& [cname, ci] : classes_) {
+                for (auto& kv : classes_) {
+                    const ClassInfo& ci = kv.second;
                     for (auto& m : ci.decl->methods) {
                         emitFunction(m.get(), &ci, "");
                         raw("");
@@ -173,19 +146,16 @@ namespace vayu {
             }
 
         private:
-            // ---------- output ----------
             std::string out_;
-            int nextTemp_ = 0;
-            int nextLabel_ = 0;
+            int  nextTemp_ = 0;
+            int  nextLabel_ = 0;
             bool terminated_ = false;
 
-            // ---------- per-function state ----------
-            std::unordered_map<std::string, std::string> slots_;
-            std::unordered_map<std::string, VarInfo>     varInfo_;
-            std::string                                  currentClass_;
+            std::unordered_map<std::string, std::string>    slots_;
+            std::unordered_map<std::string, VarInfo>        varInfo_;
+            std::string                                     currentClass_;
             std::vector<std::pair<std::string, std::string>> loopStack_;
 
-            // ---------- global ----------
             std::unordered_map<std::string, ClassInfo> classes_;
             std::unordered_map<std::string, int>       fieldGlobals_;
             int                                        nextFieldOffset_ = 0;
@@ -194,10 +164,10 @@ namespace vayu {
             std::unordered_map<std::string, std::string> strLitLabels_;
             int                                          nextStrLitId_ = 0;
 
-            // ---------- modules ----------
             std::string                                       sourceDir_;
             std::unordered_map<std::string, Block>            modules_;
-            std::unordered_map<std::string, std::string>      fromImports_;   // local → module
+            std::unordered_map<std::string, std::string>      fromImports_;
+            std::string                                       currentModulePrefix_;
 
             void resetFunctionState() {
                 nextTemp_ = 0;
@@ -249,7 +219,7 @@ namespace vayu {
             }
 
             // =========================================================================
-            // Modules
+            // Module loading
             // =========================================================================
 
             bool findModuleFile(const std::string& name, std::string& pathOut) const {
@@ -286,6 +256,7 @@ namespace vayu {
             }
 
             void loadModule(const std::string& name, SourceLocation loc) {
+                (void)loc;
                 std::string path;
                 if (!findModuleFile(name, path))
                     throw std::runtime_error("native: cannot find module '" +
@@ -307,18 +278,12 @@ namespace vayu {
                         ": " + e.what());
                 }
                 modules_[name] = std::move(mod);
-                // Recurse — modules may import other modules.
                 loadImports(modules_[name]);
             }
-
-            // Emit the module's function symbols (they go at the top level).
-            // (No-op; individual functions are emitted in emit()).
-            void emitModuleUnit(const std::string&, const Block&) {}
 
             void emitModuleTopLevel(const std::string& modName, const Block& modBlock) {
                 std::string prefix = mangle(modName) + "_";
 
-                // Allocate slots for the module's top-level variables.
                 std::unordered_set<std::string> modVars;
                 for (auto& s : modBlock.stmts) {
                     if (s->kind == StmtKind::Def) continue;
@@ -332,21 +297,18 @@ namespace vayu {
                     line("storel 0, " + slot);
                 }
 
-                // Emit the module's top-level statements.  Any NameRef inside is
-                // resolved against `slots_`, which we've seeded with prefixed names.
                 currentModulePrefix_ = prefix;
                 for (auto& s : modBlock.stmts) {
                     if (s->kind == StmtKind::Def) continue;
                     if (s->kind == StmtKind::Struct || s->kind == StmtKind::Class) continue;
+                    if (s->kind == StmtKind::Import || s->kind == StmtKind::FromImport) continue;
                     emitStmt(s.get());
                 }
                 currentModulePrefix_.clear();
             }
 
-            std::string currentModulePrefix_;
-
             // =========================================================================
-            // String literal interning
+            // String literals
             // =========================================================================
 
             std::string internString(const std::string& s) {
@@ -504,7 +466,6 @@ namespace vayu {
                 }
             }
 
-            // Add the type-name literals used by exceptions.
             void collectExceptionLiterals() {
                 internString("Exception");
                 internString("ValueError");
@@ -518,15 +479,15 @@ namespace vayu {
             }
 
             // =========================================================================
-            // Class collection
+            // Classes — collect, link parents, propagate fields + __init__
             // =========================================================================
 
             void collectClasses(const Block& program) {
+                // ---- Pass 1: assign global field offsets ----
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Class) {
                         auto* n = static_cast<const ClassStmt*>(s.get());
                         for (auto& f : n->fields) allocFieldOffset(f.name);
-                        // Exception fields.
                         allocFieldOffset("typeName");
                         allocFieldOffset("message");
                     }
@@ -535,36 +496,97 @@ namespace vayu {
                         for (auto& f : n->fields) allocFieldOffset(f.name);
                     }
                 }
-                for (auto& s : program.stmts) {
-                    if (s->kind != StmtKind::Class) continue;
-                    auto* n = static_cast<const ClassStmt*>(s.get());
+
+                // ---- Pass 2: build ClassInfo; ci.fields = OWN fields ----
+                for (auto& stmt : program.stmts) {
+                    if (stmt->kind != StmtKind::Class) continue;
+                    auto* n = static_cast<const ClassStmt*>(stmt.get());
                     ClassInfo ci;
                     ci.name = n->name;
                     ci.parentName = n->parentName;
                     ci.decl = n;
+                    for (auto& f : n->fields) ci.fields.push_back(f.name);
                     for (auto& m : n->methods) {
-                        if (m->name == "__init__") { ci.hasInit = true; ci.initDecl = m.get(); continue; }
+                        if (m->name == "__init__") {
+                            ci.hasInit = true;
+                            ci.initDecl = m.get();
+                            continue;
+                        }
                         ci.methods[m->name] = m.get();
                     }
                     classes_[n->name] = std::move(ci);
                 }
-                for (auto& [name, ci] : classes_) {
-                    if (!ci.parentName.empty()) {
-                        auto it = classes_.find(ci.parentName);
-                        if (it != classes_.end()) {
-                            ci.parent = &it->second;
-                            for (auto& f : it->second.fields) ci.fields.push_back(f);
-                            if (!ci.hasInit && it->second.hasInit) {
-                                ci.hasInit = true;
-                                ci.initDecl = it->second.initDecl;
-                            }
+
+                // ---- Pass 3: link parent pointers ----
+                for (auto it = classes_.begin(); it != classes_.end(); ++it) {
+                    ClassInfo& ci = it->second;
+                    if (ci.parentName.empty()) continue;
+                    auto pit = classes_.find(ci.parentName);
+                    if (pit != classes_.end()) ci.parent = &pit->second;
+                }
+
+                // ---- Pass 4: propagate inherited fields (fixed point) ----
+                std::unordered_map<std::string, std::vector<std::string>> ownFields;
+                for (auto it = classes_.begin(); it != classes_.end(); ++it)
+                    ownFields[it->first] = it->second.fields;
+
+                for (int pass = 0; pass < 8; ++pass) {
+                    bool changed = false;
+                    for (auto it = classes_.begin(); it != classes_.end(); ++it) {
+                        ClassInfo& ci = it->second;
+                        std::vector<std::string> rebuilt;
+                        if (ci.parent) {
+                            for (auto& f : ci.parent->fields) rebuilt.push_back(f);
+                        }
+                        for (auto& f : ownFields[ci.name]) {
+                            bool dup = false;
+                            for (auto& r : rebuilt) if (r == f) { dup = true; break; }
+                            if (!dup) rebuilt.push_back(f);
+                        }
+                        if (rebuilt != ci.fields) {
+                            ci.fields = std::move(rebuilt);
+                            changed = true;
                         }
                     }
-                    for (auto& f : ci.decl->fields) ci.fields.push_back(f.name);
+                    if (!changed) break;
+                }
+
+                // ---- Pass 5a: mark the actual __init__ definer ----
+// Must run BEFORE inheritance propagation, otherwise a subclass that
+// has inherited `hasInit` but no own __init__ would claim to define it.
+                for (auto it = classes_.begin(); it != classes_.end(); ++it) {
+                    ClassInfo& ci = it->second;
+                    if (ci.hasInit && !ci.initOwner) ci.initOwner = &ci;
+                }
+
+                // ---- Pass 5b: propagate __init__ signature down the chain ----
+                for (int pass = 0; pass < 8; ++pass) {
+                    bool changed = false;
+                    for (auto it = classes_.begin(); it != classes_.end(); ++it) {
+                        ClassInfo& ci = it->second;
+                        if (ci.hasInit || !ci.parent || !ci.parent->hasInit) continue;
+                        ci.hasInit = true;
+                        ci.initDecl = ci.parent->initDecl;
+                        ci.initOwner = ci.parent->initOwner;   // now non-null
+                        changed = true;
+                    }
+                    if (!changed) break;
+                }
+                // Mark the actual definer.
+                for (auto it = classes_.begin(); it != classes_.end(); ++it) {
+                    ClassInfo& ci = it->second;
+                    if (ci.hasInit && !ci.initOwner) ci.initOwner = &ci;
+                }
+
+                // ---- Pass 6: fill fieldOffsets + totalSize ----
+                for (auto it = classes_.begin(); it != classes_.end(); ++it) {
+                    ClassInfo& ci = it->second;
                     for (auto& f : ci.fields)
                         ci.fieldOffsets[f] = fieldGlobals_.at(f);
+
                     int maxOff = -8;
-                    for (auto& [_, off] : ci.fieldOffsets) if (off > maxOff) maxOff = off;
+                    for (auto& kv : ci.fieldOffsets)
+                        if (kv.second > maxOff) maxOff = kv.second;
                     ci.totalSize = maxOff + 8;
                 }
             }
@@ -583,15 +605,25 @@ namespace vayu {
                 return it == classes_.end() ? nullptr : &it->second;
             }
 
-            // =========================================================================
-            // Var collection
-            // =========================================================================
+            /// Walk up the hierarchy to find the class that declares the method.
+            const ClassInfo* findClassDefiningMethod(const ClassInfo* ci,
+                const std::string& name) const {
+                for (auto c = ci; c; c = c->parent) {
+                    if (name == "__init__") {
+                        if (c->hasInit && c->initOwner == c) return c;
+                    }
+                    else {
+                        if (c->methods.count(name)) return c;
+                    }
+                }
+                return nullptr;
+            }
 
             static void collectVarsStmt(const Stmt* s, std::unordered_set<std::string>& out);
             static void collectVarsBlock(const Block& b, std::unordered_set<std::string>& out);
 
             // =========================================================================
-            // Expression codegen
+            // Expressions
             // =========================================================================
 
             struct Val {
@@ -642,8 +674,6 @@ namespace vayu {
                     auto* n = static_cast<const NameRefExpr*>(e);
                     const std::string& name = n->name;
 
-                    // If `name` is a from-imported symbol, use the module's
-                    // prefixed version.  Applies to both variables and functions.
                     std::string lookup = name;
                     auto fi = fromImports_.find(name);
                     if (fi != fromImports_.end()) {
@@ -654,8 +684,7 @@ namespace vayu {
                     }
 
                     auto sit = slots_.find(lookup);
-                    if (sit == slots_.end() && lookup != name)
-                        sit = slots_.find(name);   // fallback
+                    if (sit == slots_.end() && lookup != name) sit = slots_.find(name);
                     if (sit == slots_.end())
                         throw std::runtime_error(
                             "native: variable '" + name + "' not declared");
@@ -716,9 +745,6 @@ namespace vayu {
                     Val a = emitExpr(n->lhs.get());
                     Val b = emitExpr(n->rhs.get());
 
-                    // String operations: either side must be Str.
-                    // Unknown is accepted as "maybe string" and we dispatch at
-                    // runtime — for now, if one side is Str, we assume both are.
                     bool strAdd = (n->op == BinOp::Add) &&
                         (a.type == VType::Str || b.type == VType::Str);
                     if (strAdd) {
@@ -792,7 +818,19 @@ namespace vayu {
                                 ", l " + a.ssa + ")");
                             r.ssa = t; r.type = VType::Bool; return r;
                         }
-                        throw std::runtime_error("native: 'in' requires a list");
+                        if (b.type == VType::Map) {
+                            std::string t = newTemp();
+                            line(t + " =l call $vayu_map_has(l " + b.ssa +
+                                ", l " + a.ssa + ")");
+                            r.ssa = t; r.type = VType::Bool; return r;
+                        }
+                        if (b.type == VType::Str && a.type == VType::Str) {
+                            std::string t = newTemp();
+                            line(t + " =l call $vayu_str_contains(l " + b.ssa +
+                                ", l " + a.ssa + ")");
+                            r.ssa = t; r.type = VType::Bool; return r;
+                        }
+                        throw std::runtime_error("native: 'in' unsupported on these types");
                     }
                     case BinOp::Is:
                         throw std::runtime_error("native: 'is' not supported");
@@ -830,7 +868,6 @@ namespace vayu {
                 case ExprKind::Attr: {
                     auto* n = static_cast<const AttrExpr*>(e);
 
-                    // Module member: `math.pi` → prefixed variable
                     if (n->target->kind == ExprKind::NameRef) {
                         const auto* tn = static_cast<const NameRefExpr*>(n->target.get());
                         if (modules_.count(tn->name)) {
@@ -842,8 +879,7 @@ namespace vayu {
                                 r.ssa = t;
                                 return r;
                             }
-                            // Not a variable — must be a function; caller handles it.
-                            r.ssa = prefixed;   // sentinel: symbol name
+                            r.ssa = prefixed;
                             r.cls = "__fn__";
                             return r;
                         }
@@ -851,26 +887,31 @@ namespace vayu {
 
                     Val base = emitExpr(n->target.get());
                     if (base.type == VType::Exc) {
-                        // Exception field access: .message → offset 8, .typeName → offset 0
                         int off = (n->name == "message") ? 8 : 0;
+                        std::string addr = newTemp();
+                        line(addr + " =l add " + base.ssa + ", " + std::to_string(off));
                         std::string t = newTemp();
-                        line(t + " =l loadl " + base.ssa + " + " + std::to_string(off));
+                        line(t + " =l loadl " + addr);
                         r.ssa = t;
                         r.type = VType::Str;
                         return r;
                     }
                     if (base.type != VType::Obj)
                         throw std::runtime_error(
-                            "native: attribute access on non-object");
+                            "native: attribute access on non-object (type " +
+                            std::to_string((int)base.type) + ")");
                     auto ci = findClass(base.cls);
-                    if (!ci) throw std::runtime_error("native: unknown class");
+                    if (!ci) throw std::runtime_error("native: unknown class '" +
+                        base.cls + "'");
                     auto fit = ci->fieldOffsets.find(n->name);
                     if (fit == ci->fieldOffsets.end())
                         throw std::runtime_error(
                             "native: '" + n->name + "' is not a field of class '" +
                             base.cls + "'");
+                    std::string addr = newTemp();
+                    line(addr + " =l add " + base.ssa + ", " + std::to_string(fit->second));
                     std::string t = newTemp();
-                    line(t + " =l loadl " + base.ssa + " + " + std::to_string(fit->second));
+                    line(t + " =l loadl " + addr);
                     r.ssa = t;
                     for (auto& f : ci->decl->fields) {
                         if (f.name == n->name) { r.type = typeOfAnnotation(f.type.get()); break; }
@@ -930,6 +971,7 @@ namespace vayu {
                     if (s == "int")   return VType::Int;
                     if (s == "bool")  return VType::Bool;
                     if (s == "str")   return VType::Str;
+                    if (s == "float") return VType::Int;
                     if (classes_.count(s)) return VType::Obj;
                 }
                 if (e->kind == ExprKind::GenericType) {
@@ -948,12 +990,6 @@ namespace vayu {
                 return {};
             }
 
-            // =========================================================================
-            // Calls
-            // =========================================================================
-
-            // Handles obj.method(...) where obj is list/map/str.
-            // Returns true if the method was a builtin and r was filled.
             bool tryBuiltinMethod(const std::string& recvName, const Val& recv,
                 const CallExpr* call, Val& r) {
                 auto argV = [&](size_t i) { return emitExpr(call->args[i].value.get()); };
@@ -979,6 +1015,17 @@ namespace vayu {
                         line(t + " =l call $vayu_list_contains(l " + recv.ssa +
                             ", l " + v.ssa + ")");
                         r.ssa = t; r.type = VType::Bool; return true;
+                    }
+                    if (recvName == "insert") {
+                        Val i = argV(0), v = argV(1);
+                        line("call $vayu_list_insert(l " + recv.ssa + ", l " +
+                            i.ssa + ", l " + v.ssa + ")");
+                        r.ssa = "0"; r.type = VType::Void; return true;
+                    }
+                    if (recvName == "remove") {
+                        Val v = argV(0);
+                        line("call $vayu_list_remove(l " + recv.ssa + ", l " + v.ssa + ")");
+                        r.ssa = "0"; r.type = VType::Void; return true;
                     }
                 }
                 if (recv.type == VType::Map) {
@@ -1009,6 +1056,11 @@ namespace vayu {
                         line("call $vayu_map_clear(l " + recv.ssa + ")");
                         r.ssa = "0"; r.type = VType::Void; return true;
                     }
+                    if (recvName == "keys") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_map_keys(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::List; r.elemType = VType::Str; return true;
+                    }
                 }
                 if (recv.type == VType::Str) {
                     if (recvName == "upper" || recvName == "lower") {
@@ -1031,6 +1083,14 @@ namespace vayu {
                             ", l " + sub.ssa + ")");
                         r.ssa = t; r.type = VType::Int; return true;
                     }
+                    if (recvName == "starts_with" || recvName == "ends_with") {
+                        Val sub = argV(0);
+                        const char* fn = (recvName == "starts_with")
+                            ? "$vayu_str_starts_with" : "$vayu_str_ends_with";
+                        std::string t = newTemp();
+                        line(t + " =l call " + fn + "(l " + recv.ssa + ", l " + sub.ssa + ")");
+                        r.ssa = t; r.type = VType::Bool; return true;
+                    }
                 }
                 return false;
             }
@@ -1038,25 +1098,102 @@ namespace vayu {
             Val emitCall(const CallExpr* n) {
                 Val r;
 
-                // ---------- method call ----------
                 if (n->callee->kind == ExprKind::Attr) {
                     auto* attr = static_cast<const AttrExpr*>(n->callee.get());
 
-                    // First, try to evaluate the receiver.
+                    // ---- super().method(args) ----
+                    if (attr->target->kind == ExprKind::Call) {
+                        auto* inner = static_cast<const CallExpr*>(attr->target.get());
+                        if (inner->callee->kind == ExprKind::NameRef &&
+                            inner->args.empty()) {
+                            const auto* inm = static_cast<const NameRefExpr*>(
+                                inner->callee.get());
+                            if (inm->name == "super") {
+                                if (currentClass_.empty())
+                                    throw std::runtime_error(
+                                        "native: super() outside method");
+                                const ClassInfo* current = findClass(currentClass_);
+                                if (!current)
+                                    throw std::runtime_error(
+                                        "native: unknown current class '" +
+                                        currentClass_ + "'");
+                                if (!current->parent)
+                                    throw std::runtime_error(
+                                        "native: super() called in class '" +
+                                        currentClass_ + "' which has no parent");
+
+                                const ClassInfo* defining =
+                                    findClassDefiningMethod(current->parent, attr->name);
+                                if (!defining)
+                                    throw std::runtime_error(
+                                        "native: parent class '" +
+                                        current->parent->name + "' has no method '" +
+                                        attr->name + "'");
+
+                                auto selfIt = slots_.find("self");
+                                if (selfIt == slots_.end())
+                                    throw std::runtime_error(
+                                        "native: super() requires 'self' in scope");
+
+                                std::string selfVal = newTemp();
+                                line(selfVal + " =l loadl " + selfIt->second);
+
+                                std::vector<std::string> args;
+                                args.push_back(selfVal);
+                                for (auto& a : n->args) {
+                                    if (!a.name.empty())
+                                        throw std::runtime_error(
+                                            "native: kwargs not supported");
+                                    args.push_back(emitExpr(a.value.get()).ssa);
+                                }
+                                std::string argsStr;
+                                for (size_t i = 0; i < args.size(); ++i) {
+                                    if (i) argsStr += ", ";
+                                    argsStr += "l " + args[i];
+                                }
+                                std::string sym = "$vayu_mth_" + mangle(defining->name) +
+                                    "_" + mangle(attr->name);
+                                std::string t = newTemp();
+                                line(t + " =l call " + sym + "(" + argsStr + ")");
+                                r.ssa = t;
+
+                                if (attr->name == "__init__") {
+                                    r.type = VType::Void;
+                                }
+                                else {
+                                    auto mit = defining->methods.find(attr->name);
+                                    if (mit != defining->methods.end() &&
+                                        mit->second->returnType)
+                                        r.type = typeOfAnnotation(
+                                            mit->second->returnType.get());
+                                    else
+                                        r.type = VType::Unknown;
+                                }
+                                return r;
+                            }
+                        }
+                    }
+
                     Val recv = emitExpr(attr->target.get());
 
-                    // Builtin method on list/map/str?
                     if (tryBuiltinMethod(attr->name, recv, n, r)) return r;
 
-                    // User method on Obj?
                     if (recv.type == VType::Obj) {
                         auto ci = findClass(recv.cls);
                         if (!ci) throw std::runtime_error("native: unknown class");
+                        const ClassInfo* defining =
+                            findClassDefiningMethod(ci, attr->name);
+                        if (!defining)
+                            throw std::runtime_error(
+                                "native: class '" + recv.cls + "' has no method '" +
+                                attr->name + "'");
+
                         std::vector<std::string> args;
                         args.push_back(recv.ssa);
                         for (auto& a : n->args) {
                             if (!a.name.empty())
-                                throw std::runtime_error("native: kwargs not supported");
+                                throw std::runtime_error(
+                                    "native: kwargs not supported");
                             args.push_back(emitExpr(a.value.get()).ssa);
                         }
                         std::string argsStr;
@@ -1064,22 +1201,34 @@ namespace vayu {
                             if (i) argsStr += ", ";
                             argsStr += "l " + args[i];
                         }
-                        std::string sym = "$vayu_mth_" + mangle(ci->name) + "_" +
-                            mangle(attr->name);
+                        std::string sym = "$vayu_mth_" + mangle(defining->name) +
+                            "_" + mangle(attr->name);
                         std::string t = newTemp();
                         line(t + " =l call " + sym + "(" + argsStr + ")");
-                        r.ssa = t; r.type = VType::Unknown;
+                        r.ssa = t;
+
+                        if (attr->name == "__init__") {
+                            r.type = VType::Void;
+                        }
+                        else {
+                            auto mit = defining->methods.find(attr->name);
+                            if (mit != defining->methods.end() &&
+                                mit->second->returnType)
+                                r.type = typeOfAnnotation(
+                                    mit->second->returnType.get());
+                            else
+                                r.type = VType::Unknown;
+                        }
                         return r;
                     }
 
-                    // Module function: `math.sqrt(x)`.
                     if (attr->target->kind == ExprKind::NameRef) {
-                        const auto* tn = static_cast<const NameRefExpr*>(attr->target.get());
+                        const auto* tn = static_cast<const NameRefExpr*>(
+                            attr->target.get());
                         if (modules_.count(tn->name)) {
                             std::vector<std::string> args;
-                            for (auto& a : n->args) {
+                            for (auto& a : n->args)
                                 args.push_back(emitExpr(a.value.get()).ssa);
-                            }
                             std::string argsStr;
                             for (size_t i = 0; i < args.size(); ++i) {
                                 if (i) argsStr += ", ";
@@ -1104,13 +1253,11 @@ namespace vayu {
                 const auto* nm = static_cast<const NameRefExpr*>(n->callee.get());
                 std::string name = nm->name;
 
-                // ---------- builtin: print ----------
                 if (name == "print") {
                     if (n->args.empty()) {
                         line("call $vayu_print_ln()");
                         r.ssa = "0"; r.type = VType::Void; return r;
                     }
-                    // First print the first arg (no separator issues), then optional rest.
                     for (size_t i = 0; i < n->args.size(); ++i) {
                         Val v = emitExpr(n->args[i].value.get());
                         if (i > 0) line("call $vayu_print_space()");
@@ -1135,11 +1282,9 @@ namespace vayu {
                         }
                     }
                     line("call $vayu_print_ln()");
-                    r.ssa = "0"; r.type = VType::Void;
-                    return r;
+                    r.ssa = "0"; r.type = VType::Void; return r;
                 }
 
-                // ---------- builtin: len ----------
                 if (name == "len") {
                     Val v = emitExpr(n->args[0].value.get());
                     int kind = -1;
@@ -1147,7 +1292,8 @@ namespace vayu {
                     case VType::Str:  kind = 0; break;
                     case VType::List: kind = 1; break;
                     case VType::Map:  kind = 2; break;
-                    default: throw std::runtime_error("native: len() of unsupported type");
+                    default: throw std::runtime_error(
+                        "native: len() of unsupported type");
                     }
                     std::string t = newTemp();
                     line(t + " =l call $vayu_len(l " + v.ssa + ", l " +
@@ -1156,7 +1302,6 @@ namespace vayu {
                     return r;
                 }
 
-                // ---------- builtin: str ----------
                 if (name == "str") {
                     Val v = emitExpr(n->args[0].value.get());
                     if (v.type == VType::Str) return v;
@@ -1167,13 +1312,13 @@ namespace vayu {
                         r.ssa = t; r.type = VType::Str;
                         return r;
                     }
-                    throw std::runtime_error("native: str() unsupported on this type");
+                    throw std::runtime_error(
+                        "native: str() unsupported on this type");
                 }
 
                 if (name == "range")
                     throw std::runtime_error("native: range() only in `for` loops");
 
-                // ---------- exception constructors ----------
                 if (isExceptionName(name)) {
                     std::string typeLbl = internString(name);
                     Val msg = emitExpr(n->args[0].value.get());
@@ -1183,9 +1328,7 @@ namespace vayu {
                     return r;
                 }
 
-                // ---------- class constructor ----------
                 if (classes_.count(name)) {
-                    auto& ci = classes_[name];
                     std::vector<std::string> args;
                     for (auto& a : n->args) {
                         if (!a.name.empty())
@@ -1204,14 +1347,11 @@ namespace vayu {
                     return r;
                 }
 
-                // ---------- from-imported function ----------
                 auto fi = fromImports_.find(name);
                 std::string fnName = name;
-                if (fi != fromImports_.end()) {
+                if (fi != fromImports_.end())
                     fnName = mangle(fi->second) + "_" + name;
-                }
 
-                // ---------- user function ----------
                 std::vector<std::string> args;
                 for (auto& a : n->args) {
                     if (!a.name.empty())
@@ -1229,10 +1369,6 @@ namespace vayu {
                 return r;
             }
 
-            // =========================================================================
-            // Statements
-            // =========================================================================
-
             void emitStmt(const Stmt* s) {
                 if (!s) return;
                 switch (s->kind) {
@@ -1249,14 +1385,19 @@ namespace vayu {
                         Val recv = emitExpr(attr->target.get());
                         Val v = emitExpr(n->value.get());
                         if (recv.type != VType::Obj)
-                            throw std::runtime_error("native: field assign on non-object");
+                            throw std::runtime_error(
+                                "native: field assign on non-object");
                         auto ci = findClass(recv.cls);
-                        if (!ci) throw std::runtime_error("native: unknown class");
+                        if (!ci) throw std::runtime_error(
+                            "native: unknown class");
                         auto fit = ci->fieldOffsets.find(attr->name);
                         if (fit == ci->fieldOffsets.end())
-                            throw std::runtime_error("native: '" + attr->name + "' is not a field");
-                        line("storel " + v.ssa + ", " + recv.ssa + " + " +
+                            throw std::runtime_error(
+                                "native: '" + attr->name + "' is not a field");
+                        std::string addr = newTemp();
+                        line(addr + " =l add " + recv.ssa + ", " +
                             std::to_string(fit->second));
+                        line("storel " + v.ssa + ", " + addr);
                         return;
                     }
                     if (n->target->kind == ExprKind::Index) {
@@ -1274,10 +1415,12 @@ namespace vayu {
                                 idx.ssa + ", l " + v.ssa + ")");
                             return;
                         }
-                        throw std::runtime_error("native: index-assign on unsupported type");
+                        throw std::runtime_error(
+                            "native: index-assign on unsupported type");
                     }
                     if (n->target->kind != ExprKind::NameRef)
-                        throw std::runtime_error("native: unsupported assignment target");
+                        throw std::runtime_error(
+                            "native: unsupported assignment target");
 
                     auto* nm = static_cast<const NameRefExpr*>(n->target.get());
                     std::string slotName = nm->name;
@@ -1288,10 +1431,13 @@ namespace vayu {
                         slotName = currentModulePrefix_ + nm->name;
 
                     Val v = emitExpr(n->value.get());
-                    std::string slot = slots_.count(slotName) ? slots_[slotName] : "";
-                    if (slot.empty()) slot = slots_.count(nm->name) ? slots_[nm->name] : "";
+                    std::string slot = slots_.count(slotName)
+                        ? slots_[slotName] : "";
                     if (slot.empty())
-                        throw std::runtime_error("native: variable '" + nm->name + "' not declared");
+                        slot = slots_.count(nm->name) ? slots_[nm->name] : "";
+                    if (slot.empty())
+                        throw std::runtime_error(
+                            "native: variable '" + nm->name + "' not declared");
                     line("storel " + v.ssa + ", " + slot);
 
                     VarInfo vi;
@@ -1307,10 +1453,13 @@ namespace vayu {
                     std::string slotName = n->name;
                     if (!currentModulePrefix_.empty())
                         slotName = currentModulePrefix_ + n->name;
-                    std::string slot = slots_.count(slotName) ? slots_[slotName] : "";
-                    if (slot.empty()) slot = slots_.count(n->name) ? slots_[n->name] : "";
+                    std::string slot = slots_.count(slotName)
+                        ? slots_[slotName] : "";
                     if (slot.empty())
-                        throw std::runtime_error("native: variable '" + n->name + "' not declared");
+                        slot = slots_.count(n->name) ? slots_[n->name] : "";
+                    if (slot.empty())
+                        throw std::runtime_error(
+                            "native: variable '" + n->name + "' not declared");
                     Val v; v.ssa = "0"; v.type = VType::Int;
                     if (n->value) v = emitExpr(n->value.get());
                     line("storel " + v.ssa + ", " + slot);
@@ -1348,7 +1497,7 @@ namespace vayu {
                 case StmtKind::Class:  return;
                 case StmtKind::Import:
                 case StmtKind::FromImport:
-                    return;   // resolved at load time
+                    return;
 
                 case StmtKind::Def:
                     throw std::runtime_error("native: nested 'def' not supported");
@@ -1421,7 +1570,8 @@ namespace vayu {
                 if (n->iterable->kind == ExprKind::Call) {
                     auto* call = static_cast<const CallExpr*>(n->iterable.get());
                     if (call->callee->kind == ExprKind::NameRef) {
-                        const auto* rn = static_cast<const NameRefExpr*>(call->callee.get());
+                        const auto* rn = static_cast<const NameRefExpr*>(
+                            call->callee.get());
                         if (rn->name == "range") { emitForRange(n, call); return; }
                     }
                 }
@@ -1450,7 +1600,8 @@ namespace vayu {
                     line("storel " + s.ssa + ", " + varSlot);
                 }
                 else line("storel 0, " + varSlot);
-                Val stopV = emitExpr(call->args[call->args.size() == 2 ? 1 : 0].value.get());
+                Val stopV = emitExpr(
+                    call->args[call->args.size() == 2 ? 1 : 0].value.get());
                 line("storel " + stopV.ssa + ", " + stopSlot);
 
                 std::string lBody = newLabel("for_body_");
@@ -1487,8 +1638,19 @@ namespace vayu {
 
             void emitForList(const ForStmt* n) {
                 Val iter = emitExpr(n->iterable.get());
+
+                if (iter.type == VType::Map) {
+                    std::string keysList = newTemp();
+                    line(keysList + " =l call $vayu_map_keys(l " + iter.ssa + ")");
+                    iter.ssa = keysList;
+                    iter.type = VType::List;
+                    iter.elemType = VType::Str;
+                    iter.valType = VType::Unknown;
+                }
+
                 if (iter.type != VType::List)
-                    throw std::runtime_error("native: `for` requires range(...) or a list");
+                    throw std::runtime_error(
+                        "native: `for` requires range(...), a list, or a map");
 
                 std::string savedSlot; bool hadSaved = false;
                 {
@@ -1501,7 +1663,11 @@ namespace vayu {
                 std::string idxSlot = "%" + mangle(n->targetName) + "_idx_" + uniq;
                 std::string lenSlot = "%" + mangle(n->targetName) + "_len_" + uniq;
                 slots_[n->targetName] = varSlot;
-                varInfo_[n->targetName] = VarInfo{ iter.elemType, "", VType::Unknown, VType::Unknown };
+
+                VarInfo lv;
+                lv.type = iter.elemType;
+                varInfo_[n->targetName] = lv;
+
                 line(varSlot + " =l alloc8 8");
                 line(listSlot + " =l alloc8 8");
                 line(idxSlot + " =l alloc8 8");
@@ -1561,16 +1727,14 @@ namespace vayu {
                 else line("ret 0");
             }
 
-            // ---------- try / raise ----------
-
             void emitRaise(const RaiseStmt* n) {
                 if (n->exception) {
                     Val v = emitExpr(n->exception.get());
                     if (v.type == VType::Str) {
-                        // Auto-wrap bare strings as Exception.
                         std::string typeLbl = internString("Exception");
                         std::string t = newTemp();
-                        line(t + " =l call $vayu_mkexc(l " + typeLbl + ", l " + v.ssa + ")");
+                        line(t + " =l call $vayu_mkexc(l " + typeLbl +
+                            ", l " + v.ssa + ")");
                         v.ssa = t;
                     }
                     line("call $vayu_raise(l " + v.ssa + ")");
@@ -1578,23 +1742,17 @@ namespace vayu {
                 else {
                     line("call $vayu_reraise()");
                 }
-                // Raise never returns — mark as terminal.
-                line("jmp @__raise_unreachable_" + std::to_string(nextLabel_++));
             }
 
             void emitTry(const TryStmt* n) {
                 std::string lTry = newLabel("try_body_");
                 std::string lExc = newLabel("try_exc_");
                 std::string lEnd = newLabel("try_end_");
-                std::string lReraise = newLabel("try_reraise_");
 
-                // frameId = try_push()
                 std::string fid = newTemp();
                 line(fid + " =l call $vayu_try_push()");
-                // buf = try_buf(fid)
                 std::string buf = newTemp();
                 line(buf + " =l call $vayu_try_buf(l " + fid + ")");
-                // r =w setjmp(buf)
                 std::string rv = newTemp();
                 line(rv + " =w call $setjmp(l " + buf + ")");
                 line("jnz " + rv + ", " + lExc + ", " + lTry);
@@ -1607,16 +1765,20 @@ namespace vayu {
                 }
 
                 raw(lExc);
-                // Dispatch by exception type
                 {
                     std::string et = newTemp();
                     line(et + " =l call $vayu_get_exc_type()");
 
-                    for (auto& h : n->handlers) {
-                        std::string lMatch = newLabel("catch_match_");
-                        std::string lNextH = newLabel("catch_next_");
-                        std::string lBody = newLabel("catch_body_");
+                    std::vector<std::string> matchLabels;
+                    std::vector<std::string> nextLabels;
+                    for (size_t hi = 0; hi < n->handlers.size(); ++hi) {
+                        matchLabels.push_back(newLabel("catch_match_"));
+                        nextLabels.push_back(newLabel("catch_next_"));
+                    }
+                    std::string lReraise = newLabel("try_reraise_");
 
+                    for (size_t i = 0; i < n->handlers.size(); ++i) {
+                        auto& h = n->handlers[i];
                         if (h.exceptionType) {
                             std::string typeName;
                             if (h.exceptionType->kind == ExprKind::NameRef) {
@@ -1630,65 +1792,43 @@ namespace vayu {
                             std::string typeLbl = internString(typeName);
 
                             if (typeName == "Exception") {
-                                // Catches everything.
-                                line("jmp " + lMatch);
+                                line("jmp " + matchLabels[i]);
                             }
                             else {
                                 std::string cond = newTemp();
-                                line(cond + " =w call $vayu_str_eq(l " + et + ", l " + typeLbl + ")");
-                                line("jnz " + cond + ", " + lMatch + ", " + lNextH);
+                                line(cond + " =w call $vayu_str_eq(l " + et +
+                                    ", l " + typeLbl + ")");
+                                std::string nextTarget =
+                                    (i + 1 < n->handlers.size())
+                                    ? nextLabels[i + 1] : lReraise;
+                                line("jnz " + cond + ", " + matchLabels[i] +
+                                    ", " + nextTarget);
                             }
                         }
                         else {
-                            // Bare `except` — always matches.
-                            line("jmp " + lMatch);
-                        }
-
-                        raw(lNextH);
-                        if (h.exceptionType && !(h.exceptionType->kind == ExprKind::NameRef &&
-                            static_cast<const NameRefExpr*>(h.exceptionType.get())->name == "Exception")) {
-                            // (fallthrough from earlier non-matching to next handler)
-                            continue;
-                        }
-                        else {
-                            continue;
+                            line("jmp " + matchLabels[i]);
                         }
                     }
 
-                    // No handler matched — reraise.
                     raw(lReraise);
                     line("call $vayu_reraise()");
                     line("jmp " + lEnd);
 
-                    // Emit each handler body.
-                    for (auto& h : n->handlers) {
-                        std::string lMatch = newLabel("catch_match_");
-                        std::string lNextH = newLabel("catch_next_");
-                        std::string lBody = newLabel("catch_body_");
+                    for (size_t i = 0; i < n->handlers.size(); ++i) {
+                        auto& h = n->handlers[i];
+                        raw(matchLabels[i]);
 
-                        // We must re-emit the label structure here.  Since we already
-                        // referenced lMatch/lNextH above, we just need to place them.
-                        raw(lMatch);
-
-                        // Bind the exception variable.
                         if (!h.varName.empty()) {
                             std::string excVal = newTemp();
                             line(excVal + " =l call $vayu_get_exc_value()");
-                            std::string slot = "%" + mangle(h.varName) + "_slot";
-                            if (!slots_.count(h.varName)) {
-                                slots_[h.varName] = slot;
-                                // This is a new slot in the current function.
-                                // NB: we should really allocate it at function entry;
-                                // for now, allocate it lazily here — QBE allows alloc8
-                                // anywhere but the value will be uninitialized on the
-                                // first use in that case.  Since we store immediately,
-                                // it's safe.
+                            std::string slotName = h.varName;
+                            if (!slots_.count(slotName)) {
+                                std::string slot = "%" + mangle(slotName) + "_slot";
+                                slots_[slotName] = slot;
+                                line(slot + " =l alloc8 8");
                             }
-                            else {
-                                slot = slots_[h.varName];
-                            }
-                            line("storel " + excVal + ", " + slot);
-                            varInfo_[h.varName] = VarInfo{ VType::Exc };
+                            line("storel " + excVal + ", " + slots_[slotName]);
+                            varInfo_[slotName] = VarInfo{ VType::Exc };
                         }
 
                         emitBlock(h.body);
@@ -1700,14 +1840,8 @@ namespace vayu {
                 }
 
                 raw(lEnd);
-                if (n->finallyBody) {
-                    emitBlock(*n->finallyBody);
-                }
+                if (n->finallyBody) emitBlock(*n->finallyBody);
             }
-
-            // =========================================================================
-            // Functions
-            // =========================================================================
 
             void emitFunction(const DefStmt* def, const ClassInfo* cls,
                 const std::string& prefix) {
@@ -1732,21 +1866,30 @@ namespace vayu {
                 int  savedTemp = nextTemp_;
                 int  savedLabel = nextLabel_;
                 bool savedTerm = terminated_;
-                std::string savedOut = out_;
                 std::string savedModPrefix = currentModulePrefix_;
 
                 resetFunctionState();
                 if (cls) currentClass_ = cls->name;
                 if (!prefix.empty()) currentModulePrefix_ = prefix;
 
-                for (auto& p : def->params) {
+                for (size_t pi = 0; pi < def->params.size(); ++pi) {
+                    auto& p = def->params[pi];
                     std::string slot = "%" + mangle(p.name) + "_slot";
                     slots_[p.name] = slot;
                     line(slot + " =l alloc8 8");
                     line("storel %p_" + mangle(p.name) + ", " + slot);
+
                     VarInfo vi;
-                    vi.type = p.type ? typeOfAnnotation(p.type.get()) : VType::Unknown;
-                    vi.clsName = p.type ? classNameOfAnnotation(p.type.get()) : std::string{};
+                    if (cls && pi == 0) {
+                        vi.type = VType::Obj;
+                        vi.clsName = cls->name;
+                    }
+                    else {
+                        vi.type = p.type ? typeOfAnnotation(p.type.get())
+                            : VType::Unknown;
+                        vi.clsName = p.type ? classNameOfAnnotation(p.type.get())
+                            : std::string{};
+                    }
                     varInfo_[p.name] = vi;
                 }
 
@@ -1771,13 +1914,12 @@ namespace vayu {
                 nextTemp_ = savedTemp;
                 nextLabel_ = savedLabel;
                 terminated_ = savedTerm;
-                out_ = std::move(savedOut);
                 currentModulePrefix_ = std::move(savedModPrefix);
             }
 
             void emitClassCtor(const ClassInfo& ci) {
-                const DefStmt* userInit = ci.initDecl;
                 std::string sym = "$vayu_ctor_" + mangle(ci.name);
+                const DefStmt* userInit = ci.initDecl;
 
                 std::vector<std::string> paramNames;
                 if (userInit) {
@@ -1803,26 +1945,31 @@ namespace vayu {
                 int  savedTemp = nextTemp_;
                 int  savedLabel = nextLabel_;
                 bool savedTerm = terminated_;
-                std::string savedOut = out_;
+                std::string savedModPrefix = currentModulePrefix_;
 
                 resetFunctionState();
                 currentClass_ = ci.name;
 
                 std::string self = newTemp();
-                line(self + " =l call $vayu_alloc(l " + std::to_string(ci.totalSize) + ")");
+                line(self + " =l call $vayu_alloc(l " +
+                    std::to_string(ci.totalSize) + ")");
 
-                if (userInit) {
+                if (userInit && ci.initOwner) {
                     std::string argList = "l " + self;
-                    for (auto& p : paramNames) argList += ", l %p_" + mangle(p);
-                    std::string initSym = "$vayu_mth_" + mangle(ci.name) + "_" + "__init__";
+                    for (auto& p : paramNames)
+                        argList += ", l %p_" + mangle(p);
+                    std::string initSym = "$vayu_mth_" + mangle(ci.initOwner->name) +
+                        "_" + mangle("__init__");
                     line("call " + initSym + "(" + argList + ")");
                 }
                 else {
                     for (size_t i = 0; i < ci.fields.size(); ++i) {
                         const std::string& f = ci.fields[i];
                         int off = ci.fieldOffsets.at(f);
-                        line("storel %p_" + mangle(f) + ", " + self + " + " +
+                        std::string addr = newTemp();
+                        line(addr + " =l add " + self + ", " +
                             std::to_string(off));
+                        line("storel %p_" + mangle(f) + ", " + addr);
                     }
                 }
                 line("ret " + self);
@@ -1835,7 +1982,7 @@ namespace vayu {
                 nextTemp_ = savedTemp;
                 nextLabel_ = savedLabel;
                 terminated_ = savedTerm;
-                out_ = std::move(savedOut);
+                currentModulePrefix_ = std::move(savedModPrefix);
             }
 
             std::string emitCond(const Expr* e) {
@@ -1853,7 +2000,8 @@ namespace vayu {
             case StmtKind::Assign: {
                 auto* n = static_cast<const AssignStmt*>(s);
                 if (n->target->kind == ExprKind::NameRef)
-                    out.insert(static_cast<const NameRefExpr*>(n->target.get())->name);
+                    out.insert(static_cast<const NameRefExpr*>(
+                        n->target.get())->name);
                 break;
             }
             case StmtKind::AnnotAssign: {
@@ -1915,14 +2063,25 @@ typedef struct { VayuStr* key; int64_t value; uint8_t used; } VayuMapEntry;
 typedef struct { int64_t len; int64_t cap; VayuMapEntry* entries; } VayuMap;
 typedef struct { VayuStr* typeName; VayuStr* message; } VayuExc;
 
-// ---- allocation -----------------------------------------------------------
+void vayu_raise_str(VayuStr* typeName, VayuStr* msg);
+
 void* vayu_alloc(int64_t size) {
     void* p = calloc(1, (size_t)size);
     if (!p) { fprintf(stderr, "vayu: oom\n"); exit(1); }
     return p;
 }
 
-// ---- printing -------------------------------------------------------------
+static VayuStr* vayu_mkstr(const char* cstr, int64_t n) {
+    VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)n + 1);
+    s->len = n;
+    memcpy(s->data, cstr, (size_t)n);
+    s->data[n] = 0;
+    return s;
+}
+static VayuStr* vayu_mkstr_c(const char* cstr) {
+    return vayu_mkstr(cstr, (int64_t)strlen(cstr));
+}
+
 void vayu_print_int(long long v) { printf("%lld\n", v); }
 void vayu_print_bool(long long v) { printf("%s\n", v ? "true" : "false"); }
 void vayu_print_int_noln(long long v) { printf("%lld", v); }
@@ -1930,7 +2089,6 @@ void vayu_print_bool_noln(long long v) { printf("%s", v ? "true" : "false"); }
 void vayu_print_space(void) { putchar(' '); }
 void vayu_print_ln(void) { putchar('\n'); }
 
-// ---- strings --------------------------------------------------------------
 VayuStr* vayu_str_concat(VayuStr* a, VayuStr* b) {
     int64_t n = a->len + b->len;
     VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)n + 1);
@@ -1957,9 +2115,7 @@ VayuStr* vayu_int_to_str(long long v, long long kind) {
     char buf[64]; int n;
     if (kind == 1) n = snprintf(buf, sizeof(buf), "%s", v ? "true" : "false");
     else           n = snprintf(buf, sizeof(buf), "%lld", v);
-    VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)n + 1);
-    s->len = n; memcpy(s->data, buf, (size_t)n); s->data[n] = 0;
-    return s;
+    return vayu_mkstr(buf, n);
 }
 VayuStr* vayu_str_upper(VayuStr* s) {
     VayuStr* r = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)s->len + 1);
@@ -1995,8 +2151,15 @@ int64_t vayu_str_find(VayuStr* s, VayuStr* sub) {
         if (memcmp(s->data + i, sub->data, (size_t)sub->len) == 0) return i;
     return -1;
 }
+int64_t vayu_str_starts_with(VayuStr* s, VayuStr* p) {
+    if (p->len > s->len) return 0;
+    return memcmp(s->data, p->data, (size_t)p->len) == 0;
+}
+int64_t vayu_str_ends_with(VayuStr* s, VayuStr* p) {
+    if (p->len > s->len) return 0;
+    return memcmp(s->data + (s->len - p->len), p->data, (size_t)p->len) == 0;
+}
 
-// ---- lists ----------------------------------------------------------------
 VayuList* vayu_list_new() {
     VayuList* l = (VayuList*)malloc(sizeof(VayuList));
     l->len = 0; l->cap = 4;
@@ -2015,24 +2178,24 @@ void vayu_list_push(VayuList* l, int64_t v) {
 int64_t vayu_list_get(VayuList* l, int64_t i) {
     if (i < 0) i += l->len;
     if (i < 0 || i >= l->len) {
-        // Raise IndexError
-        VayuStr* tn = (VayuStr*)malloc(sizeof(VayuStr) + 11);
-        tn->len = 10; memcpy(tn->data, "IndexError", 10); tn->data[10] = 0;
-        VayuStr* msg = (VayuStr*)malloc(sizeof(VayuStr) + 19);
-        msg->len = 18; memcpy(msg->data, "index out of range", 18); msg->data[18] = 0;
-        extern void vayu_raise_str(VayuStr*, VayuStr*);
-        vayu_raise_str(tn, msg);
-        exit(1);   // unreachable
+        vayu_raise_str(vayu_mkstr_c("IndexError"),
+                       vayu_mkstr_c("list index out of range"));
     }
     return l->items[i];
 }
 void vayu_list_set(VayuList* l, int64_t i, int64_t v) {
     if (i < 0) i += l->len;
-    if (i < 0 || i >= l->len) { fprintf(stderr, "vayu: list index out of range\n"); exit(1); }
+    if (i < 0 || i >= l->len) {
+        vayu_raise_str(vayu_mkstr_c("IndexError"),
+                       vayu_mkstr_c("list index out of range"));
+    }
     l->items[i] = v;
 }
 int64_t vayu_list_pop(VayuList* l) {
-    if (l->len == 0) { fprintf(stderr, "vayu: pop empty\n"); exit(1); }
+    if (l->len == 0) {
+        vayu_raise_str(vayu_mkstr_c("IndexError"),
+                       vayu_mkstr_c("pop from empty list"));
+    }
     return l->items[--l->len];
 }
 int64_t vayu_list_len(VayuList* l) { return l->len; }
@@ -2041,8 +2204,26 @@ int64_t vayu_list_contains(VayuList* l, int64_t v) {
     for (int64_t i = 0; i < l->len; ++i) if (l->items[i] == v) return 1;
     return 0;
 }
+void vayu_list_insert(VayuList* l, int64_t i, int64_t v) {
+    if (i < 0) i = 0;
+    if (i > l->len) i = l->len;
+    vayu_list_grow(l);
+    memmove(l->items + i + 1, l->items + i,
+            sizeof(int64_t) * (size_t)(l->len - i));
+    l->items[i] = v;
+    l->len++;
+}
+void vayu_list_remove(VayuList* l, int64_t v) {
+    for (int64_t i = 0; i < l->len; ++i) {
+        if (l->items[i] == v) {
+            memmove(l->items + i, l->items + i + 1,
+                    sizeof(int64_t) * (size_t)(l->len - i - 1));
+            l->len--;
+            return;
+        }
+    }
+}
 
-// ---- maps -----------------------------------------------------------------
 static uint64_t hash_str(VayuStr* s) {
     uint64_t h = 1469598103934665603ULL;
     for (int64_t i = 0; i < s->len; ++i) { h ^= (uint8_t)s->data[i]; h *= 1099511628211ULL; }
@@ -2091,13 +2272,7 @@ void vayu_map_put(VayuMap* m, VayuStr* k, int64_t v) {
 }
 int64_t vayu_map_get(VayuMap* m, VayuStr* k) {
     VayuMapEntry* e = map_find(m, k);
-    if (!e) {
-        VayuStr* tn = (VayuStr*)malloc(sizeof(VayuStr) + 9);
-        tn->len = 8; memcpy(tn->data, "KeyError", 8); tn->data[8] = 0;
-        extern void vayu_raise_str(VayuStr*, VayuStr*);
-        vayu_raise_str(tn, k);
-        exit(1);
-    }
+    if (!e) vayu_raise_str(vayu_mkstr_c("KeyError"), k);
     return e->value;
 }
 int64_t vayu_map_has(VayuMap* m, VayuStr* k) { return map_find(m, k) != NULL; }
@@ -2109,8 +2284,15 @@ void vayu_map_clear(VayuMap* m) {
     memset(m->entries, 0, sizeof(VayuMapEntry) * (size_t)m->cap);
     m->len = 0;
 }
+VayuList* vayu_map_keys(VayuMap* m) {
+    VayuList* l = vayu_list_new();
+    for (int64_t i = 0; i < m->cap; ++i) {
+        if (!m->entries[i].used) continue;
+        vayu_list_push(l, (int64_t)m->entries[i].key);
+    }
+    return l;
+}
 
-// ---- generic helpers ------------------------------------------------------
 int64_t vayu_len(int64_t v, int64_t kind) {
     switch (kind) {
         case 0: return vayu_str_len((VayuStr*)v);
@@ -2159,21 +2341,10 @@ void vayu_print_map(VayuMap* m, int64_t vk) {
     vayu_print_map_noln(m, vk); putchar('\n');
 }
 
-// ---- arithmetic -----------------------------------------------------------
 long long vayu_floordiv(long long a, long long b) {
     if (b == 0) {
-        VayuStr* tn = (VayuStr*)malloc(sizeof(VayuStr) + 16);
-        tn->len = 15; memcpy(tn->data, "ZeroDivisionErr", 15); tn->data[15] = 0;
-        // oops, needs 21 bytes; adjust
-        free(tn);
-        tn = (VayuStr*)malloc(sizeof(VayuStr) + 21);
-        tn->len = 20; memcpy(tn->data, "ZeroDivisionError", 17); tn->data[17] = 0;
-        tn->len = 17;
-        VayuStr* msg = (VayuStr*)malloc(sizeof(VayuStr) + 17);
-        msg->len = 16; memcpy(msg->data, "division by zero", 16); msg->data[16] = 0;
-        extern void vayu_raise_str(VayuStr*, VayuStr*);
-        vayu_raise_str(tn, msg);
-        exit(1);
+        vayu_raise_str(vayu_mkstr_c("ZeroDivisionError"),
+                       vayu_mkstr_c("division by zero"));
     }
     long long q = a / b;
     if ((a ^ b) < 0 && q * b != a) q--;
@@ -2181,20 +2352,14 @@ long long vayu_floordiv(long long a, long long b) {
 }
 long long vayu_mod(long long a, long long b) {
     if (b == 0) {
-        VayuStr* tn = (VayuStr*)malloc(sizeof(VayuStr) + 17);
-        tn->len = 17; memcpy(tn->data, "ZeroDivisionError", 17); tn->data[17] = 0;
-        VayuStr* msg = (VayuStr*)malloc(sizeof(VayuStr) + 14);
-        msg->len = 13; memcpy(msg->data, "modulo by zero", 14); msg->data[13] = 0;
-        extern void vayu_raise_str(VayuStr*, VayuStr*);
-        vayu_raise_str(tn, msg);
-        exit(1);
+        vayu_raise_str(vayu_mkstr_c("ZeroDivisionError"),
+                       vayu_mkstr_c("modulo by zero"));
     }
     long long r = a % b;
     if (r != 0 && ((r < 0) != (b < 0))) r += b;
     return r;
 }
 
-// ---- exceptions -----------------------------------------------------------
 #define VAYU_MAX_TRY 64
 
 static jmp_buf  g_jmpBufs[VAYU_MAX_TRY];
@@ -2202,7 +2367,9 @@ static int      g_trySp = 0;
 static VayuExc* g_excValue = NULL;
 
 int vayu_try_push(void) {
-    if (g_trySp >= VAYU_MAX_TRY) { fprintf(stderr, "vayu: try stack overflow\n"); exit(1); }
+    if (g_trySp >= VAYU_MAX_TRY) {
+        fprintf(stderr, "vayu: try stack overflow\n"); exit(1);
+    }
     return g_trySp++;
 }
 void* vayu_try_buf(int id) { return &g_jmpBufs[id]; }
@@ -2252,10 +2419,6 @@ int main(void) { vayu_main(); return 0; }
         out << kRuntimeC;
         return true;
     }
-
-    // ===========================================================================
-    // Public entry points
-    // ===========================================================================
 
     namespace {
         void tryRemove(const std::string& p) { std::remove(p.c_str()); }
@@ -2339,7 +2502,8 @@ int main(void) { vayu_main(); return 0; }
         }
 
         {
-            std::string cmd = ccPath_ + " -c -O2 \"" + asmPath + "\" -o \"" + objPath + "\"";
+            std::string cmd = ccPath_ + " -c -O2 \"" + asmPath +
+                "\" -o \"" + objPath + "\"";
             int rc = std::system(cmd.c_str());
             if (rc != 0) {
                 lastError_ = "assembler failed. .s at " + asmPath;
@@ -2356,7 +2520,8 @@ int main(void) { vayu_main(); return 0; }
             if (rc != 0) {
                 lastError_ = "linker failed";
                 std::fprintf(stderr, "native: %s\n", lastError_.c_str());
-                tryRemove(ssaPath); tryRemove(asmPath); tryRemove(objPath); tryRemove(rtPath);
+                tryRemove(ssaPath); tryRemove(asmPath);
+                tryRemove(objPath); tryRemove(rtPath);
                 return 1;
             }
         }
@@ -2369,7 +2534,10 @@ int main(void) { vayu_main(); return 0; }
             tryRemove(objPath); tryRemove(rtPath); tryRemove(exePath);
         }
 
-        if (runRc != 0) { lastError_ = "program exited " + std::to_string(runRc); return 1; }
+        if (runRc != 0) {
+            lastError_ = "program exited " + std::to_string(runRc);
+            return 1;
+        }
         return 0;
     }
 
