@@ -11,8 +11,10 @@ namespace vayu {
         int  compileAndRun(const Block& program, const std::string& sourceDir = "");
         void dumpIR(const Block& program, const std::string& sourceDir = "");
 
-        const std::string& lastError() const { return lastError_; }
+        /// If set, compileAndRun writes the executable here and does NOT run it.
+        void setOutputExe(const std::string& path) { outputExe_ = path; }
 
+        const std::string& lastError() const { return lastError_; }
         void setQbePath(const std::string& p) { qbePath_ = p; }
         void setCcPath(const std::string& p) { ccPath_ = p; }
         void setQbeTarget(const std::string& t) { qbeTarget_ = t; }
@@ -22,7 +24,7 @@ namespace vayu {
         std::string qbePath_;
         std::string ccPath_;
         std::string qbeTarget_;
-
+        std::string outputExe_;   // optional
         std::string buildQBE(const Block& program, const std::string& sourceDir);
         bool        writeRuntimeC(const std::string& path) const;
     };

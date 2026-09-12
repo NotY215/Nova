@@ -2478,7 +2478,8 @@ int main(void) { vayu_main(); return 0; }
         std::string asmPath = base + ".s";
         std::string objPath = base + ".o";
         std::string rtPath = base + "_rt.c";
-        std::string exePath = base + ".exe";
+        std::string exePath = outputExe_.empty() ? (base + ".exe") : outputExe_;
+        const bool  compileOnly = !outputExe_.empty();
 
         {
             std::ofstream out(ssaPath, std::ios::binary);
@@ -2540,13 +2541,18 @@ int main(void) { vayu_main(); return 0; }
             }
         }
 
+        // Intermediate artefacts always go away.
+        tryRemove(ssaPath);
+        tryRemove(asmPath);
+        tryRemove(objPath);
+        tryRemove(rtPath);
+
+        if (compileOnly) return 0;   // user wants the exe; leave it in place.
+
         int runRc = std::system(("\"" + exePath + "\"").c_str());
 
         bool keep = (std::getenv("VAYU_KEEP_TEMP") != nullptr);
-        if (!keep) {
-            tryRemove(ssaPath); tryRemove(asmPath);
-            tryRemove(objPath); tryRemove(rtPath); tryRemove(exePath);
-        }
+        if (!keep) tryRemove(exePath);
 
         if (runRc != 0) {
             lastError_ = "program exited " + std::to_string(runRc);

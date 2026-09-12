@@ -2,13 +2,14 @@ class Point:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-    def mag_sq(self):
-        return self.x * self.x + self.y * self.y
+    def add(self, other):
+        self.x += other.x
+        self.y += other.y
 
 total = 0
-i = 0
-while i < 5000000:
-    p = Point(i, i + 1)
-    total += p.mag_sq()
-    i += 1
+for i in range(5000000):
+    a = Point(i, i + 1)
+    b = Point(1, 1)
+    a.add(b)
+    total += a.x + a.y
 print(total)
