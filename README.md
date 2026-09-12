@@ -276,19 +276,19 @@ Target platforms include:
 Vayu source files use:
 
 ```text
-.vayu
+.vyu
 ```
 
 Examples:
 
 ```text
-hello.vayu
-main.vayu
-game.vayu
-ai.vayu
+hello.vyu
+main.vyu
+game.vyu
+ai.vyu
 ```
 
-The official language name is **Vayu** and the official source extension is **`.vayu`**.
+The official language name is **Vayu** and the official source extension is **`.vyu`**.
 
 ---
 

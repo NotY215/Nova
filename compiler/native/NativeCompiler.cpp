@@ -1999,7 +1999,101 @@ namespace vayu {
                 currentModulePrefix_ = std::move(savedModPrefix);
             }
 
+            // Emit a branch-condition expression as a `w` SSA value suitable for
+  // `jnz`.  When the expression is itself a comparison, we bypass the
+  // usual i64 round-trip and emit the compare directly at width `w`.
+  //
+  // Without this, every `if x < N:` costs:
+  //     %c  =w csltl %x, N
+  //     %e  =l extsw %c
+  //     %z  =w cnel %e, 0
+  //     jnz %z, ...
+  // This function collapses the middle two instructions.
             std::string emitCond(const Expr* e) {
+                if (!e) return "0";
+
+                // ---- Direct comparisons ----
+                if (e->kind == ExprKind::Binary) {
+                    auto* b = static_cast<const BinaryExpr*>(e);
+
+                    switch (b->op) {
+                    case BinOp::Eq: case BinOp::NotEq:
+                    case BinOp::Lt: case BinOp::Gt:
+                    case BinOp::LtEq: case BinOp::GtEq: {
+                        Val a = emitExpr(b->lhs.get());
+                        Val c = emitExpr(b->rhs.get());
+
+                        // String comparison: strings compare by value via a
+                        // runtime call returning i64.  Compress to `w`.
+                        bool strCmp =
+                            (a.type == VType::Str || c.type == VType::Str) &&
+                            (b->op == BinOp::Eq || b->op == BinOp::NotEq);
+                        if (strCmp) {
+                            const char* fn = (b->op == BinOp::Eq)
+                                ? "$vayu_str_eq" : "$vayu_str_ne";
+                            std::string t = newTemp();
+                            line(t + " =l call " + fn +
+                                "(l " + a.ssa + ", l " + c.ssa + ")");
+                            std::string w = newTemp();
+                            line(w + " =w cnel " + t + ", 0");
+                            return w;
+                        }
+
+                        // Numeric comparison: emit at width `w` and stop.
+                        const char* opName = nullptr;
+                        switch (b->op) {
+                        case BinOp::Eq:    opName = "ceql";  break;
+                        case BinOp::NotEq: opName = "cnel";  break;
+                        case BinOp::Lt:    opName = "csltl"; break;
+                        case BinOp::Gt:    opName = "csgtl"; break;
+                        case BinOp::LtEq:  opName = "cslel"; break;
+                        case BinOp::GtEq:  opName = "csgel"; break;
+                        default: break;
+                        }
+                        std::string w = newTemp();
+                        line(w + " =w " + opName + " " + a.ssa + ", " + c.ssa);
+                        return w;
+                    }
+
+                    case BinOp::And: {
+                        // Short-circuit would need basic blocks; for now emit both
+                        // conds and AND the `w` results.  Safe when neither side
+                        // has side effects.
+                        std::string w1 = emitCond(b->lhs.get());
+                        std::string w2 = emitCond(b->rhs.get());
+                        std::string w = newTemp();
+                        line(w + " =w and " + w1 + ", " + w2);
+                        return w;
+                    }
+                    case BinOp::Or: {
+                        std::string w1 = emitCond(b->lhs.get());
+                        std::string w2 = emitCond(b->rhs.get());
+                        std::string w = newTemp();
+                        line(w + " =w or " + w1 + ", " + w2);
+                        return w;
+                    }
+                    default: break;
+                    }
+                }
+
+                // ---- `not x` flips the condition ----
+                if (e->kind == ExprKind::Unary) {
+                    auto* u = static_cast<const UnaryExpr*>(e);
+                    if (u->op == UnOp::Not) {
+                        std::string w = emitCond(u->operand.get());
+                        std::string inv = newTemp();
+                        line(inv + " =w xor " + w + ", 1");
+                        return inv;
+                    }
+                }
+
+                // ---- `true` / `false` literals as conditions ----
+                if (e->kind == ExprKind::BoolLit) {
+                    auto* bl = static_cast<const BoolLitExpr*>(e);
+                    return bl->value ? "1" : "0";
+                }
+
+                // ---- General case: emit as i64, then collapse to `w` ----
                 Val v = emitExpr(e);
                 std::string t = newTemp();
                 line(t + " =w cnel " + v.ssa + ", 0");
@@ -2080,7 +2174,7 @@ typedef struct { VayuStr* typeName; VayuStr* message; } VayuExc;
 void vayu_raise_str(VayuStr* typeName, VayuStr* msg);
 
 void* vayu_alloc(int64_t size) {
-    void* p = calloc(1, (size_t)size);
+    void* p = malloc((size_t)size);
     if (!p) { fprintf(stderr, "vayu: oom\n"); exit(1); }
     return p;
 }
