@@ -21,7 +21,10 @@ namespace vayu {
 
     void TypeChecker::pushScope() { scopes_.emplace_back(); }
     void TypeChecker::popScope() { scopes_.pop_back(); }
-    void TypeChecker::defineVar(const std::string& n, TypePtr t) { scopes_.back().vars[n] = std::move(t); }
+
+    void TypeChecker::defineVar(const std::string& n, TypePtr t) {
+        scopes_.back().vars[n] = std::move(t);
+    }
 
     TypePtr TypeChecker::lookupUserVar(const std::string& n) {
         for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
@@ -49,11 +52,13 @@ namespace vayu {
     void TypeChecker::installBuiltins() {
         auto A = Types::Any();
         auto listAny = Types::List(A);
+        auto listStr = Types::List(Types::Str());
 
         auto B = [&](const char* name, TypePtr t) {
             builtins_[name] = std::move(t);
             };
 
+        // ---- Core ----
         B("print", Types::Function({ A }, Types::None()));
         B("str", Types::Function({ A }, Types::Str()));
         B("int", Types::Function({ A }, Types::Int()));
@@ -69,6 +74,7 @@ namespace vayu {
         B("chr", Types::Function({ Types::Int() }, Types::Str()));
         B("list", Types::Function({ A }, listAny));
 
+        // ---- Higher-order ----
         B("map", Types::Function({ A, listAny }, listAny));
         B("filter", Types::Function({ A, listAny }, listAny));
         B("sorted", Types::Function({ listAny }, listAny));
@@ -77,7 +83,26 @@ namespace vayu {
         B("all", Types::Function({ listAny }, Types::Bool()));
         B("sum", Types::Function({ listAny }, A));
 
+        // ---- math module placeholder ----
         B("math", Types::Any());
+
+        // ---- Phase 7A: file I/O ----
+        B("read_file", Types::Function({ Types::Str() }, Types::Str()));
+        B("write_file", Types::Function({ Types::Str(), Types::Str() }, Types::None()));
+        B("file_exists", Types::Function({ Types::Str() }, Types::Bool()));
+
+        // ---- Phase 7A: process + CLI ----
+        B("args", Types::Function({}, Types::List(Types::Str())));
+        B("run_command", Types::Function({ Types::Str() }, Types::Int()));
+        B("exit", Types::Function({ Types::Int() }, Types::None()));
+        B("join", Types::Function({ Types::Str(), listStr }, Types::Str()));
+
+        // ---- Phase 7A: input primitives ----
+        B("input", Types::Function({}, Types::Str()));
+        B("read_line", Types::Function({}, Types::Str()));
+        B("read_all", Types::Function({}, Types::Str()));
+        B("read_int", Types::Function({}, Types::Int()));
+        B("print_raw", Types::Function({ Types::Str() }, Types::None()));
     }
 
     void TypeChecker::installBuiltinExceptions() {
@@ -102,27 +127,29 @@ namespace vayu {
     }
 
     // ===========================================================================
-    // Pass 1 — signatures
+    // Pass 1 — declarations
     // ===========================================================================
 
     void TypeChecker::collectSignatures(const Block& program) {
-        // --- structs ---
+        // ---- structs ----
         for (auto& s : program.stmts) {
             if (s->kind != StmtKind::Struct) continue;
             auto* d = static_cast<const StructStmt*>(s.get());
-            if (structs_.count(d->name)) error(d->loc, "struct '" + d->name + "' already defined");
+            if (structs_.count(d->name))
+                error(d->loc, "struct '" + d->name + "' already defined");
             auto st = Types::Struct(d->name, {});
             structs_[d->name] = st;
             std::vector<StructFieldInfo> fields;
             for (auto& f : d->fields) {
                 for (auto& e : fields) if (e.name == f.name)
-                    error(f.loc, "duplicate field '" + f.name + "' in struct '" + d->name + "'");
+                    error(f.loc, "duplicate field '" + f.name +
+                        "' in struct '" + d->name + "'");
                 fields.push_back({ f.name, resolveTypeExpr(f.type.get()) });
             }
             st->fields = std::move(fields);
         }
 
-        // --- classes (2-pass for inheritance) ---
+        // ---- classes (two passes for inheritance) ----
         for (int pass = 0; pass < 2; ++pass) {
             for (auto& s : program.stmts) {
                 if (s->kind != StmtKind::Class) continue;
@@ -136,6 +163,7 @@ namespace vayu {
                 }
                 if (!structs_.count(d->name)) continue;
                 auto ct = structs_[d->name];
+
                 if (!d->parentName.empty()) {
                     auto it = structs_.find(d->parentName);
                     if (it == structs_.end())
@@ -146,20 +174,24 @@ namespace vayu {
                         error(d->loc, "class '" + d->name + "' cannot inherit from itself");
                     ct->parent = it->second;
                 }
+
                 std::vector<StructFieldInfo> fields;
                 for (auto& f : d->fields) {
                     for (auto& e : fields) if (e.name == f.name)
-                        error(f.loc, "duplicate field '" + f.name + "' in class '" + d->name + "'");
+                        error(f.loc, "duplicate field '" + f.name +
+                            "' in class '" + d->name + "'");
                     if (ct->findField(f.name))
                         error(f.loc, "field '" + f.name + "' re-declared in subclass");
                     fields.push_back({ f.name, resolveTypeExpr(f.type.get()) });
                 }
                 ct->fields = std::move(fields);
+
                 for (auto& m : d->methods) {
                     if (ct->methods.count(m->name))
                         error(m->loc, "method '" + m->name + "' declared twice");
                     if (ct->findField(m->name))
-                        error(m->loc, "field '" + m->name + "' already exists; cannot also be a method");
+                        error(m->loc, "field '" + m->name +
+                            "' already exists; cannot also be a method");
                     std::vector<TypePtr> params;
                     for (size_t i = 0; i < m->params.size(); ++i) {
                         if (i == 0) params.push_back(ct);
@@ -175,7 +207,7 @@ namespace vayu {
             }
         }
 
-        // --- functions (recursive — handles nested defs and defs inside methods) ---
+        // ---- functions ----
         collectDefs(program, /*isTopLevel=*/true);
     }
 
@@ -202,7 +234,6 @@ namespace vayu {
                 collectDefs(d->body, /*isTopLevel=*/false);
                 break;
             }
-
             case StmtKind::If: {
                 auto* n = static_cast<const IfStmt*>(s.get());
                 collectDefs(n->thenBody, false);
@@ -210,15 +241,12 @@ namespace vayu {
                 if (n->elseBody) collectDefs(*n->elseBody, false);
                 break;
             }
-
             case StmtKind::While:
                 collectDefs(static_cast<const WhileStmt*>(s.get())->body, false);
                 break;
-
             case StmtKind::For:
                 collectDefs(static_cast<const ForStmt*>(s.get())->body, false);
                 break;
-
             case StmtKind::Try: {
                 auto* n = static_cast<const TryStmt*>(s.get());
                 collectDefs(n->tryBody, false);
@@ -226,13 +254,11 @@ namespace vayu {
                 if (n->finallyBody) collectDefs(*n->finallyBody, false);
                 break;
             }
-
             case StmtKind::Class: {
                 auto* n = static_cast<const ClassStmt*>(s.get());
                 for (auto& m : n->methods) collectDefs(m->body, false);
                 break;
             }
-
             default: break;
             }
         }
@@ -285,23 +311,28 @@ namespace vayu {
     // Helpers
     // ===========================================================================
 
-    TypePtr TypeChecker::commonElementType(const TypePtr& a, const TypePtr& b, SourceLocation loc) {
-        if (a->kind == TypeKind::Error || b->kind == TypeKind::Error) return Types::Error();
+    TypePtr TypeChecker::commonElementType(const TypePtr& a, const TypePtr& b,
+        SourceLocation loc) {
+        if (a->kind == TypeKind::Error || b->kind == TypeKind::Error)
+            return Types::Error();
         if (a->kind == TypeKind::Any) return b;
         if (b->kind == TypeKind::Any) return a;
         if (a->equals(b)) return a;
         bool aN = a->kind == TypeKind::Int || a->kind == TypeKind::Float;
         bool bN = b->kind == TypeKind::Int || b->kind == TypeKind::Float;
         if (aN && bN) {
-            if (a->kind == TypeKind::Float || b->kind == TypeKind::Float) return Types::Float();
+            if (a->kind == TypeKind::Float || b->kind == TypeKind::Float)
+                return Types::Float();
             return Types::Int();
         }
-        error(loc, "incompatible element types: " + a->toString() + " and " + b->toString());
+        error(loc, "incompatible element types: " + a->toString() +
+            " and " + b->toString());
     }
 
     TypePtr TypeChecker::lookupCollectionMethod(const TypePtr& target,
         const std::string& name,
         SourceLocation loc) {
+        // ---- str ----
         if (target->kind == TypeKind::Str) {
             if (name == "upper" || name == "lower" || name == "strip" ||
                 name == "lstrip" || name == "rstrip")
@@ -312,6 +343,8 @@ namespace vayu {
                 return Types::Function({ Types::List(Types::Str()) }, Types::Str());
             if (name == "replace")
                 return Types::Function({ Types::Str(), Types::Str() }, Types::Str());
+            if (name == "substr")
+                return Types::Function({ Types::Int(), Types::Int() }, Types::Str());
             if (name == "find" || name == "index")
                 return Types::Function({ Types::Str() }, Types::Int());
             if (name == "contains" || name == "starts_with" || name == "ends_with")
@@ -320,9 +353,12 @@ namespace vayu {
                 return Types::Function({}, Types::Bool());
             if (name == "char_at")
                 return Types::Function({ Types::Int() }, Types::Str());
+            if (name == "to_int")
+                return Types::Function({}, Types::Int());
             error(loc, "str has no method '" + name + "'");
         }
 
+        // ---- list ----
         if (target->kind == TypeKind::List) {
             TypePtr E = target->params.empty() ? Types::Any() : target->params[0];
             if (name == "append")   return Types::Function({ E }, Types::None());
@@ -335,6 +371,7 @@ namespace vayu {
             error(loc, "list has no method '" + name + "'");
         }
 
+        // ---- map ----
         if (target->kind == TypeKind::Map) {
             TypePtr K = target->params.size() > 0 ? target->params[0] : Types::Str();
             TypePtr V = target->params.size() > 1 ? target->params[1] : Types::Any();
@@ -347,6 +384,7 @@ namespace vayu {
             if (name == "clear")    return Types::Function({}, Types::None());
             error(loc, "map has no method '" + name + "'");
         }
+
         return nullptr;
     }
 
@@ -360,23 +398,30 @@ namespace vayu {
         TypePtr st = structs_.at(name);
         std::vector<bool> seen(decl->fields.size(), false);
         size_t positional = 0;
+
         for (const auto& arg : call->args) {
             TypePtr at = checkExpr(arg.value.get());
             if (arg.name.empty()) {
                 if (positional >= decl->fields.size())
-                    error(arg.loc, "too many positional arguments for struct '" + name + "'");
+                    error(arg.loc, "too many positional arguments for struct '" +
+                        name + "'");
                 TypePtr ft = st->fields[positional].type;
                 if (!isAssignable(ft, at))
                     error(arg.loc, "field '" + decl->fields[positional].name +
-                        "' expects " + ft->toString() + ", got " + at->toString());
-                seen[positional] = true; ++positional;
+                        "' expects " + ft->toString() +
+                        ", got " + at->toString());
+                seen[positional] = true;
+                ++positional;
             }
             else {
                 int idx = -1;
                 for (size_t i = 0; i < decl->fields.size(); ++i)
                     if (decl->fields[i].name == arg.name) { idx = (int)i; break; }
-                if (idx < 0) error(arg.loc, "struct '" + name + "' has no field '" + arg.name + "'");
-                if (seen[idx]) error(arg.loc, "field '" + arg.name + "' given more than once");
+                if (idx < 0)
+                    error(arg.loc, "struct '" + name + "' has no field '" +
+                        arg.name + "'");
+                if (seen[idx])
+                    error(arg.loc, "field '" + arg.name + "' given more than once");
                 TypePtr ft = st->fields[idx].type;
                 if (!isAssignable(ft, at))
                     error(arg.loc, "field '" + arg.name + "' expects " +
@@ -385,8 +430,10 @@ namespace vayu {
             }
         }
         for (size_t i = 0; i < decl->fields.size(); ++i)
-            if (!seen[i]) error(call->loc, "struct '" + name + "' is missing value for field '" +
-                decl->fields[i].name + "'");
+            if (!seen[i])
+                error(call->loc, "struct '" + name +
+                    "' is missing value for field '" +
+                    decl->fields[i].name + "'");
         return st;
     }
 
@@ -429,25 +476,29 @@ namespace vayu {
         if (!s) return;
         switch (s->kind) {
 
-        case StmtKind::Expr:
-            checkExpr(static_cast<const ExprStmt*>(s)->expr.get());
+        case StmtKind::Expr: {
+            auto* n = static_cast<const ExprStmt*>(s);
+            checkExpr(n->expr.get());
             return;
+        }
 
         case StmtKind::Assign: {
             auto* n = static_cast<const AssignStmt*>(s);
 
             if (n->target->kind == ExprKind::NameRef) {
                 TypePtr v = checkExpr(n->value.get());
-                const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
-                // Only look in USER scopes: a fresh assignment should shadow
-                // any builtin (e.g. `sum = 0` overrides the builtin `sum`).
+                const auto* nm =
+                    static_cast<const NameRefExpr*>(n->target.get());
                 TypePtr ex = lookupUserVar(nm->name);
                 if (ex) {
                     if (!isAssignable(ex, v))
                         error(n->loc, "cannot assign " + v->toString() +
-                            " to '" + nm->name + "' of type " + ex->toString());
+                            " to '" + nm->name + "' of type " +
+                            ex->toString());
                 }
-                else defineVar(nm->name, v);
+                else {
+                    defineVar(nm->name, v);
+                }
                 return;
             }
 
@@ -458,11 +509,14 @@ namespace vayu {
                     error(a->loc, "cannot set field '" + a->name +
                         "' on value of type " + t->toString());
                 const StructFieldInfo* f = t->findField(a->name);
-                if (!f) error(a->loc, "type '" + t->name + "' has no field '" + a->name + "'");
+                if (!f)
+                    error(a->loc, "type '" + t->name + "' has no field '" +
+                        a->name + "'");
                 TypePtr v = checkExpr(n->value.get());
                 if (!isAssignable(f->type, v))
                     error(n->loc, "field '" + a->name + "' expects " +
-                        f->type->toString() + ", got " + v->toString());
+                        f->type->toString() + ", got " +
+                        v->toString());
                 return;
             }
 
@@ -474,7 +528,8 @@ namespace vayu {
 
                 if (tgt->kind == TypeKind::List) {
                     if (idx->kind != TypeKind::Int && idx->kind != TypeKind::Any)
-                        error(ix->loc, "list index must be int, got " + idx->toString());
+                        error(ix->loc, "list index must be int, got " +
+                            idx->toString());
                     if (!isAssignable(tgt->params[0], val))
                         error(n->loc, "cannot assign " + val->toString() +
                             " into " + tgt->toString());
@@ -482,7 +537,8 @@ namespace vayu {
                 }
                 if (tgt->kind == TypeKind::Map) {
                     if (!isAssignable(tgt->params[0], idx))
-                        error(ix->loc, "map key must be " + tgt->params[0]->toString() +
+                        error(ix->loc, "map key must be " +
+                            tgt->params[0]->toString() +
                             ", got " + idx->toString());
                     if (!isAssignable(tgt->params[1], val))
                         error(n->loc, "cannot assign " + val->toString() +
@@ -491,7 +547,8 @@ namespace vayu {
                 }
                 if (tgt->kind == TypeKind::Str)
                     error(n->loc, "strings are immutable");
-                error(ix->loc, "cannot index-assign to value of type " + tgt->toString());
+                error(ix->loc, "cannot index-assign to value of type " +
+                    tgt->toString());
             }
 
             error(n->target->loc, "invalid assignment target");
@@ -504,8 +561,8 @@ namespace vayu {
                 TypePtr v = checkExpr(n->value.get());
                 if (!isAssignable(declared, v))
                     error(n->loc, "cannot initialize '" + n->name + "' (" +
-                        declared->toString() + ") with value of type " +
-                        v->toString());
+                        declared->toString() +
+                        ") with value of type " + v->toString());
             }
             defineVar(n->name, declared);
             return;
@@ -515,7 +572,10 @@ namespace vayu {
             auto* n = static_cast<const IfStmt*>(s);
             checkExpr(n->cond.get());
             checkBlock(n->thenBody);
-            for (auto& ec : n->elifs) { checkExpr(ec.cond.get()); checkBlock(ec.body); }
+            for (auto& ec : n->elifs) {
+                checkExpr(ec.cond.get());
+                checkBlock(ec.body);
+            }
             if (n->elseBody) checkBlock(*n->elseBody);
             return;
         }
@@ -523,7 +583,9 @@ namespace vayu {
         case StmtKind::While: {
             auto* n = static_cast<const WhileStmt*>(s);
             checkExpr(n->cond.get());
-            ++loopDepth_; checkBlock(n->body); --loopDepth_;
+            ++loopDepth_;
+            checkBlock(n->body);
+            --loopDepth_;
             return;
         }
 
@@ -545,7 +607,8 @@ namespace vayu {
                 elem = it;
             }
             else {
-                error(n->loc, "cannot iterate over value of type " + it->toString());
+                error(n->loc, "cannot iterate over value of type " +
+                    it->toString());
             }
 
             defineVar(n->targetName, elem);
@@ -559,11 +622,11 @@ namespace vayu {
             auto* n = static_cast<const DefStmt*>(s);
             auto it = functions_.find(n->name);
             if (it == functions_.end())
-                error(n->loc, "internal: missing signature for '" + n->name + "'");
+                error(n->loc, "internal: missing signature for '" +
+                    n->name + "'");
             TypePtr sig = it->second;
 
             defineVar(n->name, sig);
-
             pushScope();
             for (size_t i = 0; i < n->params.size(); ++i)
                 defineVar(n->params[i].name, sig->params[i]);
@@ -583,7 +646,8 @@ namespace vayu {
 
         case StmtKind::Return: {
             auto* n = static_cast<const ReturnStmt*>(s);
-            if (!currentReturnType_) error(n->loc, "'return' outside function");
+            if (!currentReturnType_)
+                error(n->loc, "'return' outside function");
             TypePtr v = n->value ? checkExpr(n->value.get()) : Types::None();
             if (!isAssignable(currentReturnType_, v))
                 error(n->loc, "returning " + v->toString() +
@@ -592,7 +656,8 @@ namespace vayu {
             return;
         }
 
-        case StmtKind::Struct: return;
+        case StmtKind::Struct:
+            return;
 
         case StmtKind::Class: {
             auto* n = static_cast<const ClassStmt*>(s);
@@ -619,7 +684,6 @@ namespace vayu {
                         error(h.exceptionType->loc,
                             "'" + excType->name + "' is not an exception class");
                 }
-
                 pushScope();
                 if (!h.varName.empty()) defineVar(h.varName, excType);
                 for (auto& st : h.body.stmts) checkStmt(st.get());
@@ -638,7 +702,8 @@ namespace vayu {
 
         case StmtKind::Import: {
             auto* n = static_cast<const ImportStmt*>(s);
-            const std::string& bind = n->alias.empty() ? n->moduleName : n->alias;
+            const std::string& bind =
+                n->alias.empty() ? n->moduleName : n->alias;
             defineVar(bind, Types::Any());
             return;
         }
@@ -646,17 +711,21 @@ namespace vayu {
         case StmtKind::FromImport: {
             auto* n = static_cast<const FromImportStmt*>(s);
             for (auto& item : n->items) {
-                const std::string& bind = item.alias.empty() ? item.name : item.alias;
+                const std::string& bind =
+                    item.alias.empty() ? item.name : item.alias;
                 defineVar(bind, Types::Any());
             }
             return;
         }
 
-        case StmtKind::Pass: return;
+        case StmtKind::Pass:
+            return;
+
         case StmtKind::Break:
         case StmtKind::Continue:
             if (loopDepth_ == 0)
-                error(s->loc, s->kind == StmtKind::Break ? "'break' outside loop"
+                error(s->loc, s->kind == StmtKind::Break
+                    ? "'break' outside loop"
                     : "'continue' outside loop");
             return;
         }
@@ -669,12 +738,12 @@ namespace vayu {
     TypePtr TypeChecker::checkExpr(const Expr* e) {
         if (!e) return Types::None();
         switch (e->kind) {
-        case ExprKind::IntLit: return Types::Int();
-        case ExprKind::FloatLit: return Types::Float();
+        case ExprKind::IntLit:    return Types::Int();
+        case ExprKind::FloatLit:  return Types::Float();
         case ExprKind::StringLit: return Types::Str();
-        case ExprKind::CharLit: return Types::Char();
-        case ExprKind::BoolLit: return Types::Bool();
-        case ExprKind::NoneLit: return Types::None();
+        case ExprKind::CharLit:   return Types::Char();
+        case ExprKind::BoolLit:   return Types::Bool();
+        case ExprKind::NoneLit:   return Types::None();
 
         case ExprKind::NameRef: {
             auto* n = static_cast<const NameRefExpr*>(e);
@@ -705,7 +774,8 @@ namespace vayu {
             for (auto& entry : n->entries) {
                 TypePtr k = checkExpr(entry.key.get());
                 if (k->kind != TypeKind::Str && k->kind != TypeKind::Any)
-                    error(entry.key->loc, "map keys must be str, got " + k->toString());
+                    error(entry.key->loc, "map keys must be str, got " +
+                        k->toString());
                 TypePtr v = checkExpr(entry.value.get());
                 if (!valType) valType = v;
                 else valType = commonElementType(valType, v, entry.value->loc);
@@ -732,19 +802,26 @@ namespace vayu {
                 if (t->kind == TypeKind::Float) return Types::Float();
                 if (t->kind == TypeKind::Any)   return Types::Any();
                 if (t->kind == TypeKind::Error) return t;
-                error(n->loc, "cannot apply unary operator to " + t->toString());
+                error(n->loc, "cannot apply unary operator to " +
+                    t->toString());
             }
             return Types::Error();
         }
 
         case ExprKind::Binary: {
             auto* n = static_cast<const BinaryExpr*>(e);
+
             if (n->op == BinOp::And || n->op == BinOp::Or) {
-                checkExpr(n->lhs.get()); checkExpr(n->rhs.get());
+                checkExpr(n->lhs.get());
+                checkExpr(n->rhs.get());
                 return Types::Bool();
             }
-            TypePtr lt = checkExpr(n->lhs.get()), rt = checkExpr(n->rhs.get());
-            if (lt->kind == TypeKind::Error || rt->kind == TypeKind::Error) return Types::Error();
+
+            TypePtr lt = checkExpr(n->lhs.get());
+            TypePtr rt = checkExpr(n->rhs.get());
+
+            if (lt->kind == TypeKind::Error || rt->kind == TypeKind::Error)
+                return Types::Error();
 
             if (n->op == BinOp::In) {
                 if (rt->kind == TypeKind::List || rt->kind == TypeKind::Map) {
@@ -759,6 +836,7 @@ namespace vayu {
                 if (rt->kind == TypeKind::Any) return Types::Bool();
                 error(n->loc, "'in' requires a list, map, or str on the right");
             }
+
             if (lt->kind == TypeKind::Any || rt->kind == TypeKind::Any) {
                 switch (n->op) {
                 case BinOp::Eq: case BinOp::NotEq:
@@ -768,48 +846,69 @@ namespace vayu {
                 default: return Types::Any();
                 }
             }
+
             switch (n->op) {
             case BinOp::Add:
-                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::Int) return Types::Int();
-                if (lt->kind == TypeKind::Float && rt->kind == TypeKind::Float) return Types::Float();
-                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::Float) return Types::Float();
-                if (lt->kind == TypeKind::Float && rt->kind == TypeKind::Int) return Types::Float();
-                if (lt->kind == TypeKind::Str && rt->kind == TypeKind::Str) return Types::Str();
+                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::Int)
+                    return Types::Int();
+                if (lt->kind == TypeKind::Float && rt->kind == TypeKind::Float)
+                    return Types::Float();
+                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::Float)
+                    return Types::Float();
+                if (lt->kind == TypeKind::Float && rt->kind == TypeKind::Int)
+                    return Types::Float();
+                if (lt->kind == TypeKind::Str && rt->kind == TypeKind::Str)
+                    return Types::Str();
                 if (lt->kind == TypeKind::List && rt->kind == TypeKind::List) {
                     if (!lt->params[0]->equals(rt->params[0]))
-                        error(n->loc, "cannot concatenate " + lt->toString() +
-                            " and " + rt->toString());
+                        error(n->loc, "cannot concatenate " +
+                            lt->toString() + " and " +
+                            rt->toString());
                     return lt;
                 }
-                error(n->loc, "cannot add " + lt->toString() + " and " + rt->toString());
+                error(n->loc, "cannot add " + lt->toString() +
+                    " and " + rt->toString());
             case BinOp::Sub: {
                 TypePtr c = commonNumeric(lt, rt);
                 if (c->kind == TypeKind::Error)
-                    error(n->loc, "cannot subtract " + rt->toString() + " from " + lt->toString());
+                    error(n->loc, "cannot subtract " + rt->toString() +
+                        " from " + lt->toString());
                 return c;
             }
             case BinOp::Mul:
-                if (lt->kind == TypeKind::Str && rt->kind == TypeKind::Int) return Types::Str();
-                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::Str) return Types::Str();
-                if (lt->kind == TypeKind::List && rt->kind == TypeKind::Int) return lt;
-                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::List) return rt;
+                if (lt->kind == TypeKind::Str && rt->kind == TypeKind::Int)
+                    return Types::Str();
+                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::Str)
+                    return Types::Str();
+                if (lt->kind == TypeKind::List && rt->kind == TypeKind::Int)
+                    return lt;
+                if (lt->kind == TypeKind::Int && rt->kind == TypeKind::List)
+                    return rt;
                 {
                     TypePtr c = commonNumeric(lt, rt);
                     if (c->kind == TypeKind::Error)
-                        error(n->loc, "cannot multiply " + lt->toString() + " by " + rt->toString());
+                        error(n->loc, "cannot multiply " +
+                            lt->toString() + " by " +
+                            rt->toString());
                     return c;
                 }
             case BinOp::Div: {
-                bool ln = lt->kind == TypeKind::Int || lt->kind == TypeKind::Float;
-                bool rn = rt->kind == TypeKind::Int || rt->kind == TypeKind::Float;
-                if (!ln || !rn) error(n->loc, "cannot divide " + lt->toString() + " by " + rt->toString());
+                bool ln = lt->kind == TypeKind::Int ||
+                    lt->kind == TypeKind::Float;
+                bool rn = rt->kind == TypeKind::Int ||
+                    rt->kind == TypeKind::Float;
+                if (!ln || !rn)
+                    error(n->loc, "cannot divide " + lt->toString() +
+                        " by " + rt->toString());
                 return Types::Float();
             }
             case BinOp::FloorDiv: case BinOp::Mod: case BinOp::Pow: {
                 TypePtr c = commonNumeric(lt, rt);
                 if (c->kind == TypeKind::Error)
-                    error(n->loc, std::string("cannot apply '") + binOpName(n->op) +
-                        "' to " + lt->toString() + " and " + rt->toString());
+                    error(n->loc, std::string("cannot apply '") +
+                        binOpName(n->op) + "' to " +
+                        lt->toString() + " and " +
+                        rt->toString());
                 return c;
             }
             case BinOp::Eq: case BinOp::NotEq:
@@ -829,18 +928,21 @@ namespace vayu {
             if (tgt->kind == TypeKind::Any) return Types::Any();
             if (tgt->kind == TypeKind::List) {
                 if (idx->kind != TypeKind::Int && idx->kind != TypeKind::Any)
-                    error(n->loc, "list index must be int, got " + idx->toString());
+                    error(n->loc, "list index must be int, got " +
+                        idx->toString());
                 return tgt->params.empty() ? Types::Any() : tgt->params[0];
             }
             if (tgt->kind == TypeKind::Map) {
                 if (!isAssignable(tgt->params[0], idx))
-                    error(n->loc, "map key must be " + tgt->params[0]->toString() +
+                    error(n->loc, "map key must be " +
+                        tgt->params[0]->toString() +
                         ", got " + idx->toString());
                 return tgt->params.size() > 1 ? tgt->params[1] : Types::Any();
             }
             if (tgt->kind == TypeKind::Str) {
                 if (idx->kind != TypeKind::Int && idx->kind != TypeKind::Any)
-                    error(n->loc, "str index must be int, got " + idx->toString());
+                    error(n->loc, "str index must be int, got " +
+                        idx->toString());
                 return Types::Str();
             }
             error(n->loc, "cannot index value of type " + tgt->toString());
@@ -863,22 +965,27 @@ namespace vayu {
                     "' on value of type " + t->toString());
             if (const auto* f = t->findField(n->name)) return f->type;
             if (TypePtr m = t->findMethod(n->name)) {
-                std::vector<TypePtr> bound(m->params.begin() + 1, m->params.end());
+                std::vector<TypePtr> bound(m->params.begin() + 1,
+                    m->params.end());
                 return Types::Function(std::move(bound), m->returnType);
             }
-            error(n->loc, "type '" + t->name + "' has no field or method '" + n->name + "'");
+            error(n->loc, "type '" + t->name + "' has no field or method '" +
+                n->name + "'");
         }
 
         case ExprKind::Call: {
             auto* n = static_cast<const CallExpr*>(e);
 
             if (n->callee->kind == ExprKind::NameRef) {
-                const auto* nm = static_cast<const NameRefExpr*>(n->callee.get());
+                const auto* nm =
+                    static_cast<const NameRefExpr*>(n->callee.get());
 
                 if (nm->name == "super") {
-                    if (!currentClass_) error(n->loc, "'super()' outside method");
+                    if (!currentClass_)
+                        error(n->loc, "'super()' outside method");
                     if (!currentClass_->parent)
-                        error(n->loc, "class '" + currentClass_->name + "' has no parent");
+                        error(n->loc, "class '" + currentClass_->name +
+                            "' has no parent");
                     return currentClass_->parent;
                 }
 
@@ -892,13 +999,16 @@ namespace vayu {
                                 error(a.loc, "class '" + nm->name +
                                     "' __init__ does not accept keyword arguments");
                         if (n->args.size() != initSig->params.size() - 1)
-                            error(n->loc, "class '" + nm->name + "' constructor expects " +
+                            error(n->loc, "class '" + nm->name +
+                                "' constructor expects " +
                                 std::to_string(initSig->params.size() - 1) +
-                                " argument(s), got " + std::to_string(n->args.size()));
+                                " argument(s), got " +
+                                std::to_string(n->args.size()));
                         for (size_t i = 0; i < n->args.size(); ++i) {
                             TypePtr at = checkExpr(n->args[i].value.get());
                             if (!isAssignable(initSig->params[i + 1], at))
-                                error(n->args[i].loc, "argument " + std::to_string(i + 1) +
+                                error(n->args[i].loc,
+                                    "argument " + std::to_string(i + 1) +
                                     ": expected " +
                                     initSig->params[i + 1]->toString() +
                                     ", got " + at->toString());
@@ -918,43 +1028,55 @@ namespace vayu {
                                 error(arg.loc, "too many positional arguments");
                             if (!isAssignable(all[pos].type, at))
                                 error(arg.loc, "field '" + all[pos].name +
-                                    "' expects " + all[pos].type->toString() +
+                                    "' expects " +
+                                    all[pos].type->toString() +
                                     ", got " + at->toString());
-                            seen[pos] = true; ++pos;
+                            seen[pos] = true;
+                            ++pos;
                         }
                         else {
                             int idx = -1;
                             for (size_t i = 0; i < all.size(); ++i)
-                                if (all[i].name == arg.name) { idx = (int)i; break; }
-                            if (idx < 0) error(arg.loc, "no field '" + arg.name + "'");
-                            if (seen[idx]) error(arg.loc, "field given twice");
+                                if (all[i].name == arg.name) {
+                                    idx = (int)i; break;
+                                }
+                            if (idx < 0)
+                                error(arg.loc, "no field '" + arg.name + "'");
+                            if (seen[idx])
+                                error(arg.loc, "field given twice");
                             if (!isAssignable(all[idx].type, at))
-                                error(arg.loc, "field '" + arg.name + "' expects " +
-                                    all[idx].type->toString() + ", got " +
-                                    at->toString());
+                                error(arg.loc, "field '" + arg.name +
+                                    "' expects " +
+                                    all[idx].type->toString() +
+                                    ", got " + at->toString());
                             seen[idx] = true;
                         }
                     }
                     for (size_t i = 0; i < all.size(); ++i)
-                        if (!seen[i]) error(n->loc, "missing field '" + all[i].name + "'");
+                        if (!seen[i])
+                            error(n->loc, "missing field '" + all[i].name + "'");
                     return ct;
                 }
             }
 
             TypePtr callee = checkExpr(n->callee.get());
 
+            // Methods with optional trailing args: split/strip.
             if (n->callee->kind == ExprKind::Attr) {
                 auto* attr = static_cast<const AttrExpr*>(n->callee.get());
                 if (attr->name == "split" || attr->name == "strip") {
                     std::vector<TypePtr> argTypes;
-                    for (auto& a : n->args) argTypes.push_back(checkExpr(a.value.get()));
+                    for (auto& a : n->args)
+                        argTypes.push_back(checkExpr(a.value.get()));
                     if (argTypes.size() > 1)
                         error(n->loc, "method takes 0 or 1 argument(s), got " +
                             std::to_string(argTypes.size()));
-                    if (argTypes.size() == 1 && !isAssignable(Types::Str(), argTypes[0]))
+                    if (argTypes.size() == 1 &&
+                        !isAssignable(Types::Str(), argTypes[0]))
                         error(n->args[0].loc, "argument must be str, got " +
                             argTypes[0]->toString());
-                    return callee->returnType ? callee->returnType : Types::None();
+                    return callee->returnType ? callee->returnType
+                        : Types::None();
                 }
             }
 
@@ -968,19 +1090,24 @@ namespace vayu {
 
             const NameRefExpr* nm =
                 (n->callee->kind == ExprKind::NameRef)
-                ? static_cast<const NameRefExpr*>(n->callee.get()) : nullptr;
+                ? static_cast<const NameRefExpr*>(n->callee.get())
+                : nullptr;
             if (nm && (nm->name == "print" || nm->name == "min" ||
                 nm->name == "max" || nm->name == "range" ||
-                nm->name == "list" || nm->name == "sorted"))
+                nm->name == "list" || nm->name == "sorted" ||
+                nm->name == "input"))
                 return callee->returnType ? callee->returnType : Types::None();
 
             if (argTypes.size() != callee->params.size())
-                error(n->loc, "function expects " + std::to_string(callee->params.size()) +
-                    " argument(s), got " + std::to_string(argTypes.size()));
+                error(n->loc, "function expects " +
+                    std::to_string(callee->params.size()) +
+                    " argument(s), got " +
+                    std::to_string(argTypes.size()));
             for (size_t i = 0; i < argTypes.size(); ++i)
                 if (!isAssignable(callee->params[i], argTypes[i]))
-                    error(n->args[i].loc, "argument " + std::to_string(i + 1) +
-                        ": expected " + callee->params[i]->toString() +
+                    error(n->args[i].loc, "argument " +
+                        std::to_string(i + 1) + ": expected " +
+                        callee->params[i]->toString() +
                         ", got " + argTypes[i]->toString());
             return callee->returnType ? callee->returnType : Types::None();
         }

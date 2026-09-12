@@ -24,7 +24,7 @@ namespace vayu {
         std::string qbePath_;
         std::string ccPath_;
         std::string qbeTarget_;
-        std::string outputExe_;   // optional
+        std::string outputExe_;
         std::string buildQBE(const Block& program, const std::string& sourceDir);
         bool        writeRuntimeC(const std::string& path) const;
     };

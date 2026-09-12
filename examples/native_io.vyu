@@ -1,0 +1,67 @@
+# Phase 7A — file I/O, string ops, and Python-style input().
+
+# ===========================================================================
+# Python-style input
+# ===========================================================================
+name = input("What is your name? ")
+print("Hello, " + name + "!")
+
+age = int(input("How old are you? "))
+print("Next year you will be " + str(age + 1) + ".")
+
+# ===========================================================================
+# File I/O
+# ===========================================================================
+write_file("_native_io_test.txt", "Hello from Vayu native!\nLine two.\n")
+print(file_exists("_native_io_test.txt"))     # true
+
+content = read_file("_native_io_test.txt")
+print(len(content))                           # 35
+
+# ---- String indexing ----
+print(content[0])                             # H
+print(content[6])                             # f
+
+# ---- ord / chr ----
+print(ord("A"))                               # 65
+print(chr(66))                                # B
+print(ord(content[0]))                        # 72
+
+# ---- Split / join / replace / strip ----
+parts = "alpha,beta,gamma".split(",")
+print(parts)                                  # ["alpha", "beta", "gamma"]
+print(len(parts))                             # 3
+print(parts[1])                               # beta
+
+joined = "-".join(["a", "b", "c"])
+print(joined)                                 # a-b-c
+
+r = "hello world".replace("world", "Vayu")
+print(r)                                      # hello Vayu
+
+stripped = "   padded   ".strip()
+print(stripped)                               # padded
+
+# ---- Predicates + int parsing ----
+print("12345".is_digit())                     # true
+print("abcde".is_alpha())                     # true
+print("   ".is_space())                       # true
+print("42".to_int() + 8)                      # 50
+
+# ---- CLI args ----
+a = args()
+print(len(a))                                 # 0
+
+# ---- File round trip ----
+tmp = read_file("_native_io_test.txt")
+write_file("_native_io_out.txt", tmp.replace("Hello", "Goodbye"))
+out = read_file("_native_io_out.txt")
+print(len(out))                               # 37
+
+# ---- Character classification loop ----
+letters = 0
+for i in range(len(content)):
+    c = content[i]
+    if c.is_alpha():
+        letters = letters + 1
+print(letters)                                # 26

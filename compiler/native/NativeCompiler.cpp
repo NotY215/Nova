@@ -52,11 +52,11 @@ namespace vayu {
         struct ClassInfo {
             std::string                                       name;
             std::string                                       parentName;
-            std::vector<std::string>                          fields;      // own + inherited
+            std::vector<std::string>                          fields;
             std::unordered_map<std::string, int>              fieldOffsets;
             int                                               totalSize = 0;
             const ClassStmt* decl = nullptr;
-            std::unordered_map<std::string, const DefStmt*>   methods;     // own methods only
+            std::unordered_map<std::string, const DefStmt*>   methods;
             const ClassInfo* parent = nullptr;
             bool                                              hasInit = false;
             const DefStmt* initDecl = nullptr;
@@ -479,11 +479,11 @@ namespace vayu {
             }
 
             // =========================================================================
-            // Classes — collect, link parents, propagate fields + __init__
+            // Classes
             // =========================================================================
 
             void collectClasses(const Block& program) {
-                // ---- Pass 1: assign global field offsets ----
+                // Pass 1: field offsets.
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Class) {
                         auto* n = static_cast<const ClassStmt*>(s.get());
@@ -496,8 +496,7 @@ namespace vayu {
                         for (auto& f : n->fields) allocFieldOffset(f.name);
                     }
                 }
-
-                // ---- Pass 2: build ClassInfo; ci.fields = OWN fields ----
+                // Pass 2: ClassInfo with own fields.
                 for (auto& stmt : program.stmts) {
                     if (stmt->kind != StmtKind::Class) continue;
                     auto* n = static_cast<const ClassStmt*>(stmt.get());
@@ -516,16 +515,14 @@ namespace vayu {
                     }
                     classes_[n->name] = std::move(ci);
                 }
-
-                // ---- Pass 3: link parent pointers ----
+                // Pass 3: parent pointers.
                 for (auto it = classes_.begin(); it != classes_.end(); ++it) {
                     ClassInfo& ci = it->second;
                     if (ci.parentName.empty()) continue;
                     auto pit = classes_.find(ci.parentName);
                     if (pit != classes_.end()) ci.parent = &pit->second;
                 }
-
-                // ---- Pass 4: propagate inherited fields (fixed point) ----
+                // Pass 4: inherited fields (fixed point).
                 std::unordered_map<std::string, std::vector<std::string>> ownFields;
                 for (auto it = classes_.begin(); it != classes_.end(); ++it)
                     ownFields[it->first] = it->second.fields;
@@ -535,9 +532,8 @@ namespace vayu {
                     for (auto it = classes_.begin(); it != classes_.end(); ++it) {
                         ClassInfo& ci = it->second;
                         std::vector<std::string> rebuilt;
-                        if (ci.parent) {
+                        if (ci.parent)
                             for (auto& f : ci.parent->fields) rebuilt.push_back(f);
-                        }
                         for (auto& f : ownFields[ci.name]) {
                             bool dup = false;
                             for (auto& r : rebuilt) if (r == f) { dup = true; break; }
@@ -550,16 +546,12 @@ namespace vayu {
                     }
                     if (!changed) break;
                 }
-
-                // ---- Pass 5a: mark the actual __init__ definer ----
-// Must run BEFORE inheritance propagation, otherwise a subclass that
-// has inherited `hasInit` but no own __init__ would claim to define it.
+                // Pass 5a: mark init owner.
                 for (auto it = classes_.begin(); it != classes_.end(); ++it) {
                     ClassInfo& ci = it->second;
                     if (ci.hasInit && !ci.initOwner) ci.initOwner = &ci;
                 }
-
-                // ---- Pass 5b: propagate __init__ signature down the chain ----
+                // Pass 5b: propagate __init__ signature.
                 for (int pass = 0; pass < 8; ++pass) {
                     bool changed = false;
                     for (auto it = classes_.begin(); it != classes_.end(); ++it) {
@@ -567,23 +559,15 @@ namespace vayu {
                         if (ci.hasInit || !ci.parent || !ci.parent->hasInit) continue;
                         ci.hasInit = true;
                         ci.initDecl = ci.parent->initDecl;
-                        ci.initOwner = ci.parent->initOwner;   // now non-null
+                        ci.initOwner = ci.parent->initOwner;
                         changed = true;
                     }
                     if (!changed) break;
                 }
-                // Mark the actual definer.
+                // Pass 6: offsets + size.
                 for (auto it = classes_.begin(); it != classes_.end(); ++it) {
                     ClassInfo& ci = it->second;
-                    if (ci.hasInit && !ci.initOwner) ci.initOwner = &ci;
-                }
-
-                // ---- Pass 6: fill fieldOffsets + totalSize ----
-                for (auto it = classes_.begin(); it != classes_.end(); ++it) {
-                    ClassInfo& ci = it->second;
-                    for (auto& f : ci.fields)
-                        ci.fieldOffsets[f] = fieldGlobals_.at(f);
-
+                    for (auto& f : ci.fields) ci.fieldOffsets[f] = fieldGlobals_.at(f);
                     int maxOff = -8;
                     for (auto& kv : ci.fieldOffsets)
                         if (kv.second > maxOff) maxOff = kv.second;
@@ -605,7 +589,6 @@ namespace vayu {
                 return it == classes_.end() ? nullptr : &it->second;
             }
 
-            /// Walk up the hierarchy to find the class that declares the method.
             const ClassInfo* findClassDefiningMethod(const ClassInfo* ci,
                 const std::string& name) const {
                 for (auto c = ci; c; c = c->parent) {
@@ -862,6 +845,14 @@ namespace vayu {
                         r.type = tgt.valType == VType::Unknown ? VType::Int : tgt.valType;
                         return r;
                     }
+                    if (tgt.type == VType::Str) {
+                        // String indexing: return a length-1 VayuStr.
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_char_at(l " + tgt.ssa +
+                            ", l " + idx.ssa + ")");
+                        r.ssa = t; r.type = VType::Str;
+                        return r;
+                    }
                     throw std::runtime_error("native: index on unsupported type");
                 }
 
@@ -913,8 +904,6 @@ namespace vayu {
                     std::string t = newTemp();
                     line(t + " =l loadl " + addr);
                     r.ssa = t;
-
-                    // Walk the class hierarchy to find the field's declared type.
                     for (auto c = ci; c; c = c->parent) {
                         if (!c->decl) continue;
                         bool found = false;
@@ -1003,6 +992,10 @@ namespace vayu {
                 }
                 return {};
             }
+
+            // =========================================================================
+            // Builtin methods on list / map / str
+            // =========================================================================
 
             bool tryBuiltinMethod(const std::string& recvName, const Val& recv,
                 const CallExpr* call, Val& r) {
@@ -1105,9 +1098,75 @@ namespace vayu {
                         line(t + " =l call " + fn + "(l " + recv.ssa + ", l " + sub.ssa + ")");
                         r.ssa = t; r.type = VType::Bool; return true;
                     }
+                    // ---- Phase 7A: new string methods ----
+                    if (recvName == "char_at") {
+                        Val i = argV(0);
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_char_at(l " + recv.ssa +
+                            ", l " + i.ssa + ")");
+                        r.ssa = t; r.type = VType::Str; return true;
+                    }
+                    if (recvName == "split") {
+                        Val sep = argV(0);
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_split(l " + recv.ssa +
+                            ", l " + sep.ssa + ")");
+                        r.ssa = t; r.type = VType::List; r.elemType = VType::Str;
+                        return true;
+                    }
+                    if (recvName == "replace") {
+                        Val o = argV(0), nw = argV(1);
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_replace(l " + recv.ssa +
+                            ", l " + o.ssa + ", l " + nw.ssa + ")");
+                        r.ssa = t; r.type = VType::Str; return true;
+                    }
+                    if (recvName == "substr") {
+                        Val a = argV(0), b = argV(1);
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_substr(l " + recv.ssa +
+                            ", l " + a.ssa + ", l " + b.ssa + ")");
+                        r.ssa = t; r.type = VType::Str; return true;
+                    }
+                    if (recvName == "strip") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_strip(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::Str; return true;
+                    }
+                    if (recvName == "is_digit") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_is_digit(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::Bool; return true;
+                    }
+                    if (recvName == "is_alpha") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_is_alpha(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::Bool; return true;
+                    }
+                    if (recvName == "is_space") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_is_space(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::Bool; return true;
+                    }
+                    if (recvName == "to_int") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_to_int(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::Int; return true;
+                    }
+                    if (recvName == "join") {
+                        Val lst = argV(0);
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_join(l " + recv.ssa +
+                            ", l " + lst.ssa + ")");
+                        r.ssa = t; r.type = VType::Str; return true;
+                    }
                 }
                 return false;
             }
+
+            // =========================================================================
+            // Calls
+            // =========================================================================
 
             Val emitCall(const CallExpr* n) {
                 Val r;
@@ -1329,6 +1388,162 @@ namespace vayu {
                     throw std::runtime_error(
                         "native: str() unsupported on this type");
                 }
+                if (name == "int") {
+                    Val v = emitExpr(n->args[0].value.get());
+                    if (v.type == VType::Int)  return v;
+                    if (v.type == VType::Bool) return v;   // bools are 0/1 as i64
+                    if (v.type == VType::Str) {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_to_int(l " + v.ssa + ")");
+                        r.ssa = t; r.type = VType::Int;
+                        return r;
+                    }
+                    throw std::runtime_error(
+                        "native: int() unsupported on this type");
+                }
+
+                if (name == "float") {
+                    // No floats in the native backend yet; pass numeric values through.
+                    Val v = emitExpr(n->args[0].value.get());
+                    return v;
+                }
+
+                if (name == "bool") {
+                    Val v = emitExpr(n->args[0].value.get());
+                    if (v.type == VType::Bool) return v;
+                    std::string w = newTemp();
+                    line(w + " =w cnel " + v.ssa + ", 0");
+                    std::string ext = newTemp();
+                    line(ext + " =l extsw " + w);
+                    r.ssa = ext; r.type = VType::Bool;
+                    return r;
+                }
+
+                if (name == "ord") {
+                    Val v = emitExpr(n->args[0].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_ord(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+
+                if (name == "chr") {
+                    Val v = emitExpr(n->args[0].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_chr(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+
+                if (name == "read_file") {
+                    Val p = emitExpr(n->args[0].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_read_file(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (name == "read_line") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_read_line()");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+
+                if (name == "read_all") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_read_all()");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+
+                if (name == "read_int") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_read_int()");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (name == "input") {
+                    if (n->args.size() > 1)
+                        throw std::runtime_error(
+                            "native: input() takes 0 or 1 argument");
+                    std::string t = newTemp();
+                    if (n->args.empty()) {
+                        line(t + " =l call $vayu_input_plain()");
+                    }
+                    else {
+                        Val p = emitExpr(n->args[0].value.get());
+                        if (p.type != VType::Str)
+                            throw std::runtime_error(
+                                "native: input() prompt must be a string");
+                        line(t + " =l call $vayu_input_prompt(l " + p.ssa + ")");
+                    }
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+
+                if (name == "print_raw") {
+                    Val v = emitExpr(n->args[0].value.get());
+                    if (v.type == VType::Str) {
+                        line("call $vayu_print_raw(l " + v.ssa + ")");
+                    }
+                    else {
+                        // Fall back: format to a temp string then print raw.
+                        // For simplicity, require a str argument.
+                        throw std::runtime_error(
+                            "native: print_raw() requires a str argument");
+                    }
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+
+                if (name == "write_file") {
+                    Val p = emitExpr(n->args[0].value.get());
+                    Val c = emitExpr(n->args[1].value.get());
+                    line("call $vayu_write_file(l " + p.ssa + ", l " + c.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+
+                if (name == "file_exists") {
+                    Val p = emitExpr(n->args[0].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_file_exists(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+
+                if (name == "args") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_get_args()");
+                    r.ssa = t; r.type = VType::List; r.elemType = VType::Str;
+                    return r;
+                }
+
+                if (name == "run_command") {
+                    Val c = emitExpr(n->args[0].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_run_command(l " + c.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+
+                if (name == "exit") {
+                    Val c = emitExpr(n->args[0].value.get());
+                    line("call $vayu_exit(l " + c.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+
+                if (name == "join") {
+                    // join(sep, list) -> str
+                    Val sep = emitExpr(n->args[0].value.get());
+                    Val lst = emitExpr(n->args[1].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_str_join(l " + sep.ssa +
+                        ", l " + lst.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
 
                 if (name == "range")
                     throw std::runtime_error("native: range() only in `for` loops");
@@ -1382,6 +1597,10 @@ namespace vayu {
                 r.ssa = t; r.type = VType::Unknown;
                 return r;
             }
+
+            // =========================================================================
+            // Statements
+            // =========================================================================
 
             void emitStmt(const Stmt* s) {
                 if (!s) return;
@@ -2000,19 +2219,11 @@ namespace vayu {
             }
 
             // Emit a branch-condition expression as a `w` SSA value suitable for
-  // `jnz`.  When the expression is itself a comparison, we bypass the
-  // usual i64 round-trip and emit the compare directly at width `w`.
-  //
-  // Without this, every `if x < N:` costs:
-  //     %c  =w csltl %x, N
-  //     %e  =l extsw %c
-  //     %z  =w cnel %e, 0
-  //     jnz %z, ...
-  // This function collapses the middle two instructions.
+            // `jnz`.  When the expression is itself a comparison, we bypass the
+            // usual i64 round-trip and emit the compare directly at width `w`.
             std::string emitCond(const Expr* e) {
                 if (!e) return "0";
 
-                // ---- Direct comparisons ----
                 if (e->kind == ExprKind::Binary) {
                     auto* b = static_cast<const BinaryExpr*>(e);
 
@@ -2023,8 +2234,6 @@ namespace vayu {
                         Val a = emitExpr(b->lhs.get());
                         Val c = emitExpr(b->rhs.get());
 
-                        // String comparison: strings compare by value via a
-                        // runtime call returning i64.  Compress to `w`.
                         bool strCmp =
                             (a.type == VType::Str || c.type == VType::Str) &&
                             (b->op == BinOp::Eq || b->op == BinOp::NotEq);
@@ -2039,7 +2248,6 @@ namespace vayu {
                             return w;
                         }
 
-                        // Numeric comparison: emit at width `w` and stop.
                         const char* opName = nullptr;
                         switch (b->op) {
                         case BinOp::Eq:    opName = "ceql";  break;
@@ -2056,9 +2264,6 @@ namespace vayu {
                     }
 
                     case BinOp::And: {
-                        // Short-circuit would need basic blocks; for now emit both
-                        // conds and AND the `w` results.  Safe when neither side
-                        // has side effects.
                         std::string w1 = emitCond(b->lhs.get());
                         std::string w2 = emitCond(b->rhs.get());
                         std::string w = newTemp();
@@ -2076,7 +2281,6 @@ namespace vayu {
                     }
                 }
 
-                // ---- `not x` flips the condition ----
                 if (e->kind == ExprKind::Unary) {
                     auto* u = static_cast<const UnaryExpr*>(e);
                     if (u->op == UnOp::Not) {
@@ -2087,13 +2291,11 @@ namespace vayu {
                     }
                 }
 
-                // ---- `true` / `false` literals as conditions ----
                 if (e->kind == ExprKind::BoolLit) {
                     auto* bl = static_cast<const BoolLitExpr*>(e);
                     return bl->value ? "1" : "0";
                 }
 
-                // ---- General case: emit as i64, then collapse to `w` ----
                 Val v = emitExpr(e);
                 std::string t = newTemp();
                 line(t + " =w cnel " + v.ssa + ", 0");
@@ -2155,7 +2357,7 @@ namespace vayu {
     } // anonymous namespace
 
     // ===========================================================================
-    // Runtime C
+    // Runtime C — Phase 7A adds file I/O, process, args, and string helpers.
     // ===========================================================================
 
     static const char* kRuntimeC = R"C(
@@ -2164,6 +2366,7 @@ namespace vayu {
 #include <string.h>
 #include <stdint.h>
 #include <setjmp.h>
+#include <ctype.h>
 
 typedef struct { int64_t len; char data[]; } VayuStr;
 typedef struct { int64_t len; int64_t cap; int64_t* items; } VayuList;
@@ -2172,7 +2375,13 @@ typedef struct { int64_t len; int64_t cap; VayuMapEntry* entries; } VayuMap;
 typedef struct { VayuStr* typeName; VayuStr* message; } VayuExc;
 
 void vayu_raise_str(VayuStr* typeName, VayuStr* msg);
+int64_t vayu_str_to_int(VayuStr* s);
 
+// ---- process-global argv (set once at startup) ----------------------------
+static int    g_argc = 0;
+static char** g_argv = NULL;
+
+// ---- allocation -----------------------------------------------------------
 void* vayu_alloc(int64_t size) {
     void* p = malloc((size_t)size);
     if (!p) { fprintf(stderr, "vayu: oom\n"); exit(1); }
@@ -2182,7 +2391,7 @@ void* vayu_alloc(int64_t size) {
 static VayuStr* vayu_mkstr(const char* cstr, int64_t n) {
     VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)n + 1);
     s->len = n;
-    memcpy(s->data, cstr, (size_t)n);
+    if (n > 0) memcpy(s->data, cstr, (size_t)n);
     s->data[n] = 0;
     return s;
 }
@@ -2190,19 +2399,99 @@ static VayuStr* vayu_mkstr_c(const char* cstr) {
     return vayu_mkstr(cstr, (int64_t)strlen(cstr));
 }
 
+// ---- printing -------------------------------------------------------------
 void vayu_print_int(long long v) { printf("%lld\n", v); }
 void vayu_print_bool(long long v) { printf("%s\n", v ? "true" : "false"); }
 void vayu_print_int_noln(long long v) { printf("%lld", v); }
 void vayu_print_bool_noln(long long v) { printf("%s", v ? "true" : "false"); }
 void vayu_print_space(void) { putchar(' '); }
 void vayu_print_ln(void) { putchar('\n'); }
+void vayu_print_str(VayuStr* s) {
+    fwrite(s->data, 1, (size_t)s->len, stdout); putchar('\n');
+}
+void vayu_print_str_noln(VayuStr* s) {
+    fwrite(s->data, 1, (size_t)s->len, stdout);
+}
 
+
+// ---- input primitives -----------------------------------------------------
+void vayu_print_raw(VayuStr* s) {
+    fwrite(s->data, 1, (size_t)s->len, stdout);
+    fflush(stdout);
+}
+
+VayuStr* vayu_read_line(void) {
+    size_t cap = 256, len = 0;
+    char* buf = (char*)malloc(cap);
+    int c;
+    while ((c = fgetc(stdin)) != EOF && c != '\n') {
+        if (len + 1 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        buf[len++] = (char)c;
+    }
+    if (c == EOF && len == 0) {
+        free(buf);
+        return vayu_mkstr("", 0);
+    }
+    // Strip a trailing \r if present (Windows line endings).
+    if (len > 0 && buf[len - 1] == '\r') --len;
+    VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + len + 1);
+    s->len = (int64_t)len;
+    memcpy(s->data, buf, len);
+    s->data[len] = 0;
+    free(buf);
+    return s;
+}
+
+VayuStr* vayu_read_all(void) {
+    size_t cap = 4096, len = 0;
+    char* buf = (char*)malloc(cap);
+    size_t n;
+    while ((n = fread(buf + len, 1, cap - len, stdin)) > 0) {
+        len += n;
+        if (len == cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+    }
+    VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + len + 1);
+    s->len = (int64_t)len;
+    memcpy(s->data, buf, len);
+    s->data[len] = 0;
+    free(buf);
+    return s;
+}
+
+int64_t vayu_read_int(void) {
+    VayuStr* s = vayu_read_line();
+    return vayu_str_to_int(s);
+}
+
+// ---- Python-style input ------------------------------------------------
+VayuStr* vayu_input_plain(void) {
+    return vayu_read_line();
+}
+
+VayuStr* vayu_input_prompt(VayuStr* prompt) {
+    if (prompt->len) fwrite(prompt->data, 1, (size_t)prompt->len, stdout);
+    fflush(stdout);
+    return vayu_read_line();
+}
+
+// ---- string concat helper for building diagnostic messages ---------------
+static VayuStr* vayu_concat_c(const char* prefix, VayuStr* s) {
+    int64_t plen = (int64_t)strlen(prefix);
+    VayuStr* r = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)(plen + s->len) + 1);
+    r->len = plen + s->len;
+    if (plen)   memcpy(r->data, prefix, (size_t)plen);
+    if (s->len) memcpy(r->data + plen, s->data, (size_t)s->len);
+    r->data[r->len] = 0;
+    return r;
+}
+
+// ---- strings --------------------------------------------------------------
 VayuStr* vayu_str_concat(VayuStr* a, VayuStr* b) {
     int64_t n = a->len + b->len;
     VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)n + 1);
     s->len = n;
-    memcpy(s->data, a->data, (size_t)a->len);
-    memcpy(s->data + a->len, b->data, (size_t)b->len);
+    if (a->len) memcpy(s->data, a->data, (size_t)a->len);
+    if (b->len) memcpy(s->data + a->len, b->data, (size_t)b->len);
     s->data[n] = 0;
     return s;
 }
@@ -2213,12 +2502,7 @@ int64_t vayu_str_eq(VayuStr* a, VayuStr* b) {
 }
 int64_t vayu_str_ne(VayuStr* a, VayuStr* b) { return !vayu_str_eq(a, b); }
 int64_t vayu_str_len(VayuStr* s) { return s->len; }
-void vayu_print_str(VayuStr* s) {
-    fwrite(s->data, 1, (size_t)s->len, stdout); putchar('\n');
-}
-void vayu_print_str_noln(VayuStr* s) {
-    fwrite(s->data, 1, (size_t)s->len, stdout);
-}
+
 VayuStr* vayu_int_to_str(long long v, long long kind) {
     char buf[64]; int n;
     if (kind == 1) n = snprintf(buf, sizeof(buf), "%s", v ? "true" : "false");
@@ -2268,6 +2552,119 @@ int64_t vayu_str_ends_with(VayuStr* s, VayuStr* p) {
     return memcmp(s->data + (s->len - p->len), p->data, (size_t)p->len) == 0;
 }
 
+// ---- NEW: string indexing, slicing, split/join/replace --------------------
+VayuStr* vayu_str_char_at(VayuStr* s, int64_t i) {
+    if (i < 0) i += s->len;
+    if (i < 0 || i >= s->len) {
+        vayu_raise_str(vayu_mkstr_c("IndexError"),
+                       vayu_mkstr_c("string index out of range"));
+    }
+    return vayu_mkstr(s->data + i, 1);
+}
+VayuStr* vayu_str_substr(VayuStr* s, int64_t start, int64_t end) {
+    if (start < 0) start += s->len;
+    if (end   < 0) end   += s->len;
+    if (start < 0) start = 0;
+    if (end   > s->len) end = s->len;
+    if (end < start) end = start;
+    return vayu_mkstr(s->data + start, end - start);
+}
+VayuStr* vayu_str_replace(VayuStr* s, VayuStr* from, VayuStr* to) {
+    if (from->len == 0) {
+        // Python returns the original if `from` is empty.
+        return vayu_mkstr(s->data, s->len);
+    }
+    // Count occurrences.
+    int64_t count = 0;
+    for (int64_t i = 0; i + from->len <= s->len; ) {
+        if (memcmp(s->data + i, from->data, (size_t)from->len) == 0) {
+            ++count; i += from->len;
+        } else ++i;
+    }
+    int64_t newLen = s->len + count * (to->len - from->len);
+    VayuStr* r = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)newLen + 1);
+    r->len = newLen;
+    int64_t op = 0, ip = 0;
+    while (ip < s->len) {
+        if (ip + from->len <= s->len &&
+            memcmp(s->data + ip, from->data, (size_t)from->len) == 0) {
+            if (to->len) memcpy(r->data + op, to->data, (size_t)to->len);
+            op += to->len;
+            ip += from->len;
+        } else {
+            r->data[op++] = s->data[ip++];
+        }
+    }
+    r->data[newLen] = 0;
+    return r;
+}
+VayuStr* vayu_str_strip(VayuStr* s) {
+    int64_t a = 0, b = s->len;
+    while (a < b && (s->data[a]==' '||s->data[a]=='\t'||s->data[a]=='\n'||
+                     s->data[a]=='\r'||s->data[a]=='\f'||s->data[a]=='\v')) ++a;
+    while (b > a && (s->data[b-1]==' '||s->data[b-1]=='\t'||s->data[b-1]=='\n'||
+                     s->data[b-1]=='\r'||s->data[b-1]=='\f'||s->data[b-1]=='\v')) --b;
+    return vayu_mkstr(s->data + a, b - a);
+}
+int64_t vayu_str_is_digit(VayuStr* s) {
+    if (s->len == 0) return 0;
+    for (int64_t i = 0; i < s->len; ++i) {
+        unsigned char c = (unsigned char)s->data[i];
+        if (!isdigit(c)) return 0;
+    }
+    return 1;
+}
+int64_t vayu_str_is_alpha(VayuStr* s) {
+    if (s->len == 0) return 0;
+    for (int64_t i = 0; i < s->len; ++i) {
+        unsigned char c = (unsigned char)s->data[i];
+        if (!isalpha(c)) return 0;
+    }
+    return 1;
+}
+int64_t vayu_str_is_space(VayuStr* s) {
+    if (s->len == 0) return 0;
+    for (int64_t i = 0; i < s->len; ++i) {
+        unsigned char c = (unsigned char)s->data[i];
+        if (!isspace(c)) return 0;
+    }
+    return 1;
+}
+int64_t vayu_str_to_int(VayuStr* s) {
+    // Simple decimal parse; leading whitespace allowed.
+    int64_t n = 0;
+    int64_t i = 0;
+    int     neg = 0;
+    while (i < s->len && (s->data[i]==' '||s->data[i]=='\t')) ++i;
+    if (i < s->len && (s->data[i]=='-'||s->data[i]=='+')) {
+        neg = (s->data[i]=='-'); ++i;
+    }
+    for (; i < s->len; ++i) {
+        char c = s->data[i];
+        if (c < '0' || c > '9') break;
+        n = n * 10 + (c - '0');
+    }
+    return neg ? -n : n;
+}
+
+// ---- NEW: ord/chr --------------------------------------------------------
+int64_t vayu_ord(VayuStr* s) {
+    if (s->len != 1) {
+        vayu_raise_str(vayu_mkstr_c("ValueError"),
+                       vayu_mkstr_c("ord() requires a length-1 string"));
+    }
+    return (int64_t)(unsigned char)s->data[0];
+}
+VayuStr* vayu_chr(int64_t n) {
+    if (n < 0 || n > 255) {
+        vayu_raise_str(vayu_mkstr_c("ValueError"),
+                       vayu_mkstr_c("chr() argument out of range"));
+    }
+    char c = (char)n;
+    return vayu_mkstr(&c, 1);
+}
+
+// ---- lists ----------------------------------------------------------------
 VayuList* vayu_list_new() {
     VayuList* l = (VayuList*)malloc(sizeof(VayuList));
     l->len = 0; l->cap = 4;
@@ -2332,6 +2729,57 @@ void vayu_list_remove(VayuList* l, int64_t v) {
     }
 }
 
+// ---- NEW: string split/join ----------------------------------------------
+VayuList* vayu_str_split(VayuStr* s, VayuStr* sep) {
+    VayuList* out = vayu_list_new();
+    if (sep->len == 0) {
+        // Split into individual characters.
+        for (int64_t i = 0; i < s->len; ++i)
+            vayu_list_push(out, (int64_t)vayu_mkstr(s->data + i, 1));
+        return out;
+    }
+    int64_t pos = 0;
+    while (pos <= s->len) {
+        int64_t next = -1;
+        for (int64_t i = pos; i + sep->len <= s->len; ++i) {
+            if (memcmp(s->data + i, sep->data, (size_t)sep->len) == 0) {
+                next = i; break;
+            }
+        }
+        if (next < 0) {
+            vayu_list_push(out, (int64_t)vayu_mkstr(s->data + pos, s->len - pos));
+            break;
+        }
+        vayu_list_push(out, (int64_t)vayu_mkstr(s->data + pos, next - pos));
+        pos = next + sep->len;
+    }
+    return out;
+}
+VayuStr* vayu_str_join(VayuStr* sep, VayuList* parts) {
+    // Compute total size.
+    int64_t total = 0;
+    for (int64_t i = 0; i < parts->len; ++i) {
+        VayuStr* p = (VayuStr*)parts->items[i];
+        total += p->len;
+        if (i + 1 < parts->len) total += sep->len;
+    }
+    VayuStr* r = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)total + 1);
+    r->len = total;
+    int64_t op = 0;
+    for (int64_t i = 0; i < parts->len; ++i) {
+        VayuStr* p = (VayuStr*)parts->items[i];
+        if (p->len) memcpy(r->data + op, p->data, (size_t)p->len);
+        op += p->len;
+        if (i + 1 < parts->len) {
+            if (sep->len) memcpy(r->data + op, sep->data, (size_t)sep->len);
+            op += sep->len;
+        }
+    }
+    r->data[total] = 0;
+    return r;
+}
+
+// ---- maps -----------------------------------------------------------------
 static uint64_t hash_str(VayuStr* s) {
     uint64_t h = 1469598103934665603ULL;
     for (int64_t i = 0; i < s->len; ++i) { h ^= (uint8_t)s->data[i]; h *= 1099511628211ULL; }
@@ -2401,6 +2849,7 @@ VayuList* vayu_map_keys(VayuMap* m) {
     return l;
 }
 
+// ---- generic helpers ------------------------------------------------------
 int64_t vayu_len(int64_t v, int64_t kind) {
     switch (kind) {
         case 0: return vayu_str_len((VayuStr*)v);
@@ -2449,6 +2898,7 @@ void vayu_print_map(VayuMap* m, int64_t vk) {
     vayu_print_map_noln(m, vk); putchar('\n');
 }
 
+// ---- arithmetic -----------------------------------------------------------
 long long vayu_floordiv(long long a, long long b) {
     if (b == 0) {
         vayu_raise_str(vayu_mkstr_c("ZeroDivisionError"),
@@ -2468,6 +2918,75 @@ long long vayu_mod(long long a, long long b) {
     return r;
 }
 
+// ---- NEW: file I/O -------------------------------------------------------
+VayuStr* vayu_read_file(VayuStr* path) {
+    // NUL-terminate the path into a stack buffer.
+    char buf[4096];
+    int64_t n = path->len < 4095 ? path->len : 4095;
+    memcpy(buf, path->data, (size_t)n);
+    buf[n] = 0;
+
+    FILE* f = fopen(buf, "rb");
+    if (!f) {
+        vayu_raise_str(vayu_mkstr_c("RuntimeError"),
+                       vayu_concat_c("cannot open file: ", path));
+    }
+    fseek(f, 0, SEEK_END);
+    long long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)sz + 1);
+    s->len = sz;
+    if (sz > 0) fread(s->data, 1, (size_t)sz, f);
+    s->data[sz] = 0;
+    fclose(f);
+    return s;
+}
+void vayu_write_file(VayuStr* path, VayuStr* content) {
+    char buf[4096];
+    int64_t n = path->len < 4095 ? path->len : 4095;
+    memcpy(buf, path->data, (size_t)n);
+    buf[n] = 0;
+
+    FILE* f = fopen(buf, "wb");
+    if (!f) {
+        vayu_raise_str(vayu_mkstr_c("RuntimeError"),
+                       vayu_concat_c("cannot write file: ", path));
+    }
+    fwrite(content->data, 1, (size_t)content->len, f);
+    fclose(f);
+}
+int64_t vayu_file_exists(VayuStr* path) {
+    char buf[4096];
+    int64_t n = path->len < 4095 ? path->len : 4095;
+    memcpy(buf, path->data, (size_t)n);
+    buf[n] = 0;
+    FILE* f = fopen(buf, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+// ---- NEW: process + args + exit ------------------------------------------
+VayuList* vayu_get_args(void) {
+    VayuList* l = vayu_list_new();
+    for (int i = 1; i < g_argc; ++i) {
+        vayu_list_push(l, (int64_t)vayu_mkstr_c(g_argv[i]));
+    }
+    return l;
+}
+int64_t vayu_run_command(VayuStr* cmd) {
+    char buf[8192];
+    int64_t n = cmd->len < 8191 ? cmd->len : 8191;
+    memcpy(buf, cmd->data, (size_t)n);
+    buf[n] = 0;
+    int rc = system(buf);
+    return (int64_t)rc;
+}
+void vayu_exit(int64_t code) {
+    exit((int)code);
+}
+
+// ---- exceptions -----------------------------------------------------------
 #define VAYU_MAX_TRY 64
 
 static jmp_buf  g_jmpBufs[VAYU_MAX_TRY];
@@ -2518,7 +3037,13 @@ void vayu_reraise(void) {
 }
 
 extern void vayu_main(void);
-int main(void) { vayu_main(); return 0; }
+
+int main(int argc, char** argv) {
+    g_argc = argc;
+    g_argv = argv;
+    vayu_main();
+    return 0;
+}
 )C";
 
     bool NativeCompiler::writeRuntimeC(const std::string& path) const {
@@ -2635,13 +3160,12 @@ int main(void) { vayu_main(); return 0; }
             }
         }
 
-        // Intermediate artefacts always go away.
         tryRemove(ssaPath);
         tryRemove(asmPath);
         tryRemove(objPath);
         tryRemove(rtPath);
 
-        if (compileOnly) return 0;   // user wants the exe; leave it in place.
+        if (compileOnly) return 0;
 
         int runRc = std::system(("\"" + exePath + "\"").c_str());
 

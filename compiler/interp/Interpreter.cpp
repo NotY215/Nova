@@ -1405,6 +1405,19 @@ namespace vayu {
                 else throw std::runtime_error("max(): mixed types");
             } return b;
         }
+        Value bi_input(const std::vector<Value>& a) {
+            if (a.size() > 1)
+                throw std::runtime_error("input() takes 0 or 1 argument");
+            if (!a.empty()) {
+                if (!a[0].isString())
+                    throw std::runtime_error("input() prompt must be a string");
+                std::cout << a[0].asString();
+                std::cout.flush();
+            }
+            std::string line;
+            if (!std::getline(std::cin, line)) return Value("");
+            return Value(std::move(line));
+        }
         Value bi_range(const std::vector<Value>& a) {
             if (a.empty() || a.size() > 3)
                 throw std::runtime_error("range() takes 1 to 3 arguments");
@@ -1597,6 +1610,7 @@ namespace vayu {
         add("type", bi_type);
         add("min", bi_min);
         add("max", bi_max);
+        add("input", bi_input);
         add("range", bi_range);
         add("ord", bi_ord);
         add("chr", bi_chr);
