@@ -4,6 +4,8 @@
 
 namespace vayu {
 
+    /// Compiles a Vayu AST to QBE IL, invokes `qbe` + `gcc`, and runs the
+    /// resulting executable.
     class NativeCompiler {
     public:
         NativeCompiler();
@@ -21,7 +23,7 @@ namespace vayu {
         std::string lastError_;
         std::string qbePath_;
         std::string ccPath_;
-        std::string qbeTarget_;   // e.g. "amd64_win" or "amd64_sysv"
+        std::string qbeTarget_;
 
         std::string buildQBE(const Block& program);
         bool        writeRuntimeC(const std::string& path) const;

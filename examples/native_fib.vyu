@@ -1,0 +1,37 @@
+def fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+print(fib(10))
+print(fib(20))
+print(fib(25))
+print(factorial(10))
+
+# for loop
+sum = 0
+for i in range(100):
+    sum = sum + i
+print(sum)
+
+# nested for
+total = 0
+for i in range(5):
+    for j in range(5):
+        total = total + i * j
+print(total)
+
+# break / continue
+n = 0
+for i in range(100):
+    if i == 42:
+        break
+    if i % 2 == 0:
+        continue
+    n = n + 1
+print(n)
