@@ -1,0 +1,415 @@
+# vlex.vyu — A Vayu lexer, written in Vayu.
+# Usage:   vlex <source.vyu>
+# Output:  one line per token:  LINE:COL  TYPE  LEXEME
+
+class Token:
+    kind: str
+    lexeme: str
+    line: int
+    col: int
+
+    def __init__(self, kind: str, lexeme: str, line: int, col: int) -> None:
+        self.kind = kind
+        self.lexeme = lexeme
+        self.line = line
+        self.col = col
+
+class Lexer:
+    src: str
+    pos: int
+    line: int
+    col: int
+    tokens: list<Token>
+    indent_stack: list<int>
+    bracket_depth: int
+    at_line_start: bool
+
+    def __init__(self, source: str) -> None:
+        self.src = source
+        self.pos = 0
+        self.line = 1
+        self.col = 1
+        self.tokens = []
+        self.indent_stack = [0]
+        self.bracket_depth = 0
+        self.at_line_start = true
+
+    def at_end(self) -> bool:
+        return self.pos >= len(self.src)
+
+    def peek(self, ahead: int) -> str:
+        i = self.pos + ahead
+        if i >= len(self.src):
+            return ""
+        return self.src[i]
+
+    def advance(self) -> str:
+        c = self.src[self.pos]
+        self.pos = self.pos + 1
+        if c == "\n":
+            self.line = self.line + 1
+            self.col = 1
+        else:
+            self.col = self.col + 1
+        return c
+
+    def match(self, expected: str) -> bool:
+        if self.at_end():
+            return false
+        if self.src[self.pos] != expected:
+            return false
+        self.advance()
+        return true
+
+    def add(self, kind: str, lexeme: str, line: int, col: int) -> None:
+        self.tokens.append(Token(kind, lexeme, line, col))
+
+    # -----------------------------------------------------------------
+    # Indentation
+    # -----------------------------------------------------------------
+    def handle_line_start(self) -> None:
+        self.at_line_start = false
+        indent = 0
+        while not self.at_end():
+            c = self.peek(0)
+            if c == " ":
+                indent = indent + 1
+                self.advance()
+            elif c == "\t":
+                indent = indent + 4
+                self.advance()
+            else:
+                break
+        if self.at_end():
+            return
+        if self.peek(0) == "\n":
+            return
+        if self.peek(0) == "#":
+            return
+        current = self.indent_stack[len(self.indent_stack) - 1]
+        if indent > current:
+            self.indent_stack.append(indent)
+            self.add("Indent", "", self.line, self.col)
+        elif indent < current:
+            while len(self.indent_stack) > 1 and self.indent_stack[len(self.indent_stack) - 1] > indent:
+                self.indent_stack.pop()
+                self.add("Dedent", "", self.line, self.col)
+            top = self.indent_stack[len(self.indent_stack) - 1]
+            if top != indent:
+                self.add("Invalid", "inconsistent indentation", self.line, self.col)
+
+    # -----------------------------------------------------------------
+    # Sub-scanners
+    # -----------------------------------------------------------------
+    def skip_comment(self) -> None:
+        while not self.at_end() and self.peek(0) != "\n":
+            self.advance()
+
+    def read_identifier(self) -> None:
+        line = self.line
+        col = self.col
+        text = ""
+        while not self.at_end():
+            c = self.peek(0)
+            if c.is_alpha() or c.is_digit() or c == "_":
+                text = text + self.advance()
+            else:
+                break
+        kind = keyword_kind(text)
+        self.add(kind, text, line, col)
+
+    def read_number(self) -> None:
+        line = self.line
+        col = self.col
+        text = ""
+        is_float = false
+        while not self.at_end() and self.peek(0).is_digit():
+            text = text + self.advance()
+        if self.peek(0) == "." and self.peek(1).is_digit():
+            is_float = true
+            text = text + self.advance()
+            while not self.at_end() and self.peek(0).is_digit():
+                text = text + self.advance()
+        if is_float:
+            self.add("Float", text, line, col)
+        else:
+            self.add("Int", text, line, col)
+
+    def read_string(self, quote: str) -> None:
+        line = self.line
+        col = self.col
+        self.advance()
+        text = ""
+        while not self.at_end() and self.peek(0) != quote:
+            if self.peek(0) == "\\" and self.peek(1) != "":
+                self.advance()
+                text = text + self.advance()
+                continue
+            if self.peek(0) == "\n":
+                break
+            text = text + self.advance()
+        if self.at_end() or self.peek(0) != quote:
+            self.add("Invalid", "unterminated string", line, col)
+            return
+        self.advance()
+        if quote == "'":
+            self.add("Char", text, line, col)
+        else:
+            self.add("String", text, line, col)
+
+    def read_operator(self) -> None:
+        line = self.line
+        col = self.col
+        c = self.advance()
+        if c == "+":
+            if self.match("="):
+                self.add("PlusAssign", "+=", line, col)
+            else:
+                self.add("Plus", "+", line, col)
+            return
+        if c == "-":
+            if self.match("="):
+                self.add("MinusAssign", "-=", line, col)
+            elif self.match(">"):
+                self.add("Arrow", "->", line, col)
+            else:
+                self.add("Minus", "-", line, col)
+            return
+        if c == "*":
+            if self.match("*"):
+                self.add("StarStar", "**", line, col)
+            elif self.match("="):
+                self.add("StarAssign", "*=", line, col)
+            else:
+                self.add("Star", "*", line, col)
+            return
+        if c == "/":
+            if self.match("/"):
+                self.add("SlashSlash", "//", line, col)
+            elif self.match("="):
+                self.add("SlashAssign", "/=", line, col)
+            else:
+                self.add("Slash", "/", line, col)
+            return
+        if c == "=":
+            if self.match("="):
+                self.add("Eq", "==", line, col)
+            elif self.match(">"):
+                self.add("FatArrow", "=>", line, col)
+            else:
+                self.add("Assign", "=", line, col)
+            return
+        if c == "!":
+            if self.match("="):
+                self.add("NotEq", "!=", line, col)
+            else:
+                self.add("Invalid", "!", line, col)
+            return
+        if c == "<":
+            if self.match("="):
+                self.add("LtEq", "<=", line, col)
+            else:
+                self.add("Lt", "<", line, col)
+            return
+        if c == ">":
+            if self.match("="):
+                self.add("GtEq", ">=", line, col)
+            else:
+                self.add("Gt", ">", line, col)
+            return
+        if c == ".":
+            self.add("Dot", ".", line, col)
+            return
+        if c == ",":
+            self.add("Comma", ",", line, col)
+            return
+        if c == ":":
+            self.add("Colon", ":", line, col)
+            return
+        if c == ";":
+            self.add("Semicolon", ";", line, col)
+            return
+        if c == "(":
+            self.bracket_depth = self.bracket_depth + 1
+            self.add("LParen", "(", line, col)
+            return
+        if c == ")":
+            if self.bracket_depth > 0:
+                self.bracket_depth = self.bracket_depth - 1
+            self.add("RParen", ")", line, col)
+            return
+        if c == "[":
+            self.bracket_depth = self.bracket_depth + 1
+            self.add("LBracket", "[", line, col)
+            return
+        if c == "]":
+            if self.bracket_depth > 0:
+                self.bracket_depth = self.bracket_depth - 1
+            self.add("RBracket", "]", line, col)
+            return
+        if c == "{":
+            self.bracket_depth = self.bracket_depth + 1
+            self.add("LBrace", "{", line, col)
+            return
+        if c == "}":
+            if self.bracket_depth > 0:
+                self.bracket_depth = self.bracket_depth - 1
+            self.add("RBrace", "}", line, col)
+            return
+        if c == "%":
+            self.add("Percent", "%", line, col)
+            return
+        if c == "&":
+            self.add("Amp", "&", line, col)
+            return
+        if c == "|":
+            self.add("Pipe", "|", line, col)
+            return
+        if c == "^":
+            self.add("Caret", "^", line, col)
+            return
+        if c == "~":
+            self.add("Tilde", "~", line, col)
+            return
+        if c == "@":
+            self.add("At", "@", line, col)
+            return
+        self.add("Invalid", c, line, col)
+
+    # -----------------------------------------------------------------
+    # Main loop
+    # -----------------------------------------------------------------
+    def tokenize(self) -> None:
+        while not self.at_end():
+            if self.at_line_start and self.bracket_depth == 0:
+                self.handle_line_start()
+                if self.at_end():
+                    break
+            c = self.peek(0)
+            if c == "":
+                break
+            if c == " " or c == "\t" or c == "\r":
+                self.advance()
+                continue
+            if c == "\n":
+                if self.bracket_depth == 0 and len(self.tokens) > 0:
+                    self.add("Newline", "\n", self.line, self.col)
+                self.advance()
+                self.at_line_start = true
+                continue
+            if c == "#":
+                self.skip_comment()
+                continue
+            if c.is_alpha() or c == "_":
+                self.read_identifier()
+                continue
+            if c.is_digit():
+                self.read_number()
+                continue
+            if c == "\"" or c == "'":
+                self.read_string(c)
+                continue
+            self.read_operator()
+        while len(self.indent_stack) > 1:
+            self.indent_stack.pop()
+            self.add("Dedent", "", self.line, self.col)
+        self.add("EOF", "", self.line, self.col)
+
+# -----------------------------------------------------------------
+# Keyword lookup — map-based, no one-line ifs.
+# -----------------------------------------------------------------
+def keyword_kind(word: str) -> str:
+    kw = {}
+    kw["def"] = "Def"
+    kw["return"] = "Return"
+    kw["if"] = "If"
+    kw["elif"] = "Elif"
+    kw["else"] = "Else"
+    kw["while"] = "While"
+    kw["for"] = "For"
+    kw["break"] = "Break"
+    kw["continue"] = "Continue"
+    kw["pass"] = "Pass"
+    kw["class"] = "Class"
+    kw["struct"] = "Struct"
+    kw["enum"] = "Enum"
+    kw["interface"] = "Interface"
+    kw["new"] = "New"
+    kw["delete"] = "Delete"
+    kw["import"] = "Import"
+    kw["from"] = "From"
+    kw["as"] = "As"
+    kw["try"] = "Try"
+    kw["except"] = "Except"
+    kw["finally"] = "Finally"
+    kw["with"] = "With"
+    kw["raise"] = "Raise"
+    kw["unsafe"] = "Unsafe"
+    kw["spawn"] = "Spawn"
+    kw["wait"] = "Wait"
+    kw["task"] = "Task"
+    kw["async"] = "Async"
+    kw["await"] = "Await"
+    kw["and"] = "And"
+    kw["or"] = "Or"
+    kw["not"] = "Not"
+    kw["in"] = "In"
+    kw["is"] = "Is"
+    kw["lambda"] = "Lambda"
+    kw["yield"] = "Yield"
+    kw["true"] = "True"
+    kw["false"] = "False"
+    kw["none"] = "None"
+    kw["int"] = "IntKw"
+    kw["float"] = "FloatKw"
+    kw["bool"] = "BoolKw"
+    kw["str"] = "StrKw"
+    kw["char"] = "CharKw"
+    kw["bytes"] = "BytesKw"
+    kw["ptr"] = "Ptr"
+    kw["ref"] = "Ref"
+    kw["unique"] = "Unique"
+    kw["shared"] = "Shared"
+    kw["weak"] = "Weak"
+    if word in kw:
+        return kw[word]
+    return "Identifier"
+
+def pad(s: str, width: int) -> str:
+    while len(s) < width:
+        s = s + " "
+    return s
+
+# -----------------------------------------------------------------
+# Driver
+# -----------------------------------------------------------------
+def main() -> None:
+    a = args()
+    if len(a) < 1:
+        print("usage: vlex <source.vyu>")
+        exit(1)
+    path = a[0]
+    if not file_exists(path):
+        print("vlex: cannot open " + path)
+        exit(1)
+    src = read_file(path)
+    lexer = Lexer(src)
+    lexer.tokenize()
+    i = 0
+    toks = lexer.tokens
+    while i < len(toks):
+        t = toks[i]
+        line = str(t.line)
+        col = str(t.col)
+        if len(line) < 3:
+            line = "  " + line
+            if len(line) < 3:
+                line = " " + line
+        if len(col) < 3:
+            col = "  " + col
+            if len(col) < 3:
+                col = " " + col
+        print(line + ":" + col + "  " + pad(t.kind, 14) + "  " + t.lexeme)
+        i = i + 1
+
+main()

@@ -298,6 +298,8 @@ namespace vayu {
         if (n == "bytes") return Types::Bytes();
         if (n == "None")  return Types::None();
         if (n == "any")   return Types::Any();
+        if (n == "list")  return Types::List(Types::Any());
+        if (n == "map")   return Types::Map(Types::Str(), Types::Any()); 
 
         auto it = structs_.find(n);
         if (it != structs_.end()) return it->second;

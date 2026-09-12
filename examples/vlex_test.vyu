@@ -1,0 +1,11 @@
+# Small Vayu file for the self-hosted lexer.
+name = "NotY"
+age = 17
+
+def greet(who: str) -> str:
+    return "Hello, " + who
+
+if age >= 18:
+    print(greet(name))
+else:
+    print("Minor")

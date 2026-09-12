@@ -1418,6 +1418,33 @@ namespace vayu {
             if (!std::getline(std::cin, line)) return Value("");
             return Value(std::move(line));
         }
+
+        Value bi_read_line(const std::vector<Value>& a) {
+            if (!a.empty())
+                throw std::runtime_error("read_line() takes no arguments");
+            std::string line;
+            if (!std::getline(std::cin, line)) return Value("");
+            return Value(std::move(line));
+        }
+
+        Value bi_read_int(const std::vector<Value>& a) {
+            if (!a.empty())
+                throw std::runtime_error("read_int() takes no arguments");
+            std::string line;
+            if (!std::getline(std::cin, line)) return Value(0LL);
+            try { return Value((long long)std::stoll(line)); }
+            catch (...) {
+                throw std::runtime_error("read_int: invalid integer '" + line + "'");
+            }
+        }
+
+        Value bi_read_all(const std::vector<Value>& a) {
+            if (!a.empty())
+                throw std::runtime_error("read_all() takes no arguments");
+            std::stringstream ss;
+            ss << std::cin.rdbuf();
+            return Value(ss.str());
+        }
         Value bi_range(const std::vector<Value>& a) {
             if (a.empty() || a.size() > 3)
                 throw std::runtime_error("range() takes 1 to 3 arguments");
@@ -1611,6 +1638,9 @@ namespace vayu {
         add("min", bi_min);
         add("max", bi_max);
         add("input", bi_input);
+        add("read_line", bi_read_line);
+        add("read_int", bi_read_int);
+        add("read_all", bi_read_all);
         add("range", bi_range);
         add("ord", bi_ord);
         add("chr", bi_chr);

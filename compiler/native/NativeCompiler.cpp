@@ -46,6 +46,7 @@ namespace vayu {
             VType       type = VType::Unknown;
             std::string clsName;
             VType       elemType = VType::Unknown;
+            std::string elemClsName;
             VType       valType = VType::Unknown;
         };
 
@@ -79,12 +80,29 @@ namespace vayu {
                 collectClasses(program);
                 for (auto& kv : modules_) collectClasses(kv.second);
 
+                // Best-effort pre-pass.  Correctness no longer depends on this
+                // finding every literal — see the final assembly step below.
                 collectStringLiterals(program);
                 for (auto& kv : modules_) collectStringLiterals(kv.second);
                 collectExceptionLiterals();
 
-                if (!strLitData_.empty()) { raw(strLitData_); raw(""); }
+                // Generate all code.  This may add MORE string literals to
+                // strLitData_ as expressions like  map["k"] = "v"  are lowered.
+                emitCodeBody(program);
 
+                // Assemble: data section first, then code.  By this point every
+                // literal referenced anywhere in the code has been registered.
+                std::string result;
+                if (!strLitData_.empty()) {
+                    result += strLitData_;
+                    result += "\n";
+                }
+                result += out_;
+                out_.clear();
+                return result;
+            }
+
+            void emitCodeBody(const Block& program) {
                 // ---------- $vayu_main ----------
                 resetFunctionState();
                 raw("export function $vayu_main() {");
@@ -141,8 +159,6 @@ namespace vayu {
                     emitClassCtor(ci);
                     raw("");
                 }
-
-                return out_;
             }
 
         private:
@@ -347,11 +363,13 @@ namespace vayu {
                     break;
                 case StmtKind::Assign: {
                     auto* n = static_cast<const AssignStmt*>(s);
+                    collectStringLiteralsExpr(n->target.get());
                     collectStringLiteralsExpr(n->value.get());
                     break;
                 }
                 case StmtKind::AnnotAssign: {
                     auto* n = static_cast<const AnnotAssignStmt*>(s);
+                    if (n->type)  collectStringLiteralsExpr(n->type.get());
                     if (n->value) collectStringLiteralsExpr(n->value.get());
                     break;
                 }
@@ -447,6 +465,11 @@ namespace vayu {
                 case ExprKind::Attr: {
                     auto* n = static_cast<const AttrExpr*>(e);
                     collectStringLiteralsExpr(n->target.get());
+                    break;
+                }
+                case ExprKind::Lambda: {
+                    auto* n = static_cast<const LambdaExpr*>(e);
+                    collectStringLiteralsExpr(n->body.get());
                     break;
                 }
                 case ExprKind::ListLit: {
@@ -614,6 +637,7 @@ namespace vayu {
                 VType       type = VType::Unknown;
                 std::string cls;
                 VType       elemType = VType::Unknown;
+                std::string elemCls;
                 VType       valType = VType::Unknown;
             };
 
@@ -680,6 +704,7 @@ namespace vayu {
                         r.type = vi->second.type;
                         r.cls = vi->second.clsName;
                         r.elemType = vi->second.elemType;
+                        r.elemCls = vi->second.elemClsName;
                         r.valType = vi->second.valType;
                     }
                     return r;
@@ -835,7 +860,13 @@ namespace vayu {
                         std::string t = newTemp();
                         line(t + " =l call $vayu_list_get(l " + tgt.ssa + ", l " + idx.ssa + ")");
                         r.ssa = t;
-                        r.type = tgt.elemType == VType::Unknown ? VType::Int : tgt.elemType;
+                        if (tgt.elemType == VType::Unknown) {
+                            r.type = VType::Int;   // best-effort fallback
+                        }
+                        else {
+                            r.type = tgt.elemType;
+                            r.cls = tgt.elemCls;
+                        }
                         return r;
                     }
                     if (tgt.type == VType::Map) {
@@ -910,8 +941,7 @@ namespace vayu {
                         for (auto& f : c->decl->fields) {
                             if (f.name == n->name) {
                                 if (f.type) {
-                                    r.type = typeOfAnnotation(f.type.get());
-                                    r.cls = classNameOfAnnotation(f.type.get());
+                                    inferFromAnnotation(f.type.get(), r);
                                 }
                                 found = true;
                                 break;
@@ -927,12 +957,17 @@ namespace vayu {
                     std::string lst = newTemp();
                     line(lst + " =l call $vayu_list_new()");
                     VType elemT = VType::Unknown;
+                    std::string elemC;
                     for (auto& el : n->elements) {
                         Val v = emitExpr(el.get());
-                        if (elemT == VType::Unknown) elemT = v.type;
+                        if (elemT == VType::Unknown) {
+                            elemT = v.type;
+                            elemC = v.cls;
+                        }
                         line("call $vayu_list_push(l " + lst + ", l " + v.ssa + ")");
                     }
-                    r.ssa = lst; r.type = VType::List; r.elemType = elemT;
+                    r.ssa = lst; r.type = VType::List;
+                    r.elemType = elemT; r.elemCls = elemC;
                     return r;
                 }
 
@@ -975,6 +1010,8 @@ namespace vayu {
                     if (s == "bool")  return VType::Bool;
                     if (s == "str")   return VType::Str;
                     if (s == "float") return VType::Int;
+                    if (s == "list")  return VType::List;
+                    if (s == "map")   return VType::Map;
                     if (classes_.count(s)) return VType::Obj;
                 }
                 if (e->kind == ExprKind::GenericType) {
@@ -983,6 +1020,52 @@ namespace vayu {
                     if (g->name == "map")  return VType::Map;
                 }
                 return VType::Unknown;
+            }
+
+            /// Same as typeOfAnnotation, but also fills in `cls`, `elemType`,
+            /// `elemCls`, and `valType` for object / generic annotations.
+            void inferFromAnnotation(const Expr* e, Val& v) {
+                if (!e) return;
+                if (e->kind == ExprKind::NameRef) {
+                    const auto* n = static_cast<const NameRefExpr*>(e);
+                    const std::string& s = n->name;
+                    if (s == "int")   v.type = VType::Int;
+                    else if (s == "bool")  v.type = VType::Bool;
+                    else if (s == "str")   v.type = VType::Str;
+                    else if (s == "float") v.type = VType::Int;
+                    else if (s == "list")  v.type = VType::List;
+                    else if (s == "map")   v.type = VType::Map;
+                    else if (classes_.count(s)) {
+                        v.type = VType::Obj;
+                        v.cls = s;
+                    }
+                    return;
+                }
+                if (e->kind == ExprKind::GenericType) {
+                    const auto* g = static_cast<const GenericTypeExpr*>(e);
+                    if (g->name == "list") {
+                        v.type = VType::List;
+                        if (!g->typeArgs.empty()) {
+                            Val inner;
+                            inferFromAnnotation(g->typeArgs[0].get(), inner);
+                            v.elemType = inner.type;
+                            v.elemCls = inner.cls;
+                        }
+                        return;
+                    }
+                    if (g->name == "map") {
+                        v.type = VType::Map;
+                        if (g->typeArgs.size() >= 2) {
+                            Val kk, vv;
+                            inferFromAnnotation(g->typeArgs[0].get(), kk);
+                            inferFromAnnotation(g->typeArgs[1].get(), vv);
+                            v.elemType = kk.type;
+                            v.elemCls = kk.cls;
+                            v.valType = vv.type;
+                        }
+                        return;
+                    }
+                }
             }
 
             std::string classNameOfAnnotation(const Expr* e) {
@@ -1677,6 +1760,7 @@ namespace vayu {
                     vi.type = v.type;
                     vi.clsName = v.cls;
                     vi.elemType = v.elemType;
+                    vi.elemClsName = v.elemCls;
                     vi.valType = v.valType;
                     varInfo_[slotName] = vi;
                     return;
@@ -1697,11 +1781,19 @@ namespace vayu {
                     if (n->value) v = emitExpr(n->value.get());
                     line("storel " + v.ssa + ", " + slot);
                     VarInfo vi;
-                    vi.type = typeOfAnnotation(n->type.get());
-                    vi.clsName = classNameOfAnnotation(n->type.get());
+                    {
+                        Val tmp;
+                        inferFromAnnotation(n->type.get(), tmp);
+                        vi.type = tmp.type;
+                        vi.clsName = tmp.cls;
+                        vi.elemType = tmp.elemType;
+                        vi.elemClsName = tmp.elemCls;
+                        vi.valType = tmp.valType;
+                    }
                     if (vi.type == VType::Unknown) {
                         vi.type = v.type; vi.clsName = v.cls;
-                        vi.elemType = v.elemType; vi.valType = v.valType;
+                        vi.elemType = v.elemType; vi.elemClsName = v.elemCls;
+                        vi.valType = v.valType;
                     }
                     varInfo_[slotName] = vi;
                     return;
@@ -2117,11 +2209,14 @@ namespace vayu {
                         vi.type = VType::Obj;
                         vi.clsName = cls->name;
                     }
-                    else {
-                        vi.type = p.type ? typeOfAnnotation(p.type.get())
-                            : VType::Unknown;
-                        vi.clsName = p.type ? classNameOfAnnotation(p.type.get())
-                            : std::string{};
+                    else if (p.type) {
+                        Val tmp;
+                        inferFromAnnotation(p.type.get(), tmp);
+                        vi.type = tmp.type;
+                        vi.clsName = tmp.cls;
+                        vi.elemType = tmp.elemType;
+                        vi.elemClsName = tmp.elemCls;
+                        vi.valType = tmp.valType;
                     }
                     varInfo_[p.name] = vi;
                 }
