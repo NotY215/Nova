@@ -1,0 +1,39 @@
+nums = [10, 20, 30, 40, 50]
+print(nums)
+print(nums[0])
+print(nums[4])
+print(nums[-1])
+
+nums.append(60)
+print(nums)
+print(len(nums))
+
+x = nums.pop()
+print(x)
+print(nums)
+
+total = 0
+for n in nums:
+    total = total + n
+print(total)
+
+# Nested list
+grid = [[1, 2], [3, 4], [5, 6]]
+print(grid[0])
+print(grid[1][1])
+
+# Map
+ages = {"alice": 30, "bob": 25}
+print(ages)
+print(ages["alice"])
+ages["carol"] = 40
+print(ages["carol"])
+print(ages.contains("alice"))
+print(ages.contains("dave"))
+print(len(ages))
+
+# For over map keys
+keysum = 0
+for k in ages:
+    keysum = keysum + 1
+print(keysum)

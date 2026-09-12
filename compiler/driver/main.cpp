@@ -23,6 +23,10 @@
 #  include <windows.h>
 #endif
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 static std::string readFile(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return {};
@@ -43,7 +47,7 @@ static void usage() {
         "Modes (default --run):\n"
         "  --run              tree-walking interpreter\n"
         "  --vm               bytecode virtual machine\n"
-        "  --native           QBE native compilation (Phase 6A/B/C)\n"
+        "  --native           QBE native compilation\n"
         "  --check            type-check only\n"
         "  --dump-tokens      print the lexer output\n"
         "  --dump-ast         print the parsed AST\n"
@@ -53,7 +57,7 @@ static void usage() {
         "Flags:\n"
         "  --no-check         skip the type checker\n"
         "  --no-opt           disable bytecode optimizer (VM only)\n"
-        "  --bench [N]        run the program N times, report timings\n");
+        "  --bench [N]        run the program N times (default 5), report timings\n");
 }
 
 namespace {
@@ -80,6 +84,10 @@ namespace {
     }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -127,23 +135,28 @@ int main(int argc, char** argv) {
         }
     }
 
+    // ---- Read source ----
     std::string src = readFile(file);
     if (src.empty()) {
         std::fprintf(stderr, "vayuc: cannot read '%s'\n", file.c_str());
         return 1;
     }
 
+    // ---- Lex ----
     vayu::Lexer lexer(std::move(src));
     auto tokens = lexer.tokenize();
 
     if (mode == Mode::DumpTokens) {
-        for (const auto& t : tokens)
+        for (const auto& t : tokens) {
             std::printf("%3d:%-3d  %-14s  %s\n",
                 t.location.line, t.location.column,
-                vayu::tokenTypeName(t.type), t.lexeme.c_str());
+                vayu::tokenTypeName(t.type),
+                t.lexeme.c_str());
+        }
         return 0;
     }
 
+    // ---- Parse ----
     vayu::Block program;
     try {
         vayu::Parser parser(std::move(tokens));
@@ -155,8 +168,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (mode == Mode::DumpAst) { vayu::printProgram(program); return 0; }
+    if (mode == Mode::DumpAst) {
+        vayu::printProgram(program);
+        return 0;
+    }
 
+    // ---- Type check ----
     if (!skipCheck && mode != Mode::DumpBytecode && mode != Mode::DumpIR) {
         try {
             vayu::TypeChecker checker;
@@ -176,7 +193,9 @@ int main(int argc, char** argv) {
 
     std::string srcDir = sourceDirOf(file);
 
-    // ---- dump-bytecode ----
+    // =======================================================================
+    // --dump-bytecode
+    // =======================================================================
     if (mode == Mode::DumpBytecode) {
         auto chunk = std::make_shared<vayu::Chunk>();
         try {
@@ -200,19 +219,23 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // ---- dump-ir ----
+    // =======================================================================
+    // --dump-ir
+    // =======================================================================
     if (mode == Mode::DumpIR) {
         vayu::NativeCompiler nc;
-        nc.dumpIR(program);
+        nc.dumpIR(program, srcDir);
         return nc.lastError().empty() ? 0 : 1;
     }
 
-    // ---- native ----
+    // =======================================================================
+    // --native
+    // =======================================================================
     if (mode == Mode::Native) {
         if (benchRuns > 0) {
             runBenchmark("native", benchRuns, [&]() {
                 vayu::NativeCompiler nc;
-                if (nc.compileAndRun(program) != 0) {
+                if (nc.compileAndRun(program, srcDir) != 0) {
                     std::fprintf(stderr, "native: %s\n", nc.lastError().c_str());
                     std::exit(2);
                 }
@@ -220,10 +243,12 @@ int main(int argc, char** argv) {
             return 0;
         }
         vayu::NativeCompiler nc;
-        return nc.compileAndRun(program);
+        return nc.compileAndRun(program, srcDir);
     }
 
-    // ---- vm ----
+    // =======================================================================
+    // --vm
+    // =======================================================================
     if (useVM) {
         auto chunk = std::make_shared<vayu::Chunk>();
         try {
@@ -235,10 +260,16 @@ int main(int argc, char** argv) {
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
+
         if (useOpt) {
             vayu::OptStats stats;
             vayu::optimizeChunk(*chunk, stats);
+            if (std::getenv("VAYU_OPT_VERBOSE")) {
+                std::fprintf(stderr, "[opt] folded=%d notNOT=%d\n",
+                    stats.constantsFolded, stats.notNotCollapsed);
+            }
         }
+
         if (benchRuns > 0) {
             runBenchmark(useOpt ? "vm-opt" : "vm-no-opt", benchRuns, [&]() {
                 vayu::Interpreter interp;
@@ -249,6 +280,7 @@ int main(int argc, char** argv) {
                 });
             return 0;
         }
+
         try {
             vayu::Interpreter interp;
             interp.setSourceDir(srcDir);
@@ -280,7 +312,9 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // ---- tree-walk ----
+    // =======================================================================
+    // --run  (tree-walking interpreter)
+    // =======================================================================
     if (benchRuns > 0) {
         runBenchmark("tree-walk", benchRuns, [&]() {
             vayu::Interpreter interp;
@@ -289,6 +323,7 @@ int main(int argc, char** argv) {
             });
         return 0;
     }
+
     try {
         vayu::Interpreter interp;
         interp.setSourceDir(srcDir);

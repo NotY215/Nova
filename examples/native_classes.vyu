@@ -1,0 +1,41 @@
+class Point:
+    x: int
+    y: int
+
+    def __init__(self, x: int, y: int) -> None:
+        self.x = x
+        self.y = y
+
+    def dist_sq(self) -> int:
+        return self.x * self.x + self.y * self.y
+
+p = Point(3, 4)
+print(p.x)
+print(p.y)
+print(p.dist_sq())
+
+q = Point(1, 2)
+print(q.x)
+print(q.y)
+print(q.dist_sq())
+
+class Player:
+    name: str
+    health: int
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.health = 100
+
+    def damage(self, amount: int) -> None:
+        self.health = self.health - amount
+
+    def status(self) -> str:
+        return self.name + " has " + str(self.health) + " hp"
+
+hero = Player("Vayu")
+print(hero.name)
+print(hero.health)
+hero.damage(30)
+print(hero.health)
+print(hero.status())

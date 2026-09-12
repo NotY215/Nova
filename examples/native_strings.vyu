@@ -1,0 +1,26 @@
+greeting = "Hello, "
+name = "Vayu"
+msg = greeting + name + "!"
+print(msg)
+
+# Comparison
+print("abc" == "abc")
+print("abc" == "xyz")
+print("abc" != "xyz")
+
+# len
+print(len("hello"))
+print(len(""))
+
+# In lists
+words = ["apple", "banana", "cherry"]
+print(words)
+print(words[0])
+print(words[2])
+print(len(words))
+
+# Building
+result = ""
+for w in words:
+    result = result + w + "-"
+print(result)

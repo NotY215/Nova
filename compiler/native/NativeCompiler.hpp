@@ -4,14 +4,12 @@
 
 namespace vayu {
 
-    /// Compiles a Vayu AST to QBE IL, invokes `qbe` + `gcc`, and runs the
-    /// resulting executable.
     class NativeCompiler {
     public:
         NativeCompiler();
 
-        int  compileAndRun(const Block& program);
-        void dumpIR(const Block& program);
+        int  compileAndRun(const Block& program, const std::string& sourceDir = "");
+        void dumpIR(const Block& program, const std::string& sourceDir = "");
 
         const std::string& lastError() const { return lastError_; }
 
@@ -25,7 +23,7 @@ namespace vayu {
         std::string ccPath_;
         std::string qbeTarget_;
 
-        std::string buildQBE(const Block& program);
+        std::string buildQBE(const Block& program, const std::string& sourceDir);
         bool        writeRuntimeC(const std::string& path) const;
     };
 

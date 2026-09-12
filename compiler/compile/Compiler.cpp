@@ -25,6 +25,7 @@ namespace vayu {
     // ===========================================================================
 
     void Compiler::collectDeclarations(const Block& program) {
+        // ---- structs ----
         for (auto& s : program.stmts) {
             if (s->kind == StmtKind::Struct) {
                 auto* d = static_cast<const StructStmt*>(s.get());
@@ -32,29 +33,55 @@ namespace vayu {
                 for (auto& f : d->fields) info.ownFields.push_back(f.name);
                 classInfo_[d->name] = std::move(info);
             }
-            else if (s->kind == StmtKind::Class) {
-                auto* d = static_cast<const ClassStmt*>(s.get());
-                ClassInfo info;
-                info.parentName = d->parentName;
-                for (auto& f : d->fields) info.ownFields.push_back(f.name);
-                for (auto& m : d->methods) {
-                    if (m->name == "__init__") {
-                        info.hasInit = true;
-                        for (size_t i = 1; i < m->params.size(); ++i)
-                            info.initParams.push_back(m->params[i].name);
-                        break;
-                    }
+        }
+
+        // ---- classes ----
+        for (auto& s : program.stmts) {
+            if (s->kind != StmtKind::Class) continue;
+            auto* d = static_cast<const ClassStmt*>(s.get());
+            ClassInfo info;
+            info.parentName = d->parentName;
+            for (auto& f : d->fields) info.ownFields.push_back(f.name);
+            for (auto& m : d->methods) {
+                if (m->name == "__init__") {
+                    info.hasInit = true;
+                    for (size_t i = 1; i < m->params.size(); ++i)
+                        info.initParams.push_back(m->params[i].name);
+                    break;
                 }
-                classInfo_[d->name] = std::move(info);
             }
+            classInfo_[d->name] = std::move(info);
+        }
+
+        // ---- propagate inherited __init__ signatures ----
+        // If a class declares no `__init__` of its own, it inherits the parent's
+        // signature (including the parent's `hasInit` and `initParams`).
+        // Iterate to a fixed point to support multi-level inheritance chains.
+        for (int pass = 0; pass < 8; ++pass) {
+            bool changed = false;
+            for (auto& [name, info] : classInfo_) {
+                if (info.hasInit) continue;
+                if (info.parentName.empty()) continue;
+                auto pit = classInfo_.find(info.parentName);
+                if (pit == classInfo_.end()) continue;
+                if (!pit->second.hasInit) continue;
+                info.hasInit = true;
+                info.initParams = pit->second.initParams;
+                changed = true;
+            }
+            if (!changed) break;
         }
     }
+
+    // ===========================================================================
+    // Field resolution
+    // ===========================================================================
 
     std::vector<std::string> Compiler::resolveFields(
         const std::string& name, std::unordered_set<std::string>& visiting) {
         auto it = classInfo_.find(name);
         if (it == classInfo_.end()) return {};
-        if (visiting.count(name)) return {};
+        if (visiting.count(name)) return {};   // cycle; type checker catches it
         visiting.insert(name);
         std::vector<std::string> result;
         if (!it->second.parentName.empty())
@@ -82,9 +109,11 @@ namespace vayu {
         chunk_->emit(0, line);
         return pos;
     }
+
     void Compiler::patchJump(size_t operandPos, size_t target) {
         chunk_->patchJump(operandPos, (int)target, 0);
     }
+
     void Compiler::emitLoop(size_t loopStart, int line) {
         chunk_->emitOp(OpCode::JUMP, line);
         size_t pos = chunk_->code.size();
@@ -92,6 +121,7 @@ namespace vayu {
         chunk_->emit(0, line);
         chunk_->patchJump(pos, (int)loopStart, line);
     }
+
     void Compiler::emitJumpTo(size_t target, int line) {
         chunk_->emitOp(OpCode::JUMP, line);
         size_t pos = chunk_->code.size();
@@ -99,12 +129,14 @@ namespace vayu {
         chunk_->emit(0, line);
         chunk_->patchJump(pos, (int)target, line);
     }
+
     void Compiler::emitNameU16(OpCode op, const std::string& name, int line) {
         chunk_->emitOp(op, line);
         int idx = chunk_->addName(name);
         chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
         chunk_->emit((uint8_t)(idx & 0xFF), line);
     }
+
     void Compiler::emitNameU16WithCount(OpCode op, const std::string& name,
         uint8_t count, int line) {
         chunk_->emitOp(op, line);
@@ -127,6 +159,7 @@ namespace vayu {
         int line = s->loc.line;
 
         switch (s->kind) {
+
         case StmtKind::Expr: {
             auto* n = static_cast<const ExprStmt*>(s);
             compileExpr(n->expr.get());
@@ -136,6 +169,7 @@ namespace vayu {
 
         case StmtKind::Assign: {
             auto* n = static_cast<const AssignStmt*>(s);
+
             if (n->target->kind == ExprKind::NameRef) {
                 const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
                 compileExpr(n->value.get());
@@ -173,8 +207,14 @@ namespace vayu {
         case StmtKind::Return: compileReturn(static_cast<const ReturnStmt*>(s)); return;
         case StmtKind::Try:    compileTry(static_cast<const TryStmt*>(s));    return;
         case StmtKind::Raise:  compileRaise(static_cast<const RaiseStmt*>(s));  return;
-        case StmtKind::Import: compileImport(static_cast<const ImportStmt*>(s)); return;
-        case StmtKind::FromImport: compileFrom(static_cast<const FromImportStmt*>(s)); return;
+
+        case StmtKind::Import:
+            compileImport(static_cast<const ImportStmt*>(s));
+            return;
+
+        case StmtKind::FromImport:
+            compileFrom(static_cast<const FromImportStmt*>(s));
+            return;
 
         case StmtKind::Break:
             if (loopStack_.empty())
@@ -207,12 +247,11 @@ namespace vayu {
         int line = n->loc.line;
         emitNameU16(OpCode::IMPORT, n->moduleName, line);
         for (auto& item : n->items) {
-            // Peek top module, push member
             emitNameU16(OpCode::IMPORT_MEMBER, item.name, line);
             const std::string& bind = item.alias.empty() ? item.name : item.alias;
             emitNameU16(OpCode::DEFINE, bind, line);
         }
-        chunk_->emitOp(OpCode::POP, line);   // drop module
+        chunk_->emitOp(OpCode::POP, line);
     }
 
     void Compiler::compileAssignAttr(const AttrExpr* target, const Expr* value,
@@ -290,6 +329,7 @@ namespace vayu {
             endJumps.push_back(emitJump(OpCode::JUMP, line));
             patchJump(s, chunk_->here());
         }
+
         if (n->elseBody) compileBlock(*n->elseBody);
 
         size_t end = chunk_->here();
@@ -339,13 +379,13 @@ namespace vayu {
         for (size_t j : loopStack_.back().breakJumps) patchJump(j, exit);
         loopStack_.pop_back();
 
-        // Both normal exit and `break` land here; clean up [iterable, idx].
+        // Clean up [iterable, idx] — both the normal exit and `break` land here.
         chunk_->emitOp(OpCode::POP, line);
         chunk_->emitOp(OpCode::POP, line);
     }
 
     // ===========================================================================
-    // try / raise  (from 4E)
+    // try / raise
     // ===========================================================================
 
     void Compiler::compileTry(const TryStmt* t) {
@@ -372,6 +412,7 @@ namespace vayu {
                         "try/except: exception type must be a class name");
                 const std::string& cn =
                     static_cast<const NameRefExpr*>(h.exceptionType.get())->name;
+
                 chunk_->emitOp(OpCode::EXCEPT_MATCH, line);
                 int ni = chunk_->addName(cn);
                 chunk_->emit((uint8_t)((ni >> 8) & 0xFF), line);
@@ -419,6 +460,7 @@ namespace vayu {
     }
 
     void Compiler::compileCall(const CallExpr* c, int line) {
+        // super()
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             if (nm->name == "super") {
@@ -429,15 +471,18 @@ namespace vayu {
             }
         }
 
+        // struct / class construction
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             auto ci = classInfo_.find(nm->name);
             if (ci != classInfo_.end()) {
                 const ClassInfo& info = ci->second;
+
                 if (info.hasInit) {
                     for (auto& a : c->args)
                         if (!a.name.empty())
-                            error(a.loc, "VM mode: keyword args for class with __init__ unsupported");
+                            error(a.loc,
+                                "VM mode: keyword args for class with __init__ unsupported");
                     if (c->args.size() != info.initParams.size())
                         error(c->loc, "class '" + nm->name + "' constructor expects " +
                             std::to_string(info.initParams.size()) +
@@ -448,27 +493,35 @@ namespace vayu {
                         (uint8_t)c->args.size(), line);
                     return;
                 }
+
+                // Field-matched construction: reorder args to declaration order.
                 std::vector<int> argForField(info.allFields.size(), -1);
                 size_t positional = 0;
                 for (size_t i = 0; i < c->args.size(); ++i) {
                     const auto& a = c->args[i];
                     if (a.name.empty()) {
                         if (positional >= info.allFields.size())
-                            error(a.loc, "too many positional arguments for '" + nm->name + "'");
-                        argForField[positional] = (int)i; ++positional;
+                            error(a.loc, "too many positional arguments for '" +
+                                nm->name + "'");
+                        argForField[positional] = (int)i;
+                        ++positional;
                     }
                     else {
                         int fi = -1;
                         for (size_t j = 0; j < info.allFields.size(); ++j)
                             if (info.allFields[j] == a.name) { fi = (int)j; break; }
-                        if (fi < 0) error(a.loc, "'" + nm->name + "' has no field '" + a.name + "'");
-                        if (argForField[fi] != -1) error(a.loc, "field '" + a.name + "' given twice");
+                        if (fi < 0)
+                            error(a.loc, "'" + nm->name + "' has no field '" +
+                                a.name + "'");
+                        if (argForField[fi] != -1)
+                            error(a.loc, "field '" + a.name + "' given twice");
                         argForField[fi] = (int)i;
                     }
                 }
                 for (size_t j = 0; j < info.allFields.size(); ++j) {
                     if (argForField[j] == -1)
-                        error(c->loc, "'" + nm->name + "' is missing value for field '" +
+                        error(c->loc, "'" + nm->name +
+                            "' is missing value for field '" +
                             info.allFields[j] + "'");
                     compileExpr(c->args[argForField[j]].value.get());
                 }
@@ -478,6 +531,7 @@ namespace vayu {
             }
         }
 
+        // method call: obj.method(args)
         if (c->callee->kind == ExprKind::Attr) {
             auto* attr = static_cast<const AttrExpr*>(c->callee.get());
             compileExpr(attr->target.get());
@@ -492,6 +546,7 @@ namespace vayu {
             return;
         }
 
+        // plain-name call
         if (c->callee->kind == ExprKind::NameRef) {
             compileExpr(c->callee.get());
             for (auto& a : c->args) {
