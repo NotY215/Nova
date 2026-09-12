@@ -1,106 +1,79 @@
 #include "NativeCompiler.hpp"
-#include "native/NativeRuntime.hpp"
-
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/Verifier.h>
-#include <llvm/Support/raw_ostream.h>
-#include <llvm/Support/TargetSelect.h>
-
-#include <llvm/ExecutionEngine/Orc/LLJIT.h>
-#include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
-#include <llvm/ExecutionEngine/Orc/DynamicLibrarySearchGenerator.h>
-
-#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#ifdef _WIN32
+#  include <process.h>
+#  define VAYU_GETPID() _getpid()
+#else
+#  include <unistd.h>
+#  define VAYU_GETPID() getpid()
+#endif
+
 namespace vayu {
 
     // ===========================================================================
-    // Internal codegen state
+    // Constructor — picks sensible default tool paths per platform
     // ===========================================================================
 
-    class NativeCompiler::Impl {
-    public:
-        llvm::LLVMContext                                    ctx;
-        std::unique_ptr<llvm::Module>                        module;
-        std::unique_ptr<llvm::orc::LLJIT>                    jit;
+    NativeCompiler::NativeCompiler() {
+#ifdef _WIN32
+        qbePath_ = "tools\\qbe.exe";
+        ccPath_ = "gcc";
+        qbeTarget_ = "amd64_win";
+#else
+        qbePath_ = "tools/qbe";
+        ccPath_ = "cc";
+        qbeTarget_ = "amd64_sysv";
+#endif
 
-        // Per-function codegen state
-        llvm::IRBuilder<>* builder = nullptr;
-        llvm::Function* currentFn = nullptr;
-
-        // Variable slots (all i64 for now)
-        std::unordered_map<std::string, llvm::AllocaInst*>   varSlots;
-
-        // ---- helpers ----
-        llvm::Type* i64Ty();
-        llvm::Type* i1Ty();
-        llvm::Type* voidTy();
-
-        void ensureJIT();
-        void collectVariables(const Block& program);
-
-        // codegen
-        llvm::Value* emitExpr(const Expr* e);
-        void         emitStmt(const Stmt* s);
-        void         emitBlock(const Block& b);
-
-        // builtin lookup: returns nullptr if name isn't an intrinsic
-        llvm::FunctionCallee lookupBuiltin(const std::string& name);
-    };
-
-    llvm::Type* NativeCompiler::Impl::i64Ty() { return llvm::Type::getInt64Ty(ctx); }
-    llvm::Type* NativeCompiler::Impl::i1Ty() { return llvm::Type::getInt1Ty(ctx); }
-    llvm::Type* NativeCompiler::Impl::voidTy() { return llvm::Type::getVoidTy(ctx); }
-
-    // ===========================================================================
-    // JIT initialization
-    // ===========================================================================
-
-    void NativeCompiler::Impl::ensureJIT() {
-        if (jit) return;
-
-        // Make sure LLVM knows about the host target.
-        llvm::InitializeNativeTarget();
-        llvm::InitializeNativeTargetAsmPrinter();
-        llvm::InitializeNativeTargetAsmParser();
-
-        auto jitOrErr = llvm::orc::LLJITBuilder().create();
-        if (!jitOrErr) {
-            std::string msg;
-            llvm::handleAllErrors(jitOrErr.takeError(),
-                [&](llvm::ErrorInfoBase& e) { msg = e.message(); });
-            throw std::runtime_error("failed to create LLJIT: " + msg);
-        }
-        jit = std::move(*jitOrErr);
-
-        // Let the JIT resolve symbols (vayu_print_int, ...) against this process.
-        auto& jd = jit->getMainJITDylib();
-        auto genOrErr = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
-            jit->getDataLayout().getGlobalPrefix());
-        if (!genOrErr) {
-            std::string msg;
-            llvm::handleAllErrors(genOrErr.takeError(),
-                [&](llvm::ErrorInfoBase& e) { msg = e.message(); });
-            throw std::runtime_error("failed to create dynamic symbol generator: " + msg);
-        }
-        jd.addGenerator(std::move(*genOrErr));
+        if (const char* p = std::getenv("VAYU_QBE"))        qbePath_ = p;
+        if (const char* p = std::getenv("VAYU_CC"))         ccPath_ = p;
+        if (const char* p = std::getenv("VAYU_QBE_TARGET")) qbeTarget_ = p;
     }
 
     // ===========================================================================
-    // Variable collection (walk the AST once, before codegen)
+    // AST analysis helpers
     // ===========================================================================
 
-    static void collectVarsFromBlock(const Block& b,
-        std::unordered_set<std::string>& out);
+    static bool isBoolExpr(const Expr* e) {
+        if (!e) return false;
+        switch (e->kind) {
+        case ExprKind::BoolLit:
+            return true;
+        case ExprKind::Unary: {
+            auto* u = static_cast<const UnaryExpr*>(e);
+            return u->op == UnOp::Not;
+        }
+        case ExprKind::Binary: {
+            auto* b = static_cast<const BinaryExpr*>(e);
+            switch (b->op) {
+            case BinOp::Eq: case BinOp::NotEq:
+            case BinOp::Lt: case BinOp::Gt:
+            case BinOp::LtEq: case BinOp::GtEq:
+            case BinOp::And: case BinOp::Or:
+            case BinOp::In: case BinOp::Is:
+                return true;
+            default:
+                return false;
+            }
+        }
+        default:
+            return false;
+        }
+    }
 
-    static void collectVarsFromStmt(const Stmt* s,
-        std::unordered_set<std::string>& out) {
+    static void collectVarsStmt(const Stmt* s, std::unordered_set<std::string>& out);
+    static void collectVarsBlock(const Block& b, std::unordered_set<std::string>& out);
+
+    static void collectVarsStmt(const Stmt* s, std::unordered_set<std::string>& out) {
         if (!s) return;
         switch (s->kind) {
         case StmtKind::Assign: {
@@ -114,561 +87,665 @@ namespace vayu {
             out.insert(n->name);
             break;
         }
-        case StmtKind::Def: {
-            auto* n = static_cast<const DefStmt*>(s);
-            out.insert(n->name);
-            collectVarsFromBlock(n->body, out);
-            break;
-        }
         case StmtKind::If: {
             auto* n = static_cast<const IfStmt*>(s);
-            collectVarsFromBlock(n->thenBody, out);
-            for (auto& ec : n->elifs) collectVarsFromBlock(ec.body, out);
-            if (n->elseBody) collectVarsFromBlock(*n->elseBody, out);
+            collectVarsBlock(n->thenBody, out);
+            for (auto& ec : n->elifs) collectVarsBlock(ec.body, out);
+            if (n->elseBody) collectVarsBlock(*n->elseBody, out);
             break;
         }
         case StmtKind::While: {
             auto* n = static_cast<const WhileStmt*>(s);
-            collectVarsFromBlock(n->body, out);
-            break;
-        }
-        case StmtKind::For: {
-            auto* n = static_cast<const ForStmt*>(s);
-            out.insert(n->targetName);
-            collectVarsFromBlock(n->body, out);
-            break;
-        }
-        case StmtKind::Try: {
-            auto* n = static_cast<const TryStmt*>(s);
-            collectVarsFromBlock(n->tryBody, out);
-            for (auto& h : n->handlers) {
-                if (!h.varName.empty()) out.insert(h.varName);
-                collectVarsFromBlock(h.body, out);
-            }
-            if (n->finallyBody) collectVarsFromBlock(*n->finallyBody, out);
+            collectVarsBlock(n->body, out);
             break;
         }
         default: break;
         }
     }
 
-    static void collectVarsFromBlock(const Block& b,
-        std::unordered_set<std::string>& out) {
-        for (auto& s : b.stmts) collectVarsFromStmt(s.get(), out);
-    }
-
-    void NativeCompiler::Impl::collectVariables(const Block& program) {
-        std::unordered_set<std::string> names;
-        collectVarsFromBlock(program, names);
-
-        // Create an alloca i64 for each, initialized to 0.
-        builder->SetInsertPoint(&currentFn->getEntryBlock(),
-            currentFn->getEntryBlock().begin());
-        llvm::AllocaInst* anySlot = nullptr;
-        for (auto& name : names) {
-            // Skip function names — they're CFunctions in a later phase.
-            auto* slot = builder->CreateAlloca(i64Ty(), nullptr, name);
-            builder->CreateStore(llvm::ConstantInt::get(i64Ty(), 0), slot);
-            varSlots[name] = slot;
-            if (!anySlot) anySlot = slot;
-        }
-        // Position the builder after all allocas so the entry block stays tidy.
-        builder->SetInsertPoint(&currentFn->getEntryBlock(),
-            currentFn->getEntryBlock().end());
+    static void collectVarsBlock(const Block& b, std::unordered_set<std::string>& out) {
+        for (auto& s : b.stmts) collectVarsStmt(s.get(), out);
     }
 
     // ===========================================================================
-    // Builtin lookup
+    // QBE IL emitter
     // ===========================================================================
 
-    llvm::FunctionCallee NativeCompiler::Impl::lookupBuiltin(const std::string& name) {
-        if (name == "print") {
-            // We only support print(int) for now.  Later phases will add
-            // an overload-resolution layer.
-            return module->getOrInsertFunction(
-                "vayu_print_int",
-                llvm::FunctionType::get(voidTy(), { i64Ty() }, false));
-        }
-        if (name == "print_bool") {
-            return module->getOrInsertFunction(
-                "vayu_print_bool",
-                llvm::FunctionType::get(voidTy(), { i1Ty() }, false));
-        }
-        return nullptr;
-    }
+    namespace {
 
-    // ===========================================================================
-    // Expression codegen
-    // ===========================================================================
+        class QbeEmitter {
+        public:
+            std::string emit(const Block& program) {
+                std::unordered_set<std::string> names;
+                collectVarsBlock(program, names);
 
-    llvm::Value* NativeCompiler::Impl::emitExpr(const Expr* e) {
-        if (!e) return llvm::ConstantInt::get(i64Ty(), 0);
+                raw("# Generated by Vayu (QBE backend)");
+                raw("");
+                raw("export function $vayu_main() {");
+                raw("@start");
 
-        switch (e->kind) {
+                for (auto& n : names) {
+                    std::string slot = "%" + mangle(n) + "_slot";
+                    varSlot_[n] = slot;
+                    line(slot + " =l alloc8 8");
+                    line("storel 0, " + slot);
+                }
 
-        case ExprKind::IntLit: {
-            auto* n = static_cast<const IntLitExpr*>(e);
-            return llvm::ConstantInt::get(i64Ty(), (uint64_t)n->value, /*signed=*/true);
-        }
-        case ExprKind::BoolLit: {
-            auto* n = static_cast<const BoolLitExpr*>(e);
-            return llvm::ConstantInt::get(i64Ty(), n->value ? 1 : 0);
-        }
-        case ExprKind::NoneLit:
-            return llvm::ConstantInt::get(i64Ty(), 0);
+                emitBlock(program);
+                line("ret");
+                raw("}");
 
-        case ExprKind::FloatLit:
-            // Floats arrive in 6E.
-            throw std::runtime_error("native: float literals not yet supported");
-
-        case ExprKind::StringLit:
-            // Strings arrive in 6E.
-            throw std::runtime_error("native: string literals not yet supported");
-
-        case ExprKind::NameRef: {
-            auto* n = static_cast<const NameRefExpr*>(e);
-            auto it = varSlots.find(n->name);
-            if (it == varSlots.end()) {
-                throw std::runtime_error(
-                    "native: '" + n->name + "' is not defined");
-            }
-            return builder->CreateLoad(i64Ty(), it->second, n->name);
-        }
-
-        case ExprKind::Grouping:
-            return emitExpr(static_cast<const GroupingExpr*>(e)->inner.get());
-
-        case ExprKind::Unary: {
-            auto* n = static_cast<const UnaryExpr*>(e);
-            llvm::Value* v = emitExpr(n->operand.get());
-            switch (n->op) {
-            case UnOp::Neg:
-                return builder->CreateSub(
-                    llvm::ConstantInt::get(i64Ty(), 0), v, "neg");
-            case UnOp::Pos:
-                return v;
-            case UnOp::Not: {
-                // !v  →  v == 0  →  zext to i64
-                llvm::Value* cmp = builder->CreateICmpEQ(
-                    v, llvm::ConstantInt::get(i64Ty(), 0), "not");
-                return builder->CreateZExt(cmp, i64Ty(), "not.i64");
-            }
-            }
-            return v;
-        }
-
-        case ExprKind::Binary: {
-            auto* n = static_cast<const BinaryExpr*>(e);
-
-            if (n->op == BinOp::And) {
-                // Short-circuit: result is 1 if both are non-zero.
-                llvm::Value* a = emitExpr(n->lhs.get());
-                llvm::Value* b = emitExpr(n->rhs.get());
-                llvm::Value* an = builder->CreateICmpNE(
-                    a, llvm::ConstantInt::get(i64Ty(), 0));
-                llvm::Value* bn = builder->CreateICmpNE(
-                    b, llvm::ConstantInt::get(i64Ty(), 0));
-                llvm::Value* both = builder->CreateAnd(an, bn);
-                return builder->CreateZExt(both, i64Ty(), "and.i64");
-            }
-            if (n->op == BinOp::Or) {
-                llvm::Value* a = emitExpr(n->lhs.get());
-                llvm::Value* b = emitExpr(n->rhs.get());
-                llvm::Value* an = builder->CreateICmpNE(
-                    a, llvm::ConstantInt::get(i64Ty(), 0));
-                llvm::Value* bn = builder->CreateICmpNE(
-                    b, llvm::ConstantInt::get(i64Ty(), 0));
-                llvm::Value* either = builder->CreateOr(an, bn);
-                return builder->CreateZExt(either, i64Ty(), "or.i64");
+                return out_;
             }
 
-            llvm::Value* l = emitExpr(n->lhs.get());
-            llvm::Value* r = emitExpr(n->rhs.get());
+        private:
+            std::string out_;
+            int nextTemp_ = 0;
+            int nextLabel_ = 0;
+            std::unordered_map<std::string, std::string> varSlot_;
 
-            switch (n->op) {
-            case BinOp::Add:      return builder->CreateAdd(l, r, "add");
-            case BinOp::Sub:      return builder->CreateSub(l, r, "sub");
-            case BinOp::Mul:      return builder->CreateMul(l, r, "mul");
-            case BinOp::Div:
-            case BinOp::FloorDiv: return builder->CreateSDiv(l, r, "div");
-            case BinOp::Mod:      return builder->CreateSRem(l, r, "rem");
-            case BinOp::Pow:
-                throw std::runtime_error(
-                    "native: '**' on int not yet lowered (needs runtime helper)");
+            std::string newTemp() { return "%t" + std::to_string(nextTemp_++); }
+            std::string newLabel(const char* prefix) {
+                return "@" + std::string(prefix) + std::to_string(nextLabel_++);
+            }
+            void line(const std::string& s) { out_ += "    " + s + "\n"; }
+            void raw(const std::string& s) { out_ += s + "\n"; }
 
-            case BinOp::Eq: {
-                llvm::Value* c = builder->CreateICmpEQ(l, r, "eq");
-                return builder->CreateZExt(c, i64Ty(), "eq.i64");
-            }
-            case BinOp::NotEq: {
-                llvm::Value* c = builder->CreateICmpNE(l, r, "ne");
-                return builder->CreateZExt(c, i64Ty(), "ne.i64");
-            }
-            case BinOp::Lt: {
-                llvm::Value* c = builder->CreateICmpSLT(l, r, "lt");
-                return builder->CreateZExt(c, i64Ty(), "lt.i64");
-            }
-            case BinOp::Gt: {
-                llvm::Value* c = builder->CreateICmpSGT(l, r, "gt");
-                return builder->CreateZExt(c, i64Ty(), "gt.i64");
-            }
-            case BinOp::LtEq: {
-                llvm::Value* c = builder->CreateICmpSLE(l, r, "le");
-                return builder->CreateZExt(c, i64Ty(), "le.i64");
-            }
-            case BinOp::GtEq: {
-                llvm::Value* c = builder->CreateICmpSGE(l, r, "ge");
-                return builder->CreateZExt(c, i64Ty(), "ge.i64");
+            static std::string mangle(const std::string& s) {
+                std::string r = "v";
+                for (char c : s) {
+                    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '_')
+                        r += c;
+                    else
+                        r += '_';
+                }
+                return r;
             }
 
-            case BinOp::In:
-            case BinOp::Is:
-                throw std::runtime_error(
-                    std::string("native: operator '") +
-                    binOpName(n->op) + "' not yet supported");
-
-            case BinOp::And: case BinOp::Or: break;
+            std::string lookupSlot(const std::string& name) {
+                auto it = varSlot_.find(name);
+                if (it == varSlot_.end()) return {};
+                return it->second;
             }
-            return llvm::ConstantInt::get(i64Ty(), 0);
-        }
 
-        case ExprKind::Call: {
-            auto* n = static_cast<const CallExpr*>(e);
+            std::string emitExpr(const Expr* e) {
+                if (!e) return "0";
 
-            // Only plain-name calls for now.
-            if (n->callee->kind != ExprKind::NameRef)
-                throw std::runtime_error(
-                    "native: only plain-name calls are supported in 6B/6C");
+                switch (e->kind) {
+                case ExprKind::IntLit: {
+                    auto* n = static_cast<const IntLitExpr*>(e);
+                    return std::to_string(n->value);
+                }
+                case ExprKind::BoolLit: {
+                    auto* n = static_cast<const BoolLitExpr*>(e);
+                    return n->value ? "1" : "0";
+                }
+                case ExprKind::NoneLit:
+                    return "0";
 
-            const auto* nm = static_cast<const NameRefExpr*>(n->callee.get());
+                case ExprKind::NameRef: {
+                    auto* n = static_cast<const NameRefExpr*>(e);
+                    std::string slot = lookupSlot(n->name);
+                    if (slot.empty())
+                        throw std::runtime_error(
+                            "native: variable '" + n->name + "' not declared");
+                    std::string t = newTemp();
+                    line(t + " =l loadl " + slot);
+                    return t;
+                }
 
-            // print(...) — dispatch on the shape of the argument.
-            if (nm->name == "print") {
-                if (n->args.size() != 1)
-                    throw std::runtime_error(
-                        "native: print() with " +
-                        std::to_string(n->args.size()) +
-                        " args not yet supported (only 1 arg)");
+                case ExprKind::Grouping:
+                    return emitExpr(static_cast<const GroupingExpr*>(e)->inner.get());
 
-                llvm::Value* arg = emitExpr(n->args[0].value.get());
+                case ExprKind::Unary: {
+                    auto* n = static_cast<const UnaryExpr*>(e);
+                    std::string v = emitExpr(n->operand.get());
+                    switch (n->op) {
+                    case UnOp::Pos:
+                        return v;
+                    case UnOp::Neg: {
+                        std::string t = newTemp();
+                        line(t + " =l sub 0, " + v);
+                        return t;
+                    }
+                    case UnOp::Not: {
+                        std::string c = newTemp();
+                        line(c + " =w ceql " + v + ", 0");
+                        std::string ext = newTemp();
+                        line(ext + " =l extsw " + c);
+                        return ext;
+                    }
+                    }
+                    return v;
+                }
 
-                // Look at the AST shape to decide i64 vs bool.
-                bool argIsBool = (n->args[0].value->kind == ExprKind::BoolLit);
-                if (!argIsBool && n->args[0].value->kind == ExprKind::Binary) {
-                    auto* b = static_cast<const BinaryExpr*>(n->args[0].value.get());
-                    switch (b->op) {
-                    case BinOp::Eq: case BinOp::NotEq:
-                    case BinOp::Lt: case BinOp::Gt:
-                    case BinOp::LtEq: case BinOp::GtEq:
-                    case BinOp::And: case BinOp::Or:
-                        argIsBool = true;
+                case ExprKind::Binary: {
+                    auto* n = static_cast<const BinaryExpr*>(e);
+
+                    if (n->op == BinOp::And || n->op == BinOp::Or) {
+                        std::string a = emitExpr(n->lhs.get());
+                        std::string b = emitExpr(n->rhs.get());
+                        std::string ab = newTemp();
+                        line(ab + " =w cnel " + a + ", 0");
+                        std::string bb = newTemp();
+                        line(bb + " =w cnel " + b + ", 0");
+                        std::string r = newTemp();
+                        line(r + " =w " + (n->op == BinOp::And ? "and" : "or") +
+                            " " + ab + ", " + bb);
+                        std::string ext = newTemp();
+                        line(ext + " =l extsw " + r);
+                        return ext;
+                    }
+
+                    std::string a = emitExpr(n->lhs.get());
+                    std::string b = emitExpr(n->rhs.get());
+
+                    switch (n->op) {
+                    case BinOp::Add: {
+                        std::string t = newTemp();
+                        line(t + " =l add " + a + ", " + b);
+                        return t;
+                    }
+                    case BinOp::Sub: {
+                        std::string t = newTemp();
+                        line(t + " =l sub " + a + ", " + b);
+                        return t;
+                    }
+                    case BinOp::Mul: {
+                        std::string t = newTemp();
+                        line(t + " =l mul " + a + ", " + b);
+                        return t;
+                    }
+                    case BinOp::Div: {
+                        std::string t = newTemp();
+                        line(t + " =l div " + a + ", " + b);
+                        return t;
+                    }
+                    case BinOp::FloorDiv: {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_floordiv(l " + a + ", l " + b + ")");
+                        return t;
+                    }
+                    case BinOp::Mod: {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_mod(l " + a + ", l " + b + ")");
+                        return t;
+                    }
+
+                    case BinOp::Eq:
+                    case BinOp::NotEq:
+                    case BinOp::Lt:
+                    case BinOp::Gt:
+                    case BinOp::LtEq:
+                    case BinOp::GtEq: {
+                        const char* opName = nullptr;
+                        switch (n->op) {
+                        case BinOp::Eq:    opName = "ceql";  break;
+                        case BinOp::NotEq: opName = "cnel";  break;
+                        case BinOp::Lt:    opName = "csltl"; break;
+                        case BinOp::Gt:    opName = "csgtl"; break;
+                        case BinOp::LtEq:  opName = "cslel"; break;
+                        case BinOp::GtEq:  opName = "csgel"; break;
+                        default: break;
+                        }
+                        std::string c = newTemp();
+                        line(c + " =w " + opName + " " + a + ", " + b);
+                        std::string ext = newTemp();
+                        line(ext + " =l extsw " + c);
+                        return ext;
+                    }
+
+                    case BinOp::Pow:
+                        throw std::runtime_error(
+                            "native: '**' not yet lowered");
+                    case BinOp::In:
+                    case BinOp::Is:
+                        throw std::runtime_error(
+                            std::string("native: operator '") +
+                            binOpName(n->op) + "' not yet lowered");
+                    default:
                         break;
-                    default: break;
+                    }
+                    throw std::runtime_error("native: unknown binary op");
+                }
+
+                case ExprKind::Call: {
+                    auto* n = static_cast<const CallExpr*>(e);
+
+                    if (n->callee->kind != ExprKind::NameRef)
+                        throw std::runtime_error(
+                            "native: only plain-name calls supported");
+
+                    const auto* nm =
+                        static_cast<const NameRefExpr*>(n->callee.get());
+
+                    if (nm->name == "print") {
+                        if (n->args.size() != 1)
+                            throw std::runtime_error(
+                                "native: print() requires exactly 1 argument");
+
+                        std::string arg = emitExpr(n->args[0].value.get());
+                        if (isBoolExpr(n->args[0].value.get()))
+                            line("call $vayu_print_bool(l " + arg + ")");
+                        else
+                            line("call $vayu_print_int(l " + arg + ")");
+                        return "0";
+                    }
+
+                    throw std::runtime_error(
+                        "native: call to '" + nm->name + "' not supported");
+                }
+
+                case ExprKind::FloatLit:
+                case ExprKind::StringLit:
+                case ExprKind::CharLit:
+                case ExprKind::ListLit:
+                case ExprKind::MapLit:
+                case ExprKind::Attr:
+                case ExprKind::Index:
+                case ExprKind::Lambda:
+                case ExprKind::GenericType:
+                    throw std::runtime_error(
+                        "native: this expression is not yet lowered");
+                }
+                return "0";
+            }
+
+            std::string emitCond(const Expr* e) {
+                std::string v = emitExpr(e);
+                std::string t = newTemp();
+                line(t + " =w cnel " + v + ", 0");
+                return t;
+            }
+
+            void emitStmt(const Stmt* s) {
+                if (!s) return;
+                switch (s->kind) {
+                case StmtKind::Expr: {
+                    auto* n = static_cast<const ExprStmt*>(s);
+                    (void)emitExpr(n->expr.get());
+                    return;
+                }
+
+                case StmtKind::Assign: {
+                    auto* n = static_cast<const AssignStmt*>(s);
+                    if (n->target->kind != ExprKind::NameRef)
+                        throw std::runtime_error(
+                            "native: only simple-name assignment supported");
+                    const auto* nm =
+                        static_cast<const NameRefExpr*>(n->target.get());
+                    std::string v = emitExpr(n->value.get());
+                    std::string slot = lookupSlot(nm->name);
+                    if (slot.empty())
+                        throw std::runtime_error(
+                            "native: variable '" + nm->name + "' not declared");
+                    line("storel " + v + ", " + slot);
+                    return;
+                }
+
+                case StmtKind::AnnotAssign: {
+                    auto* n = static_cast<const AnnotAssignStmt*>(s);
+                    std::string v = n->value
+                        ? emitExpr(n->value.get())
+                        : std::string("0");
+                    std::string slot = lookupSlot(n->name);
+                    if (slot.empty())
+                        throw std::runtime_error(
+                            "native: variable '" + n->name + "' not declared");
+                    line("storel " + v + ", " + slot);
+                    return;
+                }
+
+                case StmtKind::If: {
+                    emitIf(static_cast<const IfStmt*>(s));
+                    return;
+                }
+                case StmtKind::While: {
+                    emitWhile(static_cast<const WhileStmt*>(s));
+                    return;
+                }
+
+                case StmtKind::Pass:   return;
+                case StmtKind::Struct:
+                case StmtKind::Class:  return;
+
+                case StmtKind::For:
+                    throw std::runtime_error("native: 'for' arrives in a later phase");
+                case StmtKind::Def:
+                    throw std::runtime_error("native: 'def' arrives in a later phase");
+                case StmtKind::Return:
+                    throw std::runtime_error("native: 'return' arrives in a later phase");
+                case StmtKind::Break:
+                    throw std::runtime_error("native: 'break' arrives in a later phase");
+                case StmtKind::Continue:
+                    throw std::runtime_error("native: 'continue' arrives in a later phase");
+                case StmtKind::Try:
+                    throw std::runtime_error("native: 'try' arrives in a later phase");
+                case StmtKind::Raise:
+                    throw std::runtime_error("native: 'raise' arrives in a later phase");
+                case StmtKind::Import:
+                case StmtKind::FromImport:
+                    throw std::runtime_error("native: modules arrive in a later phase");
+                }
+            }
+
+            void emitBlock(const Block& b) {
+                for (auto& s : b.stmts) emitStmt(s.get());
+            }
+
+            void emitIf(const IfStmt* n) {
+                std::string cond = emitCond(n->cond.get());
+
+                std::string lThen = newLabel("if_then_");
+                std::string lElse = newLabel("if_else_");
+                std::string lEnd = newLabel("if_end_");
+
+                bool hasElse = n->elseBody.has_value() || !n->elifs.empty();
+
+                if (hasElse)
+                    line("jnz " + cond + ", " + lThen + ", " + lElse);
+                else
+                    line("jnz " + cond + ", " + lThen + ", " + lEnd);
+
+                raw(lThen);
+                emitBlock(n->thenBody);
+                line("jmp " + lEnd);
+
+                if (hasElse) {
+                    raw(lElse);
+
+                    for (size_t i = 0; i < n->elifs.size(); ++i) {
+                        auto& ec = n->elifs[i];
+
+                        std::string ecCond = emitCond(ec.cond.get());
+                        std::string ecThen = newLabel("elif_then_");
+                        std::string ecElse = newLabel("elif_else_");
+
+                        bool lastElif = (i + 1 == n->elifs.size());
+                        std::string elseTarget =
+                            (lastElif && !n->elseBody) ? lEnd : ecElse;
+
+                        line("jnz " + ecCond + ", " + ecThen + ", " + elseTarget);
+
+                        raw(ecThen);
+                        emitBlock(ec.body);
+                        line("jmp " + lEnd);
+
+                        if (elseTarget == lEnd) break;
+                        raw(ecElse);
+                    }
+
+                    if (n->elseBody) {
+                        emitBlock(*n->elseBody);
+                        line("jmp " + lEnd);
                     }
                 }
-                if (n->args[0].value->kind == ExprKind::Unary) {
-                    auto* u = static_cast<const UnaryExpr*>(n->args[0].value.get());
-                    if (u->op == UnOp::Not) argIsBool = true;
-                }
 
-                llvm::FunctionCallee callee = argIsBool
-                    ? lookupBuiltin("print_bool")
-                    : lookupBuiltin("print");
-
-                if (argIsBool) {
-                    // Caller pass i64; convert to i1 for vayu_print_bool.
-                    llvm::Value* b = builder->CreateICmpNE(
-                        arg, llvm::ConstantInt::get(i64Ty(), 0), "print.bool");
-                    builder->CreateCall(callee, { b });
-                }
-                else {
-                    builder->CreateCall(callee, { arg });
-                }
-                return llvm::ConstantInt::get(i64Ty(), 0);
+                raw(lEnd);
             }
 
-            throw std::runtime_error(
-                "native: call to '" + nm->name + "' not yet supported");
-        }
+            void emitWhile(const WhileStmt* n) {
+                std::string lCond = newLabel("while_cond_");
+                std::string lBody = newLabel("while_body_");
+                std::string lEnd = newLabel("while_end_");
 
-        case ExprKind::ListLit:
-        case ExprKind::MapLit:
-        case ExprKind::Attr:
-        case ExprKind::Index:
-        case ExprKind::Lambda:
-        case ExprKind::GenericType:
-            throw std::runtime_error(
-                "native: this expression is not yet lowered (arrives in 6D+)");
-        }
-        return llvm::ConstantInt::get(i64Ty(), 0);
+                line("jmp " + lCond);
+
+                raw(lCond);
+                std::string cond = emitCond(n->cond.get());
+                line("jnz " + cond + ", " + lBody + ", " + lEnd);
+
+                raw(lBody);
+                emitBlock(n->body);
+                line("jmp " + lCond);
+
+                raw(lEnd);
+            }
+        };
+
+    } // anonymous namespace
+
+    // ===========================================================================
+    // Runtime C source
+    // ===========================================================================
+
+    static const char* kRuntimeC = R"C(
+#include <stdio.h>
+#include <stdlib.h>
+
+void vayu_print_int(long long v) {
+    printf("%lld\n", v);
+}
+
+void vayu_print_bool(long long v) {
+    printf("%s\n", v ? "true" : "false");
+}
+
+long long vayu_floordiv(long long a, long long b) {
+    if (b == 0) { fprintf(stderr, "division by zero\n"); exit(1); }
+    long long q = a / b;
+    if ((a ^ b) < 0 && q * b != a) q--;
+    return q;
+}
+
+long long vayu_mod(long long a, long long b) {
+    if (b == 0) { fprintf(stderr, "modulo by zero\n"); exit(1); }
+    long long r = a % b;
+    if (r != 0 && ((r < 0) != (b < 0))) r += b;
+    return r;
+}
+
+extern void vayu_main(void);
+
+int main(void) {
+    vayu_main();
+    return 0;
+}
+)C";
+
+    bool NativeCompiler::writeRuntimeC(const std::string& path) const {
+        std::ofstream out(path, std::ios::binary);
+        if (!out) return false;
+        out << kRuntimeC;
+        return true;
     }
 
     // ===========================================================================
-    // Statement codegen
+    // Helpers
     // ===========================================================================
 
-    void NativeCompiler::Impl::emitStmt(const Stmt* s) {
-        if (!s) return;
+    namespace {
 
-        switch (s->kind) {
-        case StmtKind::Expr: {
-            auto* n = static_cast<const ExprStmt*>(s);
-            (void)emitExpr(n->expr.get());
-            return;
+        // Delete a file quietly.
+        void tryRemove(const std::string& p) {
+            std::remove(p.c_str());
         }
 
-        case StmtKind::Assign: {
-            auto* n = static_cast<const AssignStmt*>(s);
-            if (n->target->kind != ExprKind::NameRef)
-                throw std::runtime_error(
-                    "native: only simple-name assignment is supported");
-            const auto* nm = static_cast<const NameRefExpr*>(n->target.get());
-            llvm::Value* v = emitExpr(n->value.get());
-            auto it = varSlots.find(nm->name);
-            if (it == varSlots.end()) {
-                // Late-definition: create an alloca on the fly.
-                llvm::IRBuilder<> tmp(&currentFn->getEntryBlock(),
-                    currentFn->getEntryBlock().begin());
-                auto* slot = tmp.CreateAlloca(i64Ty(), nullptr, nm->name);
-                tmp.CreateStore(llvm::ConstantInt::get(i64Ty(), 0), slot);
-                it = varSlots.emplace(nm->name, slot).first;
-            }
-            builder->CreateStore(v, it->second);
-            return;
+        // Dump the first N lines of a file to stderr (used on failure to show
+        // the offending assembly).
+        void dumpFileHead(const std::string& path, int maxLines) {
+            std::ifstream in(path);
+            if (!in) return;
+            std::string line;
+            int n = 0;
+            std::fprintf(stderr, "--- first %d lines of %s ---\n",
+                maxLines, path.c_str());
+            while (std::getline(in, line) && n < maxLines)
+                std::fprintf(stderr, "%3d | %s\n", ++n, line.c_str());
         }
 
-        case StmtKind::AnnotAssign: {
-            auto* n = static_cast<const AnnotAssignStmt*>(s);
-            auto it = varSlots.find(n->name);
-            if (it == varSlots.end()) {
-                llvm::IRBuilder<> tmp(&currentFn->getEntryBlock(),
-                    currentFn->getEntryBlock().begin());
-                auto* slot = tmp.CreateAlloca(i64Ty(), nullptr, n->name);
-                tmp.CreateStore(llvm::ConstantInt::get(i64Ty(), 0), slot);
-                it = varSlots.emplace(n->name, slot).first;
-            }
-            llvm::Value* v = n->value
-                ? emitExpr(n->value.get())
-                : llvm::ConstantInt::get(i64Ty(), 0);
-            builder->CreateStore(v, it->second);
-            return;
-        }
-
-        case StmtKind::If: {
-            auto* n = static_cast<const IfStmt*>(s);
-
-            llvm::Value* cond = emitExpr(n->cond.get());
-            llvm::Value* condBool = builder->CreateICmpNE(
-                cond, llvm::ConstantInt::get(i64Ty(), 0), "if.cond");
-
-            llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(
-                ctx, "if.then", currentFn);
-            llvm::BasicBlock* elseBB = nullptr;
-            llvm::BasicBlock* endBB = llvm::BasicBlock::Create(
-                ctx, "if.end", currentFn);
-
-            bool hasElse = (n->elseBody || !n->elifs.empty());
-            if (hasElse) {
-                elseBB = llvm::BasicBlock::Create(ctx, "if.else", currentFn);
-                builder->CreateCondBr(condBool, thenBB, elseBB);
-            }
-            else {
-                builder->CreateCondBr(condBool, thenBB, endBB);
-            }
-
-            // Then
-            builder->SetInsertPoint(thenBB);
-            emitBlock(n->thenBody);
-            builder->CreateBr(endBB);
-
-            // Else / elif chain — desugar elif to nested ifs.
-            if (hasElse) {
-                builder->SetInsertPoint(elseBB);
-
-                // Build the nested chain right-to-left.
-                // For each elif, we synthesize a fresh IfStmt-style block.
-                // Simplest implementation: emit elifs as a chain.
-                llvm::BasicBlock* curBB = elseBB;
-                for (size_t i = 0; i < n->elifs.size(); ++i) {
-                    auto& ec = n->elifs[i];
-
-                    llvm::Value* ecCond = emitExpr(ec.cond.get());
-                    llvm::Value* ecBool = builder->CreateICmpNE(
-                        ecCond, llvm::ConstantInt::get(i64Ty(), 0), "elif.cond");
-
-                    llvm::BasicBlock* ecThen = llvm::BasicBlock::Create(
-                        ctx, "elif.then", currentFn);
-                    llvm::BasicBlock* ecElse = (i + 1 == n->elifs.size())
-                        ? (n->elseBody
-                            ? llvm::BasicBlock::Create(ctx, "elif.else", currentFn)
-                            : endBB)
-                        : llvm::BasicBlock::Create(ctx, "elif.else", currentFn);
-
-                    builder->CreateCondBr(ecBool, ecThen, ecElse);
-
-                    builder->SetInsertPoint(ecThen);
-                    emitBlock(ec.body);
-                    builder->CreateBr(endBB);
-
-                    builder->SetInsertPoint(ecElse);
-                    curBB = ecElse;
-                }
-
-                if (n->elseBody) {
-                    emitBlock(*n->elseBody);
-                    builder->CreateBr(endBB);
-                }
-                else if (n->elifs.empty()) {
-                    // no else, no elifs — plain if with an else? shouldn't happen
-                    builder->CreateBr(endBB);
-                }
-            }
-
-            builder->SetInsertPoint(endBB);
-            return;
-        }
-
-        case StmtKind::While: {
-            auto* n = static_cast<const WhileStmt*>(s);
-
-            llvm::BasicBlock* condBB = llvm::BasicBlock::Create(
-                ctx, "while.cond", currentFn);
-            llvm::BasicBlock* bodyBB = llvm::BasicBlock::Create(
-                ctx, "while.body", currentFn);
-            llvm::BasicBlock* endBB = llvm::BasicBlock::Create(
-                ctx, "while.end", currentFn);
-
-            builder->CreateBr(condBB);
-
-            builder->SetInsertPoint(condBB);
-            llvm::Value* cond = emitExpr(n->cond.get());
-            llvm::Value* condBool = builder->CreateICmpNE(
-                cond, llvm::ConstantInt::get(i64Ty(), 0), "while.cond");
-            builder->CreateCondBr(condBool, bodyBB, endBB);
-
-            builder->SetInsertPoint(bodyBB);
-            emitBlock(n->body);
-            builder->CreateBr(condBB);
-
-            builder->SetInsertPoint(endBB);
-            return;
-        }
-
-        case StmtKind::Pass:
-            return;
-
-        case StmtKind::Struct:
-        case StmtKind::Class:
-            // Type declarations have no runtime footprint in 6A/B/C.
-            return;
-
-        case StmtKind::For:
-        case StmtKind::Def:
-        case StmtKind::Return:
-        case StmtKind::Break:
-        case StmtKind::Continue:
-        case StmtKind::Try:
-        case StmtKind::Raise:
-        case StmtKind::Import:
-        case StmtKind::FromImport:
-            throw std::runtime_error(
-                "native: this statement is not yet lowered (arrives in 6D+)");
-        }
-    }
-
-    void NativeCompiler::Impl::emitBlock(const Block& b) {
-        for (auto& s : b.stmts) emitStmt(s.get());
-    }
+    } // anonymous namespace
 
     // ===========================================================================
     // Public entry points
     // ===========================================================================
 
-    NativeCompiler::NativeCompiler() : impl_(std::make_unique<Impl>()) {}
-    NativeCompiler::~NativeCompiler() = default;
-
-    static void buildModule(NativeCompiler::Impl& I, const Block& program) {
-        I.module = std::make_unique<llvm::Module>("vayu_module", I.ctx);
-        I.varSlots.clear();
-
-        // Signature: i64 @vayu_main()  (we ignore the return value)
-        llvm::FunctionType* fnTy = llvm::FunctionType::get(
-            I.i64Ty(), /*params=*/{}, /*isVarArg=*/false);
-        I.currentFn = llvm::Function::Create(
-            fnTy, llvm::GlobalValue::ExternalLinkage, "vayu_main", I.module.get());
-
-        llvm::BasicBlock* entry = llvm::BasicBlock::Create(
-            I.ctx, "entry", I.currentFn);
-
-        llvm::IRBuilder<> builder(entry);
-        I.builder = &builder;
-
-        I.collectVariables(program);
-
-        I.emitBlock(program);
-
-        builder.CreateRet(llvm::ConstantInt::get(I.i64Ty(), 0));
-
-        // Verify — catches malformed IR at compile time.
-        std::string verifyErr;
-        llvm::raw_string_ostream vstream(verifyErr);
-        if (llvm::verifyModule(*I.module, &vstream)) {
-            throw std::runtime_error("native: LLVM module verification failed:\n" +
-                vstream.str());
-        }
-    }
-
-    int NativeCompiler::compileAndRun(const Block& program) {
-        lastError_.clear();
-        try {
-            buildModule(*impl_, program);
-            impl_->ensureJIT();
-
-            auto tsm = llvm::orc::ThreadSafeModule(
-                std::move(impl_->module),
-                std::make_unique<llvm::LLVMContext>());
-            // NB: we move `impl_->ctx` out — subsequent compilations need a
-            // fresh context.  For a JIT-per-invocation this is fine.
-            // Reset ctx by moving from a new one:
-            impl_->ctx = llvm::LLVMContext();
-
-            if (auto err = impl_->jit->addIRModule(std::move(tsm))) {
-                std::string msg;
-                llvm::handleAllErrors(std::move(err),
-                    [&](llvm::ErrorInfoBase& e) { msg = e.message(); });
-                lastError_ = "JIT add failed: " + msg;
-                return 1;
-            }
-
-            auto sym = impl_->jit->lookup("vayu_main");
-            if (!sym) {
-                std::string msg;
-                llvm::handleAllErrors(sym.takeError(),
-                    [&](llvm::ErrorInfoBase& e) { msg = e.message(); });
-                lastError_ = "JIT lookup failed: " + msg;
-                return 1;
-            }
-
-            using MainFn = int64_t(*)();
-            auto fn = sym->toPtr<MainFn>();
-            fn();
-            return 0;
-        }
-        catch (const std::exception& e) {
-            lastError_ = e.what();
-            return 1;
-        }
+    std::string NativeCompiler::buildQBE(const Block& program) {
+        QbeEmitter e;
+        return e.emit(program);
     }
 
     void NativeCompiler::dumpIR(const Block& program) {
         lastError_.clear();
         try {
-            buildModule(*impl_, program);
-            impl_->module->print(llvm::outs(), nullptr);
+            std::printf("%s\n", buildQBE(program).c_str());
         }
         catch (const std::exception& e) {
             lastError_ = e.what();
+            std::fprintf(stderr, "native: %s\n", e.what());
         }
+    }
+
+    int NativeCompiler::compileAndRun(const Block& program) {
+        lastError_.clear();
+
+        // ---- 1. Emit QBE IL ----
+        std::string il;
+        try {
+            il = buildQBE(program);
+        }
+        catch (const std::exception& e) {
+            lastError_ = e.what();
+            std::fprintf(stderr, "native: %s\n", e.what());
+            return 1;
+        }
+
+        // ---- 2. Temp file paths (unique per process) ----
+        std::string base = "_vayu_" + std::to_string(VAYU_GETPID());
+        std::string ssaPath = base + ".ssa";
+        std::string asmPath = base + ".s";
+        std::string objPath = base + ".o";
+        std::string rtPath = base + "_rt.c";
+        std::string exePath = base + ".exe";
+
+        // ---- 3. Write QBE IL ----
+        {
+            std::ofstream out(ssaPath, std::ios::binary);
+            if (!out) {
+                lastError_ = "cannot write " + ssaPath;
+                std::fprintf(stderr, "native: %s\n", lastError_.c_str());
+                return 1;
+            }
+            out << il;
+        }
+
+        // ---- 4. Write runtime C ----
+        if (!writeRuntimeC(rtPath)) {
+            lastError_ = "cannot write " + rtPath;
+            std::fprintf(stderr, "native: %s\n", lastError_.c_str());
+            tryRemove(ssaPath);
+            return 1;
+        }
+
+        // ---- 5. Invoke qbe with the platform-appropriate ABI target ----
+        {
+            std::string cmd = qbePath_ + " -t " + qbeTarget_ +
+                " -o \"" + asmPath + "\" \"" + ssaPath + "\"";
+            int rc = std::system(cmd.c_str());
+            if (rc != 0) {
+                lastError_ = "qbe failed (exit " + std::to_string(rc) +
+                    "). IL left at " + ssaPath;
+                std::fprintf(stderr, "native: %s\n", lastError_.c_str());
+                std::fprintf(stderr,
+                    "  (if QBE rejected the target '%s', check `qbe -h` for the\n"
+                    "   correct spelling, or set VAYU_QBE_TARGET accordingly)\n",
+                    qbeTarget_.c_str());
+                tryRemove(rtPath);
+                return 1;
+            }
+        }
+
+        // ---- 6. Preprocess QBE's assembly for the Windows PE assembler ----
+        //
+        // QBE always emits two things that are fine on ELF/Linux but that the
+        // Windows-targeting GNU as rejects:
+        //   1. No `.att_syntax` marker — as defaults to Intel on PE.
+        //   2. `.section .note.GNU-stack,"",@progbits` — an ELF-only section.
+        //
+        // We strip the note section and force AT&T syntax.
+        {
+            std::ifstream in(asmPath, std::ios::binary);
+            if (!in) {
+                lastError_ = "cannot reopen QBE assembly at " + asmPath;
+                std::fprintf(stderr, "native: %s\n", lastError_.c_str());
+                tryRemove(ssaPath); tryRemove(rtPath);
+                return 1;
+            }
+
+            std::string filtered;
+            filtered.reserve(4096);
+            std::string line;
+            while (std::getline(in, line)) {
+                // Drop ELF-specific sections the PE assembler doesn't know.
+                if (line.find(".note.GNU-stack") != std::string::npos) continue;
+                filtered += line;
+                filtered += '\n';
+            }
+            in.close();
+
+            std::ofstream out(asmPath, std::ios::binary);
+            if (!out) {
+                lastError_ = "cannot rewrite QBE assembly at " + asmPath;
+                std::fprintf(stderr, "native: %s\n", lastError_.c_str());
+                tryRemove(ssaPath); tryRemove(rtPath);
+                return 1;
+            }
+            out << ".att_syntax prefix\n";
+            out << filtered;
+        }
+
+        // ---- 7. Assemble to object ----
+        {
+            std::string cmd = ccPath_ + " -c -O2 \"" + asmPath +
+                "\" -o \"" + objPath + "\"";
+            int rc = std::system(cmd.c_str());
+            if (rc != 0) {
+                lastError_ = "assembler failed (exit " + std::to_string(rc) +
+                    "). Assembly left at " + asmPath;
+                std::fprintf(stderr, "native: %s\n", lastError_.c_str());
+                dumpFileHead(asmPath, 40);
+                tryRemove(ssaPath); tryRemove(rtPath);
+                return 1;
+            }
+        }
+
+        // ---- 8. Link object + runtime C into executable ----
+        {
+            std::string cmd = ccPath_ + " -O2 \"" + objPath + "\" \"" + rtPath +
+                "\" -o \"" + exePath + "\"";
+            int rc = std::system(cmd.c_str());
+            if (rc != 0) {
+                lastError_ = "linker failed (exit " + std::to_string(rc) + ")";
+                std::fprintf(stderr, "native: %s\n", lastError_.c_str());
+                tryRemove(ssaPath); tryRemove(asmPath);
+                tryRemove(objPath); tryRemove(rtPath);
+                return 1;
+            }
+        }
+
+        // ---- 9. Run ----
+        int runRc = 0;
+        {
+            std::string cmd = "\"" + exePath + "\"";
+            runRc = std::system(cmd.c_str());
+        }
+
+        // ---- 10. Clean up everything (on both success and error) ----
+        bool keep = (std::getenv("VAYU_KEEP_TEMP") != nullptr);
+        if (!keep) {
+            tryRemove(ssaPath);
+            tryRemove(asmPath);
+            tryRemove(objPath);
+            tryRemove(rtPath);
+            tryRemove(exePath);
+        }
+
+        if (runRc != 0) {
+            lastError_ = "program exited with code " + std::to_string(runRc);
+            return 1;
+        }
+        return 0;
     }
 
 } // namespace vayu

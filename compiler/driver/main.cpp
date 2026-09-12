@@ -43,12 +43,12 @@ static void usage() {
         "Modes (default --run):\n"
         "  --run              tree-walking interpreter\n"
         "  --vm               bytecode virtual machine\n"
-        "  --native           LLVM JIT-compiled native code (Phase 6A+)\n"
+        "  --native           QBE native compilation (Phase 6A/B/C)\n"
         "  --check            type-check only\n"
         "  --dump-tokens      print the lexer output\n"
         "  --dump-ast         print the parsed AST\n"
         "  --dump-bytecode    compile to bytecode and print disassembly\n"
-        "  --dump-ir          compile to LLVM IR and print the module\n"
+        "  --dump-ir          print the QBE IL\n"
         "\n"
         "Flags:\n"
         "  --no-check         skip the type checker\n"
@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(a, "--dump-ast"))      mode = Mode::DumpAst;
         else if (!std::strcmp(a, "--dump-bytecode")) mode = Mode::DumpBytecode;
         else if (!std::strcmp(a, "--dump-ir"))       mode = Mode::DumpIR;
-        else if (!std::strcmp(a, "--native")) { mode = Mode::Native; }
+        else if (!std::strcmp(a, "--native"))        mode = Mode::Native;
         else if (!std::strcmp(a, "--vm"))            useVM = true;
         else if (!std::strcmp(a, "--no-check"))      skipCheck = true;
         else if (!std::strcmp(a, "--no-opt"))        useOpt = false;
@@ -137,12 +137,10 @@ int main(int argc, char** argv) {
     auto tokens = lexer.tokenize();
 
     if (mode == Mode::DumpTokens) {
-        for (const auto& t : tokens) {
+        for (const auto& t : tokens)
             std::printf("%3d:%-3d  %-14s  %s\n",
                 t.location.line, t.location.column,
-                vayu::tokenTypeName(t.type),
-                t.lexeme.c_str());
-        }
+                vayu::tokenTypeName(t.type), t.lexeme.c_str());
         return 0;
     }
 
@@ -157,10 +155,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (mode == Mode::DumpAst) {
-        vayu::printProgram(program);
-        return 0;
-    }
+    if (mode == Mode::DumpAst) { vayu::printProgram(program); return 0; }
 
     if (!skipCheck && mode != Mode::DumpBytecode && mode != Mode::DumpIR) {
         try {
@@ -181,9 +176,7 @@ int main(int argc, char** argv) {
 
     std::string srcDir = sourceDirOf(file);
 
-    // =======================================================================
-    // --dump-bytecode
-    // =======================================================================
+    // ---- dump-bytecode ----
     if (mode == Mode::DumpBytecode) {
         auto chunk = std::make_shared<vayu::Chunk>();
         try {
@@ -207,26 +200,16 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // =======================================================================
-    // --dump-ir
-    // =======================================================================
+    // ---- dump-ir ----
     if (mode == Mode::DumpIR) {
         vayu::NativeCompiler nc;
         nc.dumpIR(program);
-        if (!nc.lastError().empty()) {
-            std::fprintf(stderr, "%s: native IR error: %s\n",
-                file.c_str(), nc.lastError().c_str());
-            return 1;
-        }
-        return 0;
+        return nc.lastError().empty() ? 0 : 1;
     }
 
-    // =======================================================================
-    // --native
-    // =======================================================================
+    // ---- native ----
     if (mode == Mode::Native) {
         if (benchRuns > 0) {
-            // Recompile each run (JIT is single-shot per module).
             runBenchmark("native", benchRuns, [&]() {
                 vayu::NativeCompiler nc;
                 if (nc.compileAndRun(program) != 0) {
@@ -236,19 +219,11 @@ int main(int argc, char** argv) {
                 });
             return 0;
         }
-
         vayu::NativeCompiler nc;
-        int rc = nc.compileAndRun(program);
-        if (rc != 0) {
-            std::fprintf(stderr, "%s: native error: %s\n",
-                file.c_str(), nc.lastError().c_str());
-        }
-        return rc;
+        return nc.compileAndRun(program);
     }
 
-    // =======================================================================
-    // --vm
-    // =======================================================================
+    // ---- vm ----
     if (useVM) {
         auto chunk = std::make_shared<vayu::Chunk>();
         try {
@@ -260,16 +235,10 @@ int main(int argc, char** argv) {
                 file.c_str(), e.loc.line, e.loc.column, e.what());
             return 1;
         }
-
         if (useOpt) {
             vayu::OptStats stats;
             vayu::optimizeChunk(*chunk, stats);
-            if (std::getenv("VAYU_OPT_VERBOSE")) {
-                std::fprintf(stderr, "[opt] folded=%d notNOT=%d\n",
-                    stats.constantsFolded, stats.notNotCollapsed);
-            }
         }
-
         if (benchRuns > 0) {
             runBenchmark(useOpt ? "vm-opt" : "vm-no-opt", benchRuns, [&]() {
                 vayu::Interpreter interp;
@@ -280,7 +249,6 @@ int main(int argc, char** argv) {
                 });
             return 0;
         }
-
         try {
             vayu::Interpreter interp;
             interp.setSourceDir(srcDir);
@@ -312,9 +280,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // =======================================================================
-    // --run  (tree-walk)
-    // =======================================================================
+    // ---- tree-walk ----
     if (benchRuns > 0) {
         runBenchmark("tree-walk", benchRuns, [&]() {
             vayu::Interpreter interp;
@@ -323,7 +289,6 @@ int main(int argc, char** argv) {
             });
         return 0;
     }
-
     try {
         vayu::Interpreter interp;
         interp.setSourceDir(srcDir);

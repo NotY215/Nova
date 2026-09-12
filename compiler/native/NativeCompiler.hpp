@@ -1,31 +1,30 @@
 #pragma once
 #include "ast/Ast.hpp"
-#include <memory>
 #include <string>
 
 namespace vayu {
 
-    /// Compiles Vayu AST directly to LLVM IR and JIT-executes it.
-    /// Frontend code never includes any LLVM headers — everything is
-    /// hidden behind the pimpl.
     class NativeCompiler {
     public:
         NativeCompiler();
-        ~NativeCompiler();
 
-        /// Compile + JIT + run.  Returns 0 on success, non-zero on error.
-        /// Prints diagnostics to stderr.
-        int compileAndRun(const Block& program);
-
-        /// Compile to LLVM IR and print the textual module to stdout.
+        int  compileAndRun(const Block& program);
         void dumpIR(const Block& program);
 
         const std::string& lastError() const { return lastError_; }
 
+        void setQbePath(const std::string& p) { qbePath_ = p; }
+        void setCcPath(const std::string& p) { ccPath_ = p; }
+        void setQbeTarget(const std::string& t) { qbeTarget_ = t; }
+
     private:
-        class Impl;
-        std::unique_ptr<Impl> impl_;
-        std::string           lastError_;
+        std::string lastError_;
+        std::string qbePath_;
+        std::string ccPath_;
+        std::string qbeTarget_;   // e.g. "amd64_win" or "amd64_sysv"
+
+        std::string buildQBE(const Block& program);
+        bool        writeRuntimeC(const std::string& path) const;
     };
 
 } // namespace vayu
