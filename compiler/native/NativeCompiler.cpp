@@ -913,8 +913,22 @@ namespace vayu {
                     std::string t = newTemp();
                     line(t + " =l loadl " + addr);
                     r.ssa = t;
-                    for (auto& f : ci->decl->fields) {
-                        if (f.name == n->name) { r.type = typeOfAnnotation(f.type.get()); break; }
+
+                    // Walk the class hierarchy to find the field's declared type.
+                    for (auto c = ci; c; c = c->parent) {
+                        if (!c->decl) continue;
+                        bool found = false;
+                        for (auto& f : c->decl->fields) {
+                            if (f.name == n->name) {
+                                if (f.type) {
+                                    r.type = typeOfAnnotation(f.type.get());
+                                    r.cls = classNameOfAnnotation(f.type.get());
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) break;
                     }
                     return r;
                 }
