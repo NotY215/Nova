@@ -1,4 +1,5 @@
-# vcode.vyu — Vayu → QBE IL codegen (7E-1).
+# vcode.vyu — Vayu source -> QBE IL.
+# 7E-1: statements + control flow + user functions.
 
 class Token:
     kind: str
@@ -14,21 +15,19 @@ class Token:
 
 class Node:
     kind: str
-    text: str
-    a: int
-    b: int
-    c: int
-    d: int
-    nxt: int
+    value: str
+    op: str
+    left: int
+    right: int
+    extra: int
 
     def __init__(self, kind: str) -> None:
         self.kind = kind
-        self.text = ""
-        self.a = 0
-        self.b = 0
-        self.c = 0
-        self.d = 0
-        self.nxt = 0
+        self.value = ""
+        self.op = ""
+        self.left = 0
+        self.right = 0
+        self.extra = 0
 
 class Ast:
     nodes: list<Node>
@@ -41,342 +40,6 @@ class Ast:
         n = Node(kind)
         self.nodes.append(n)
         return len(self.nodes) - 1
-
-class Codegen:
-    ast: Ast
-    out: list<str>
-    data: list<str>
-    next_temp: int
-    str_labels: list<str>
-    str_label_next: int
-    var_slots: list<str>
-    var_names: list<str>
-    final: str
-
-    def __init__(self, ast: Ast) -> None:
-        self.ast = ast
-        self.out = []
-        self.data = []
-        self.next_temp = 0
-        self.str_labels = []
-        self.str_label_next = 0
-        self.var_slots = []
-        self.var_names = []
-        self.final = ""
-
-    def emit(self, s: str) -> None:
-        self.out.append("    " + s)
-
-    def emit_raw(self, s: str) -> None:
-        self.out.append(s)
-
-    def new_temp(self) -> str:
-        t = "%t" + str(self.next_temp)
-        self.next_temp = self.next_temp + 1
-        return t
-
-    def slot_for(self, name: str) -> str:
-        i = 0
-        while i < len(self.var_names):
-            if self.var_names[i] == name:
-                return self.var_slots[i]
-            i = i + 1
-        return ""
-
-    def declare_var(self, name: str) -> str:
-        s = self.slot_for(name)
-        if s != "":
-            return s
-        slot = "%v" + name + "_slot"
-        self.var_names.append(name)
-        self.var_slots.append(slot)
-        self.emit(slot + " =l alloc8 8")
-        self.emit("storel 0, " + slot)
-        return slot
-
-    def intern_str(self, s: str) -> str:
-        i = 0
-        while i < len(self.str_labels):
-            if self.str_labels[i] == s:
-                return "$vayu_strlit_" + str(i)
-            i = i + 1
-        self.str_labels.append(s)
-        idx = self.str_label_next
-        self.str_label_next = self.str_label_next + 1
-        escaped = ""
-        j = 0
-        while j < len(s):
-            c = s[j]
-            if c == "\\":
-                escaped = escaped + "\\\\"
-            elif c == "\"":
-                escaped = escaped + "\\\""
-            elif c == "\n":
-                escaped = escaped + "\\n"
-            elif c == "\t":
-                escaped = escaped + "\\t"
-            elif c == "\r":
-                escaped = escaped + "\\r"
-            else:
-                escaped = escaped + c
-            j = j + 1
-        line = "data $vayu_strlit_" + str(idx) + " = { l " + str(len(s)) + ", b \"" + escaped + "\", b 0 }"
-        self.data.append(line)
-        return "$vayu_strlit_" + str(idx)
-
-    def collect_assigned(self, idx: int) -> None:
-        if idx == 0:
-            return
-        n = self.ast.nodes[idx]
-        if n.kind == "Assign":
-            t = self.ast.nodes[n.a]
-            if t.kind == "Name":
-                self.declare_var(t.text)
-            self.collect_assigned(n.b)
-            return
-        if n.kind == "AnnotAssign":
-            self.declare_var(n.text)
-            if n.b != 0:
-                self.collect_assigned(n.b)
-            return
-        if n.kind == "ExprStmt":
-            self.collect_assigned(n.a)
-            return
-        if n.kind == "Program" or n.kind == "Block":
-            cur = n.a
-            while cur != 0:
-                self.collect_assigned(cur)
-                cur = self.ast.nodes[cur].nxt
-            return
-        if n.kind == "Binary":
-            self.collect_assigned(n.a)
-            self.collect_assigned(n.b)
-            return
-        if n.kind == "Unary":
-            self.collect_assigned(n.a)
-            return
-        if n.kind == "Group":
-            self.collect_assigned(n.a)
-            return
-        if n.kind == "Call":
-            self.collect_assigned(n.a)
-            cur = n.b
-            while cur != 0:
-                self.collect_assigned(cur)
-                cur = self.ast.nodes[cur].nxt
-            return
-
-    def gen_expr(self, idx: int) -> str:
-        if idx == 0:
-            return "0"
-        n = self.ast.nodes[idx]
-        if n.kind == "Int":
-            return n.text
-        if n.kind == "Float":
-            return n.text
-        if n.kind == "Bool":
-            if n.text == "false":
-                return "0"
-            return "1"
-        if n.kind == "None":
-            return "0"
-        if n.kind == "Str":
-            return self.intern_str(n.text)
-        if n.kind == "Name":
-            slot = self.slot_for(n.text)
-            if slot == "":
-                print("vcode: name '" + n.text + "' is not defined")
-                exit(1)
-            t = self.new_temp()
-            self.emit(t + " =l loadl " + slot)
-            return t
-        if n.kind == "Group":
-            return self.gen_expr(n.a)
-        if n.kind == "Unary":
-            v = self.gen_expr(n.a)
-            if n.text == "-":
-                t = self.new_temp()
-                self.emit(t + " =l sub 0, " + v)
-                return t
-            if n.text == "+":
-                return v
-            c = self.new_temp()
-            self.emit(c + " =w ceql " + v + ", 0")
-            ext = self.new_temp()
-            self.emit(ext + " =l extsw " + c)
-            return ext
-        if n.kind == "Binary":
-            return self.gen_binary(n)
-        if n.kind == "Call":
-            return self.gen_call(n)
-        print("vcode: unsupported expression kind '" + n.kind + "'")
-        exit(1)
-        return "0"
-
-    def gen_binary(self, n: Node) -> str:
-        a = self.gen_expr(n.a)
-        b = self.gen_expr(n.b)
-        op = n.text
-        t = self.new_temp()
-        if op == "+":
-            self.emit(t + " =l add " + a + ", " + b)
-            return t
-        if op == "-":
-            self.emit(t + " =l sub " + a + ", " + b)
-            return t
-        if op == "*":
-            self.emit(t + " =l mul " + a + ", " + b)
-            return t
-        if op == "/":
-            self.emit(t + " =l div " + a + ", " + b)
-            return t
-        if op == "//":
-            self.emit(t + " =l call $vayu_floordiv(l " + a + ", " + b + ")")
-            return t
-        if op == "%":
-            self.emit(t + " =l call $vayu_mod(l " + a + ", " + b + ")")
-            return t
-        if op == "==" or op == "!=" or op == "<" or op == ">" or op == "<=" or op == ">=":
-            mnemonic = "ceql"
-            if op == "!=":
-                mnemonic = "cnel"
-            if op == "<":
-                mnemonic = "csltl"
-            if op == ">":
-                mnemonic = "csgtl"
-            if op == "<=":
-                mnemonic = "cslel"
-            if op == ">=":
-                mnemonic = "csgel"
-            c = self.new_temp()
-            self.emit(c + " =w " + mnemonic + " " + a + ", " + b)
-            ext = self.new_temp()
-            self.emit(ext + " =l extsw " + c)
-            return ext
-        if op == "and" or op == "or":
-            ab = self.new_temp()
-            self.emit(ab + " =w cnel " + a + ", 0")
-            bb = self.new_temp()
-            self.emit(bb + " =w cnel " + b + ", 0")
-            r = self.new_temp()
-            m = "and"
-            if op == "or":
-                m = "or"
-            self.emit(r + " =w " + m + " " + ab + ", " + bb)
-            ext = self.new_temp()
-            self.emit(ext + " =l extsw " + r)
-            return ext
-        print("vcode: unsupported binary operator '" + op + "'")
-        exit(1)
-        return "0"
-
-    def gen_call(self, n: Node) -> str:
-        callee = self.ast.nodes[n.a]
-        if callee.kind == "Name" and callee.text == "print":
-            cur = n.b
-            first = true
-            while cur != 0:
-                v = self.gen_expr(cur)
-                if not first:
-                    self.emit("call $vayu_print_space()")
-                first = false
-                arg_node = self.ast.nodes[cur]
-                if arg_node.kind == "Str":
-                    self.emit("call $vayu_print_str_noln(l " + v + ")")
-                elif arg_node.kind == "Bool":
-                    self.emit("call $vayu_print_bool_noln(l " + v + ")")
-                elif arg_node.kind == "Binary":
-                    is_bool = false
-                    if arg_node.text == "==" or arg_node.text == "!=":
-                        is_bool = true
-                    if arg_node.text == "<" or arg_node.text == ">":
-                        is_bool = true
-                    if arg_node.text == "<=" or arg_node.text == ">=":
-                        is_bool = true
-                    if arg_node.text == "and" or arg_node.text == "or":
-                        is_bool = true
-                    if is_bool:
-                        self.emit("call $vayu_print_bool_noln(l " + v + ")")
-                    else:
-                        self.emit("call $vayu_print_int_noln(l " + v + ")")
-                else:
-                    self.emit("call $vayu_print_int_noln(l " + v + ")")
-                cur = self.ast.nodes[cur].nxt
-            self.emit("call $vayu_print_ln()")
-            return "0"
-        print("vcode: only print() is supported at 7E-1")
-        exit(1)
-        return "0"
-
-    def gen_stmt(self, idx: int) -> None:
-        if idx == 0:
-            return
-        n = self.ast.nodes[idx]
-        if n.kind == "ExprStmt":
-            self.gen_expr(n.a)
-            return
-        if n.kind == "Assign":
-            v = self.gen_expr(n.b)
-            t = self.ast.nodes[n.a]
-            if t.kind != "Name":
-                print("vcode: only simple-name assignment supported at 7E-1")
-                exit(1)
-            slot = self.slot_for(t.text)
-            if slot == "":
-                slot = self.declare_var(t.text)
-            self.emit("storel " + v + ", " + slot)
-            return
-        if n.kind == "AnnotAssign":
-            slot = self.declare_var(n.text)
-            if n.b != 0:
-                v = self.gen_expr(n.b)
-                self.emit("storel " + v + ", " + slot)
-            return
-        print("vcode: statement kind '" + n.kind + "' not yet supported at 7E-1")
-        exit(1)
-
-    def gen_program(self, root_idx: int) -> None:
-        self.collect_assigned(root_idx)
-
-        saved_vars_names = self.var_names
-        saved_vars_slots = self.var_slots
-        self.out = []
-        self.var_names = []
-        self.var_slots = []
-        self.emit_raw("export function $vayu_main() {")
-        self.emit_raw("@start")
-
-        i = 0
-        while i < len(saved_vars_names):
-            name = saved_vars_names[i]
-            slot = "%v" + name + "_slot"
-            self.var_names.append(name)
-            self.var_slots.append(slot)
-            self.emit(slot + " =l alloc8 8")
-            self.emit("storel 0, " + slot)
-            i = i + 1
-
-        root = self.ast.nodes[root_idx]
-        cur = root.a
-        while cur != 0:
-            self.gen_stmt(cur)
-            cur = self.ast.nodes[cur].nxt
-
-        self.emit_raw("    ret")
-        self.emit_raw("}")
-        self.emit_raw("")
-
-        result = ""
-        i = 0
-        while i < len(self.data):
-            result = result + self.data[i] + "\n"
-            i = i + 1
-        result = result + "\n"
-        i = 0
-        while i < len(self.out):
-            result = result + self.out[i] + "\n"
-            i = i + 1
-        self.final = result
 
 class Parser:
     toks: list<Token>
@@ -418,6 +81,19 @@ class Parser:
             return true
         return false
 
+    def expect(self, kind: str, what: str) -> Token:
+        if self.check(kind):
+            return self.advance()
+        line = 0
+        col = 0
+        if self.pos < len(self.toks):
+            line = self.toks[self.pos].line
+            col = self.toks[self.pos].col
+        print("parse error at " + str(line) + ":" + str(col) +
+              ": expected " + what + ", found '" + self.peek_lexeme() + "'")
+        exit(1)
+        return Token("", "", 0, 0)
+
     def skip_newlines(self) -> None:
         while self.check("Newline"):
             self.advance()
@@ -440,22 +116,71 @@ class Parser:
             self.skip_newlines()
             if self.check("EOF"):
                 break
-            if self.check("Dedent") or self.check("Indent"):
+            if self.check("Indent"):
+                self.advance()
+                continue
+            if self.check("Dedent"):
                 self.advance()
                 continue
             stmt = self.parse_statement()
-            if stmt == 0:
-                break
             if first == 0:
                 first = stmt
             else:
-                self.ast.nodes[last].nxt = stmt
+                self.ast.nodes[last].extra = stmt
             last = stmt
-        self.ast.nodes[root].a = first
+        self.ast.nodes[root].left = first
         return root
+
+    def parse_block(self) -> int:
+        blk = self.ast.add("Block")
+        self.expect("Newline", "newline after ':'")
+        self.skip_newlines()
+        if self.check("Indent"):
+            self.advance()
+        else:
+            self.parse_error("expected an indented block")
+        first = 0
+        last = 0
+        while true:
+            self.skip_newlines()
+            if self.check("Dedent"):
+                self.advance()
+                break
+            if self.check("EOF"):
+                break
+            if self.check("Indent"):
+                self.advance()
+                continue
+            stmt = self.parse_statement()
+            if first == 0:
+                first = stmt
+            else:
+                self.ast.nodes[last].extra = stmt
+            last = stmt
+        self.ast.nodes[blk].left = first
+        return blk
 
     def parse_statement(self) -> int:
         k = self.peek_kind()
+        if k == "Def":
+            return self.parse_def()
+        if k == "If":
+            return self.parse_if()
+        if k == "While":
+            return self.parse_while()
+        if k == "For":
+            return self.parse_for()
+        if k == "Return":
+            return self.parse_return()
+        if k == "Pass":
+            self.advance()
+            return self.ast.add("Pass")
+        if k == "Break":
+            self.advance()
+            return self.ast.add("Break")
+        if k == "Continue":
+            self.advance()
+            return self.ast.add("Continue")
         if k == "Identifier":
             if self.peek_at(1) == "Colon":
                 return self.parse_annot_assign()
@@ -463,16 +188,14 @@ class Parser:
 
     def parse_annot_assign(self) -> int:
         name = self.advance()
-        self.match("Colon")
-        tname = self.advance()
-        tnode = self.ast.add("TypeName")
-        self.ast.nodes[tnode].text = tname.lexeme
+        self.expect("Colon", "':' after variable name")
+        typ = self.parse_type_expr()
         node = self.ast.add("AnnotAssign")
-        self.ast.nodes[node].text = name.lexeme
-        self.ast.nodes[node].a = tnode
+        self.ast.nodes[node].value = name.lexeme
+        self.ast.nodes[node].left = typ
         if self.match("Assign"):
             v = self.parse_expression()
-            self.ast.nodes[node].b = v
+            self.ast.nodes[node].right = v
         return node
 
     def parse_expr_or_assign(self) -> int:
@@ -480,12 +203,146 @@ class Parser:
         if self.match("Assign"):
             value = self.parse_expression()
             node = self.ast.add("Assign")
-            self.ast.nodes[node].a = expr
-            self.ast.nodes[node].b = value
+            self.ast.nodes[node].left = expr
+            self.ast.nodes[node].right = value
             return node
         node = self.ast.add("ExprStmt")
-        self.ast.nodes[node].a = expr
+        self.ast.nodes[node].left = expr
         return node
+
+    def parse_return(self) -> int:
+        self.advance()
+        node = self.ast.add("Return")
+        k = self.peek_kind()
+        if k == "Newline":
+            return node
+        if k == "Dedent":
+            return node
+        if k == "EOF":
+            return node
+        v = self.parse_expression()
+        self.ast.nodes[node].left = v
+        return node
+
+    def parse_if(self) -> int:
+        self.advance()
+        cond = self.parse_expression()
+        self.expect("Colon", "':' after if condition")
+        then = self.parse_block()
+        node = self.ast.add("If")
+        self.ast.nodes[node].left = cond
+        self.ast.nodes[node].right = then
+        last = node
+        while self.check("Elif"):
+            self.advance()
+            econd = self.parse_expression()
+            self.expect("Colon", "':' after elif condition")
+            ebody = self.parse_block()
+            enode = self.ast.add("If")
+            self.ast.nodes[enode].left = econd
+            self.ast.nodes[enode].right = ebody
+            self.ast.nodes[last].extra = enode
+            last = enode
+        if self.check("Else"):
+            self.advance()
+            self.expect("Colon", "':' after else")
+            ebody = self.parse_block()
+            enode = self.ast.add("Else")
+            self.ast.nodes[enode].right = ebody
+            self.ast.nodes[last].extra = enode
+        return node
+
+    def parse_while(self) -> int:
+        self.advance()
+        cond = self.parse_expression()
+        self.expect("Colon", "':' after while condition")
+        body = self.parse_block()
+        node = self.ast.add("While")
+        self.ast.nodes[node].left = cond
+        self.ast.nodes[node].right = body
+        return node
+
+    def parse_for(self) -> int:
+        self.advance()
+        var = self.expect("Identifier", "loop variable")
+        self.expect("In", "'in' after loop variable")
+        iter_expr = self.parse_expression()
+        self.expect("Colon", "':' after iterable")
+        body = self.parse_block()
+        node = self.ast.add("For")
+        self.ast.nodes[node].value = var.lexeme
+        self.ast.nodes[node].left = iter_expr
+        self.ast.nodes[node].right = body
+        return node
+
+    def parse_params(self) -> int:
+        self.expect("LParen", "'('")
+        first = 0
+        last = 0
+        if not self.check("RParen"):
+            while true:
+                pname = self.expect("Identifier", "parameter name")
+                pnode = self.ast.add("Param")
+                self.ast.nodes[pnode].value = pname.lexeme
+                if self.match("Colon"):
+                    ptype = self.parse_type_expr()
+                    self.ast.nodes[pnode].left = ptype
+                if first == 0:
+                    first = pnode
+                else:
+                    self.ast.nodes[last].extra = pnode
+                last = pnode
+                if not self.match("Comma"):
+                    break
+                if self.check("RParen"):
+                    break
+        self.expect("RParen", "')'")
+        return first
+
+    def parse_def(self) -> int:
+        self.advance()
+        name = self.expect("Identifier", "function name")
+        params = self.parse_params()
+        ret_type = 0
+        if self.match("Arrow"):
+            ret_type = self.parse_type_expr()
+        self.expect("Colon", "':' before function body")
+        body = self.parse_block()
+        node = self.ast.add("Def")
+        self.ast.nodes[node].value = name.lexeme
+        self.ast.nodes[node].left = params
+        self.ast.nodes[node].right = body
+        self.ast.nodes[node].extra = ret_type
+        return node
+
+    def parse_type_expr(self) -> int:
+        k = self.peek_kind()
+        if k == "Identifier":
+            return self.parse_type_name()
+        if k == "None":
+            return self.parse_type_name()
+        self.parse_error("expected type name, found '" + self.peek_lexeme() + "'")
+        return 0
+
+    def parse_type_name(self) -> int:
+        tok = self.advance()
+        node = self.ast.add("TypeName")
+        self.ast.nodes[node].value = tok.lexeme
+        if self.check("Lt"):
+            self.advance()
+            depth = 1
+            while depth > 0:
+                if self.check("EOF"):
+                    break
+                if self.check("Lt"):
+                    depth = depth + 1
+                if self.check("Gt"):
+                    depth = depth - 1
+                self.advance()
+        return node
+
+    def parse_expression(self) -> int:
+        return self.parse_binary(1)
 
     def bin_prec(self, kind: str) -> int:
         if kind == "Or":
@@ -555,10 +412,11 @@ class Parser:
             return "and"
         if kind == "Or":
             return "or"
+        if kind == "In":
+            return "in"
+        if kind == "Is":
+            return "is"
         return "?"
-
-    def parse_expression(self) -> int:
-        return self.parse_binary(1)
 
     def parse_binary(self, min_prec: int) -> int:
         left = self.parse_unary()
@@ -573,25 +431,34 @@ class Parser:
                 next_min = prec
             right = self.parse_binary(next_min)
             node = self.ast.add("Binary")
-            self.ast.nodes[node].text = self.bin_op_string(op_kind)
-            self.ast.nodes[node].a = left
-            self.ast.nodes[node].b = right
+            self.ast.nodes[node].op = self.bin_op_string(op_kind)
+            self.ast.nodes[node].left = left
+            self.ast.nodes[node].right = right
             left = node
         return left
 
     def parse_unary(self) -> int:
         k = self.peek_kind()
-        if k == "Minus" or k == "Plus" or k == "Not":
-            tok = self.advance()
+        if k == "Minus":
+            self.advance()
             operand = self.parse_unary()
             node = self.ast.add("Unary")
-            if tok.kind == "Minus":
-                self.ast.nodes[node].text = "-"
-            elif tok.kind == "Plus":
-                self.ast.nodes[node].text = "+"
-            else:
-                self.ast.nodes[node].text = "not"
-            self.ast.nodes[node].a = operand
+            self.ast.nodes[node].op = "-"
+            self.ast.nodes[node].left = operand
+            return node
+        if k == "Plus":
+            self.advance()
+            operand = self.parse_unary()
+            node = self.ast.add("Unary")
+            self.ast.nodes[node].op = "+"
+            self.ast.nodes[node].left = operand
+            return node
+        if k == "Not":
+            self.advance()
+            operand = self.parse_unary()
+            node = self.ast.add("Unary")
+            self.ast.nodes[node].op = "not"
+            self.ast.nodes[node].left = operand
             return node
         return self.parse_postfix()
 
@@ -602,8 +469,8 @@ class Parser:
                 self.advance()
                 name = self.advance()
                 attr = self.ast.add("Attr")
-                self.ast.nodes[attr].text = name.lexeme
-                self.ast.nodes[attr].a = e
+                self.ast.nodes[attr].value = name.lexeme
+                self.ast.nodes[attr].left = e
                 e = attr
                 continue
             if self.check("LParen"):
@@ -611,28 +478,30 @@ class Parser:
                 args_first = 0
                 args_last = 0
                 if not self.check("RParen"):
-                    a = self.parse_expression()
-                    args_first = a
-                    args_last = a
-                    while self.match("Comma"):
+                    while true:
+                        a = self.parse_expression()
+                        if args_first == 0:
+                            args_first = a
+                        else:
+                            self.ast.nodes[args_last].extra = a
+                        args_last = a
+                        if not self.match("Comma"):
+                            break
                         if self.check("RParen"):
                             break
-                        a = self.parse_expression()
-                        self.ast.nodes[args_last].nxt = a
-                        args_last = a
-                self.match("RParen")
+                self.expect("RParen", "')'")
                 call = self.ast.add("Call")
-                self.ast.nodes[call].a = e
-                self.ast.nodes[call].b = args_first
+                self.ast.nodes[call].left = e
+                self.ast.nodes[call].right = args_first
                 e = call
                 continue
             if self.check("LBracket"):
                 self.advance()
                 idx = self.parse_expression()
-                self.match("RBracket")
+                self.expect("RBracket", "']'")
                 ix = self.ast.add("Index")
-                self.ast.nodes[ix].a = e
-                self.ast.nodes[ix].b = idx
+                self.ast.nodes[ix].left = e
+                self.ast.nodes[ix].right = idx
                 e = ix
                 continue
             break
@@ -643,22 +512,22 @@ class Parser:
         if k == "Int":
             tok = self.advance()
             idx = self.ast.add("Int")
-            self.ast.nodes[idx].text = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "Float":
             tok = self.advance()
             idx = self.ast.add("Float")
-            self.ast.nodes[idx].text = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "String":
             tok = self.advance()
             idx = self.ast.add("Str")
-            self.ast.nodes[idx].text = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "Char":
             tok = self.advance()
             idx = self.ast.add("Char")
-            self.ast.nodes[idx].text = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "True":
             self.advance()
@@ -666,7 +535,7 @@ class Parser:
         if k == "False":
             self.advance()
             idx = self.ast.add("Bool")
-            self.ast.nodes[idx].text = "false"
+            self.ast.nodes[idx].value = "false"
             return idx
         if k == "None":
             self.advance()
@@ -674,32 +543,729 @@ class Parser:
         if k == "Identifier":
             tok = self.advance()
             idx = self.ast.add("Name")
-            self.ast.nodes[idx].text = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "LParen":
             self.advance()
             inner = self.parse_expression()
-            self.match("RParen")
+            self.expect("RParen", "')'")
             idx = self.ast.add("Group")
-            self.ast.nodes[idx].a = inner
+            self.ast.nodes[idx].left = inner
             return idx
+        if k == "LBracket":
+            return self.parse_list_literal()
         self.parse_error("expected expression, found '" + self.peek_lexeme() + "'")
         return 0
 
+    def parse_list_literal(self) -> int:
+        self.advance()
+        node = self.ast.add("List")
+        first = 0
+        last = 0
+        if not self.check("RBracket"):
+            while true:
+                e = self.parse_expression()
+                if first == 0:
+                    first = e
+                else:
+                    self.ast.nodes[last].extra = e
+                last = e
+                if not self.match("Comma"):
+                    break
+                if self.check("RBracket"):
+                    break
+        self.expect("RBracket", "']'")
+        self.ast.nodes[node].left = first
+        return node
+
+class LoopContext:
+    continue_label: str
+    break_label: str
+
+    def __init__(self, cont: str, brk: str) -> None:
+        self.continue_label = cont
+        self.break_label = brk
+
+class Codegen:
+    ast: Ast
+    out: list<str>
+    data: list<str>
+    next_temp: int
+    next_label: int
+    str_labels: list<str>
+    str_label_next: int
+    var_slots: list<str>
+    var_names: list<str>
+    loop_stack: list<LoopContext>
+    terminated: bool
+    final: str
+
+    def __init__(self, ast: Ast) -> None:
+        self.ast = ast
+        self.out = []
+        self.data = []
+        self.next_temp = 0
+        self.next_label = 0
+        self.str_labels = []
+        self.str_label_next = 0
+        self.var_slots = []
+        self.var_names = []
+        self.loop_stack = []
+        self.terminated = false
+        self.final = ""
+
+    def emit(self, s: str) -> None:
+        self.out.append("    " + s)
+        if s.starts_with("jmp "):
+            self.terminated = true
+        elif s.starts_with("jnz "):
+            self.terminated = true
+        elif s.starts_with("ret"):
+            self.terminated = true
+        else:
+            self.terminated = false
+
+    def emit_raw(self, s: str) -> None:
+        self.out.append(s)
+        if len(s) > 0:
+            if s[0] == "@":
+                self.terminated = false
+
+    def new_temp(self) -> str:
+        t = "%t" + str(self.next_temp)
+        self.next_temp = self.next_temp + 1
+        return t
+
+    def new_label(self, prefix: str) -> str:
+        s = "@" + prefix + str(self.next_label)
+        self.next_label = self.next_label + 1
+        return s
+
+    def slot_for(self, name: str) -> str:
+        i = 0
+        while i < len(self.var_names):
+            if self.var_names[i] == name:
+                return self.var_slots[i]
+            i = i + 1
+        return ""
+
+    def declare_var(self, name: str) -> str:
+        s = self.slot_for(name)
+        if s != "":
+            return s
+        slot = "%v" + name + "_slot"
+        self.var_names.append(name)
+        self.var_slots.append(slot)
+        self.emit(slot + " =l alloc8 8")
+        self.emit("storel 0, " + slot)
+        return slot
+
+    def intern_str(self, s: str) -> str:
+        i = 0
+        while i < len(self.str_labels):
+            if self.str_labels[i] == s:
+                return "$vayu_strlit_" + str(i)
+            i = i + 1
+        self.str_labels.append(s)
+        idx = self.str_label_next
+        self.str_label_next = self.str_label_next + 1
+        escaped = ""
+        j = 0
+        while j < len(s):
+            c = s[j]
+            if c == "\\":
+                escaped = escaped + "\\\\"
+            elif c == "\"":
+                escaped = escaped + "\\\""
+            elif c == "\n":
+                escaped = escaped + "\\n"
+            elif c == "\t":
+                escaped = escaped + "\\t"
+            elif c == "\r":
+                escaped = escaped + "\\r"
+            else:
+                escaped = escaped + c
+            j = j + 1
+        line = "data $vayu_strlit_" + str(idx) + " = { l " + str(len(s)) + ", b \"" + escaped + "\", b 0 }"
+        self.data.append(line)
+        return "$vayu_strlit_" + str(idx)
+
+    def collect_assigned(self, idx: int) -> None:
+        if idx == 0:
+            return
+        n = self.ast.nodes[idx]
+        if n.kind == "Assign":
+            t = self.ast.nodes[n.left]
+            if t.kind == "Name":
+                self.declare_var(t.value)
+            self.collect_assigned(n.right)
+            return
+        if n.kind == "AnnotAssign":
+            self.declare_var(n.value)
+            if n.right != 0:
+                self.collect_assigned(n.right)
+            return
+        if n.kind == "ExprStmt":
+            self.collect_assigned(n.left)
+            return
+        if n.kind == "Program":
+            cur = n.left
+            while cur != 0:
+                self.collect_assigned(cur)
+                cur = self.ast.nodes[cur].extra
+            return
+        if n.kind == "Block":
+            cur = n.left
+            while cur != 0:
+                self.collect_assigned(cur)
+                cur = self.ast.nodes[cur].extra
+            return
+        if n.kind == "If":
+            self.collect_assigned(n.left)
+            self.collect_assigned(n.right)
+            if n.extra != 0:
+                self.collect_assigned(n.extra)
+            return
+        if n.kind == "Else":
+            self.collect_assigned(n.right)
+            return
+        if n.kind == "While":
+            self.collect_assigned(n.left)
+            self.collect_assigned(n.right)
+            return
+        if n.kind == "For":
+            self.declare_var(n.value)
+            self.collect_assigned(n.left)
+            self.collect_assigned(n.right)
+            return
+        if n.kind == "Def":
+            return
+        if n.kind == "Class":
+            return
+        if n.kind == "Struct":
+            return
+        if n.kind == "Binary":
+            self.collect_assigned(n.left)
+            self.collect_assigned(n.right)
+            return
+        if n.kind == "Unary":
+            self.collect_assigned(n.left)
+            return
+        if n.kind == "Group":
+            self.collect_assigned(n.left)
+            return
+        if n.kind == "Call":
+            self.collect_assigned(n.left)
+            cur = n.right
+            while cur != 0:
+                self.collect_assigned(cur)
+                cur = self.ast.nodes[cur].extra
+            return
+        if n.kind == "List":
+            cur = n.left
+            while cur != 0:
+                self.collect_assigned(cur)
+                cur = self.ast.nodes[cur].extra
+            return
+
+    def gen_expr(self, idx: int) -> str:
+        if idx == 0:
+            return "0"
+        n = self.ast.nodes[idx]
+        if n.kind == "Int":
+            return n.value
+        if n.kind == "Float":
+            return n.value
+        if n.kind == "Bool":
+            if n.value == "false":
+                return "0"
+            return "1"
+        if n.kind == "None":
+            return "0"
+        if n.kind == "Str":
+            return self.intern_str(n.value)
+        if n.kind == "Name":
+            slot = self.slot_for(n.value)
+            if slot == "":
+                print("vcode: name '" + n.value + "' is not defined")
+                exit(1)
+            t = self.new_temp()
+            self.emit(t + " =l loadl " + slot)
+            return t
+        if n.kind == "Group":
+            return self.gen_expr(n.left)
+        if n.kind == "Unary":
+            v = self.gen_expr(n.left)
+            if n.op == "-":
+                t = self.new_temp()
+                self.emit(t + " =l sub 0, " + v)
+                return t
+            if n.op == "+":
+                return v
+            c = self.new_temp()
+            self.emit(c + " =w ceql " + v + ", 0")
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + c)
+            return ext
+        if n.kind == "Binary":
+            return self.gen_binary(n)
+        if n.kind == "Call":
+            return self.gen_call(n)
+        print("vcode: unsupported expression kind '" + n.kind + "'")
+        exit(1)
+        return "0"
+
+    def gen_binary(self, n: Node) -> str:
+        a = self.gen_expr(n.left)
+        b = self.gen_expr(n.right)
+        op = n.op
+        t = self.new_temp()
+        if op == "+":
+            self.emit(t + " =l add " + a + ", " + b)
+            return t
+        if op == "-":
+            self.emit(t + " =l sub " + a + ", " + b)
+            return t
+        if op == "*":
+            self.emit(t + " =l mul " + a + ", " + b)
+            return t
+        if op == "/":
+            self.emit(t + " =l div " + a + ", " + b)
+            return t
+        if op == "//":
+            self.emit(t + " =l call $vayu_floordiv(l " + a + ", l " + b + ")")
+            return t
+        if op == "%":
+            self.emit(t + " =l call $vayu_mod(l " + a + ", l " + b + ")")
+            return t
+        if op == "==":
+            c = self.new_temp()
+            self.emit(c + " =w ceql " + a + ", " + b)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + c)
+            return ext
+        if op == "!=":
+            c = self.new_temp()
+            self.emit(c + " =w cnel " + a + ", " + b)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + c)
+            return ext
+        if op == "<":
+            c = self.new_temp()
+            self.emit(c + " =w csltl " + a + ", " + b)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + c)
+            return ext
+        if op == ">":
+            c = self.new_temp()
+            self.emit(c + " =w csgtl " + a + ", " + b)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + c)
+            return ext
+        if op == "<=":
+            c = self.new_temp()
+            self.emit(c + " =w cslel " + a + ", " + b)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + c)
+            return ext
+        if op == ">=":
+            c = self.new_temp()
+            self.emit(c + " =w csgel " + a + ", " + b)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + c)
+            return ext
+        if op == "and":
+            ab = self.new_temp()
+            self.emit(ab + " =w cnel " + a + ", 0")
+            bb = self.new_temp()
+            self.emit(bb + " =w cnel " + b + ", 0")
+            r = self.new_temp()
+            self.emit(r + " =w and " + ab + ", " + bb)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + r)
+            return ext
+        if op == "or":
+            ab = self.new_temp()
+            self.emit(ab + " =w cnel " + a + ", 0")
+            bb = self.new_temp()
+            self.emit(bb + " =w cnel " + b + ", 0")
+            r = self.new_temp()
+            self.emit(r + " =w or " + ab + ", " + bb)
+            ext = self.new_temp()
+            self.emit(ext + " =l extsw " + r)
+            return ext
+        print("vcode: unsupported binary operator '" + op + "'")
+        exit(1)
+        return "0"
+
+    def gen_call(self, n: Node) -> str:
+        callee = self.ast.nodes[n.left]
+        if callee.kind == "Name":
+            if callee.value == "print":
+                cur = n.right
+                first = true
+                while cur != 0:
+                    v = self.gen_expr(cur)
+                    if not first:
+                        self.emit("call $vayu_print_space()")
+                    first = false
+                    arg_node = self.ast.nodes[cur]
+                    if arg_node.kind == "Str":
+                        self.emit("call $vayu_print_str_noln(l " + v + ")")
+                    elif arg_node.kind == "Bool":
+                        self.emit("call $vayu_print_bool_noln(l " + v + ")")
+                    else:
+                        is_bool = false
+                        if arg_node.kind == "Binary":
+                            if arg_node.op == "==":
+                                is_bool = true
+                            if arg_node.op == "!=":
+                                is_bool = true
+                            if arg_node.op == "<":
+                                is_bool = true
+                            if arg_node.op == ">":
+                                is_bool = true
+                            if arg_node.op == "<=":
+                                is_bool = true
+                            if arg_node.op == ">=":
+                                is_bool = true
+                            if arg_node.op == "and":
+                                is_bool = true
+                            if arg_node.op == "or":
+                                is_bool = true
+                        if is_bool:
+                            self.emit("call $vayu_print_bool_noln(l " + v + ")")
+                        else:
+                            self.emit("call $vayu_print_int_noln(l " + v + ")")
+                    cur = self.ast.nodes[cur].extra
+                self.emit("call $vayu_print_ln()")
+                return "0"
+            args_ssa: list<str> = []
+            cur = n.right
+            while cur != 0:
+                args_ssa.append(self.gen_expr(cur))
+                cur = self.ast.nodes[cur].extra
+            args_str = ""
+            i = 0
+            while i < len(args_ssa):
+                if i > 0:
+                    args_str = args_str + ", "
+                args_str = args_str + "l " + args_ssa[i]
+                i = i + 1
+            t = self.new_temp()
+            self.emit(t + " =l call $vayu_fn_" + callee.value + "(" + args_str + ")")
+            return t
+        print("vcode: only print() and simple function calls supported")
+        exit(1)
+        return "0"
+
+    def gen_stmt(self, idx: int) -> None:
+        if idx == 0:
+            return
+        n = self.ast.nodes[idx]
+        if n.kind == "ExprStmt":
+            self.gen_expr(n.left)
+            return
+        if n.kind == "Assign":
+            v = self.gen_expr(n.right)
+            t = self.ast.nodes[n.left]
+            if t.kind != "Name":
+                print("vcode: only simple-name assignment supported")
+                exit(1)
+            slot = self.slot_for(t.value)
+            if slot == "":
+                slot = self.declare_var(t.value)
+            self.emit("storel " + v + ", " + slot)
+            return
+        if n.kind == "AnnotAssign":
+            slot = self.declare_var(n.value)
+            if n.right != 0:
+                v = self.gen_expr(n.right)
+                self.emit("storel " + v + ", " + slot)
+            return
+        if n.kind == "If":
+            end_label = self.new_label("if_end_")
+            self.gen_if_chain(n, end_label)
+            self.emit_raw(end_label)
+            return
+        if n.kind == "While":
+            self.gen_while(n)
+            return
+        if n.kind == "For":
+            self.gen_for(n)
+            return
+        if n.kind == "Pass":
+            return
+        if n.kind == "Break":
+            if len(self.loop_stack) == 0:
+                print("vcode: 'break' outside loop")
+                exit(1)
+            ctx = self.loop_stack[len(self.loop_stack) - 1]
+            self.emit("jmp " + ctx.break_label)
+            return
+        if n.kind == "Continue":
+            if len(self.loop_stack) == 0:
+                print("vcode: 'continue' outside loop")
+                exit(1)
+            ctx = self.loop_stack[len(self.loop_stack) - 1]
+            self.emit("jmp " + ctx.continue_label)
+            return
+        if n.kind == "Return":
+            if n.left != 0:
+                v = self.gen_expr(n.left)
+                self.emit("ret " + v)
+            else:
+                self.emit("ret 0")
+            return
+        if n.kind == "Def":
+            return
+        if n.kind == "Block":
+            self.gen_block_from(n.left)
+            return
+        print("vcode: statement kind '" + n.kind + "' not supported")
+        exit(1)
+
+    def gen_block_from(self, stmt_idx: int) -> None:
+        cur = stmt_idx
+        while cur != 0:
+            self.gen_stmt(cur)
+            cur = self.ast.nodes[cur].extra
+
+    def gen_if_chain(self, n: Node, end_label: str) -> None:
+        cond = self.gen_expr(n.left)
+        cond_w = self.new_temp()
+        self.emit(cond_w + " =w cnel " + cond + ", 0")
+        then_label = self.new_label("if_then_")
+        next_label = self.new_label("if_next_")
+        self.emit("jnz " + cond_w + ", " + then_label + ", " + next_label)
+        self.emit_raw(then_label)
+        self.gen_block_from(self.ast.nodes[n.right].left)
+        if not self.terminated:
+            self.emit("jmp " + end_label)
+        self.emit_raw(next_label)
+        if n.extra == 0:
+            if not self.terminated:
+                self.emit("jmp " + end_label)
+            return
+        nxt = self.ast.nodes[n.extra]
+        if nxt.kind == "If":
+            self.gen_if_chain(nxt, end_label)
+        elif nxt.kind == "Else":
+            self.gen_block_from(self.ast.nodes[nxt.right].left)
+            if not self.terminated:
+                self.emit("jmp " + end_label)
+
+    def gen_while(self, n: Node) -> None:
+        cond_label = self.new_label("while_cond_")
+        body_label = self.new_label("while_body_")
+        end_label = self.new_label("while_end_")
+        self.emit("jmp " + cond_label)
+        self.emit_raw(cond_label)
+        cond = self.gen_expr(n.left)
+        cond_w = self.new_temp()
+        self.emit(cond_w + " =w cnel " + cond + ", 0")
+        self.emit("jnz " + cond_w + ", " + body_label + ", " + end_label)
+        self.emit_raw(body_label)
+        ctx = LoopContext(cond_label, end_label)
+        self.loop_stack.append(ctx)
+        self.gen_block_from(self.ast.nodes[n.right].left)
+        self.loop_stack.pop()
+        if not self.terminated:
+            self.emit("jmp " + cond_label)
+        self.emit_raw(end_label)
+
+    def gen_for(self, n: Node) -> None:
+        iter_node = self.ast.nodes[n.left]
+        if iter_node.kind != "Call":
+            print("vcode: `for` requires `range(...)` at 7E-1")
+            exit(1)
+        callee = self.ast.nodes[iter_node.left]
+        if callee.kind != "Name":
+            print("vcode: `for` requires `range(...)` at 7E-1")
+            exit(1)
+        if callee.value != "range":
+            print("vcode: `for` requires `range(...)` at 7E-1")
+            exit(1)
+        args = iter_node.right
+        if args == 0:
+            print("vcode: range() requires at least 1 arg")
+            exit(1)
+        first_arg = self.ast.nodes[args]
+        start_ssa = "0"
+        stop_expr_idx = args
+        if first_arg.extra != 0:
+            start_ssa = self.gen_expr(args)
+            stop_expr_idx = first_arg.extra
+
+        var_slot = self.declare_var(n.value)
+        self.emit("storel " + start_ssa + ", " + var_slot)
+
+        cond_label = self.new_label("for_cond_")
+        body_label = self.new_label("for_body_")
+        next_label = self.new_label("for_next_")
+        end_label = self.new_label("for_end_")
+
+        self.emit("jmp " + cond_label)
+
+        self.emit_raw(body_label)
+        ctx = LoopContext(next_label, end_label)
+        self.loop_stack.append(ctx)
+        self.gen_block_from(self.ast.nodes[n.right].left)
+        self.loop_stack.pop()
+        if not self.terminated:
+            self.emit("jmp " + next_label)
+
+        self.emit_raw(next_label)
+        i_val = self.new_temp()
+        self.emit(i_val + " =l loadl " + var_slot)
+        i_next = self.new_temp()
+        self.emit(i_next + " =l add " + i_val + ", 1")
+        self.emit("storel " + i_next + ", " + var_slot)
+        self.emit("jmp " + cond_label)
+
+        self.emit_raw(cond_label)
+        i_cur = self.new_temp()
+        self.emit(i_cur + " =l loadl " + var_slot)
+        stop_ssa = self.gen_expr(stop_expr_idx)
+        cond_w = self.new_temp()
+        self.emit(cond_w + " =w csltl " + i_cur + ", " + stop_ssa)
+        self.emit("jnz " + cond_w + ", " + body_label + ", " + end_label)
+
+        self.emit_raw(end_label)
+
+    def gen_function(self, def_node: Node) -> None:
+        name = def_node.value
+        params = def_node.left
+        body = def_node.right
+
+        param_names: list<str> = []
+        cur = params
+        while cur != 0:
+            param_names.append(self.ast.nodes[cur].value)
+            cur = self.ast.nodes[cur].extra
+
+        saved_names = self.var_names
+        saved_slots = self.var_slots
+        saved_out = self.out
+        saved_temp = self.next_temp
+        saved_label = self.next_label
+        saved_loops = self.loop_stack
+        self.var_names = []
+        self.var_slots = []
+        self.out = []
+        self.next_temp = 0
+        self.next_label = 0
+        self.loop_stack = []
+        self.terminated = false
+
+        param_decl = ""
+        i = 0
+        while i < len(param_names):
+            if i > 0:
+                param_decl = param_decl + ", "
+            param_decl = param_decl + "l %p_" + param_names[i]
+            i = i + 1
+
+        header = "function l $vayu_fn_" + name + "(" + param_decl + ") {"
+        self.emit_raw(header)
+        self.emit_raw("@start")
+
+        i = 0
+        while i < len(param_names):
+            pname = param_names[i]
+            slot = "%" + pname + "_slot"
+            self.var_names.append(pname)
+            self.var_slots.append(slot)
+            self.emit(slot + " =l alloc8 8")
+            self.emit("storel %p_" + pname + ", " + slot)
+            i = i + 1
+
+        self.collect_assigned(body)
+        self.gen_block_from(self.ast.nodes[body].left)
+        if not self.terminated:
+            self.emit("ret 0")
+        self.emit_raw("}")
+
+        fn_lines = self.out
+        self.out = saved_out
+        self.var_names = saved_names
+        self.var_slots = saved_slots
+        self.next_temp = saved_temp
+        self.next_label = saved_label
+        self.loop_stack = saved_loops
+
+        i = 0
+        while i < len(fn_lines):
+            self.out.append(fn_lines[i])
+            i = i + 1
+        self.emit_raw("")
+
+    def gen_program(self, root_idx: int) -> None:
+        self.collect_assigned(root_idx)
+
+        saved_vars_names = self.var_names
+        saved_vars_slots = self.var_slots
+        self.out = []
+        self.var_names = []
+        self.var_slots = []
+        self.terminated = false
+
+        self.emit_raw("export function $vayu_main() {")
+        self.emit_raw("@start")
+
+        i = 0
+        while i < len(saved_vars_names):
+            name = saved_vars_names[i]
+            slot = "%v" + name + "_slot"
+            self.var_names.append(name)
+            self.var_slots.append(slot)
+            self.emit(slot + " =l alloc8 8")
+            self.emit("storel 0, " + slot)
+            i = i + 1
+
+        root = self.ast.nodes[root_idx]
+        cur = root.left
+        while cur != 0:
+            n = self.ast.nodes[cur]
+            if n.kind == "Def":
+                cur = n.extra
+                continue
+            if n.kind == "Class":
+                cur = n.extra
+                continue
+            if n.kind == "Struct":
+                cur = n.extra
+                continue
+            self.gen_stmt(cur)
+            cur = n.extra
+
+        if not self.terminated:
+            self.emit("ret")
+        self.emit_raw("}")
+        self.emit_raw("")
+
+        cur = root.left
+        while cur != 0:
+            n = self.ast.nodes[cur]
+            if n.kind == "Def":
+                self.gen_function(n)
+            cur = n.extra
+
+        result = ""
+        i = 0
+        while i < len(self.data):
+            result = result + self.data[i] + "\n"
+            i = i + 1
+        if len(self.data) > 0:
+            result = result + "\n"
+        i = 0
+        while i < len(self.out):
+            result = result + self.out[i] + "\n"
+            i = i + 1
+        self.final = result
+
 def keyword_kind(word: str) -> str:
     kw = {}
-    kw["and"] = "And"
-    kw["or"] = "Or"
-    kw["not"] = "Not"
-    kw["in"] = "In"
-    kw["is"] = "Is"
-    kw["true"] = "True"
-    kw["false"] = "False"
-    kw["none"] = "None"
-    kw["int"] = "IntKw"
-    kw["float"] = "FloatKw"
-    kw["bool"] = "BoolKw"
-    kw["str"] = "StrKw"
     kw["def"] = "Def"
     kw["return"] = "Return"
     kw["if"] = "If"
@@ -707,8 +1273,23 @@ def keyword_kind(word: str) -> str:
     kw["else"] = "Else"
     kw["while"] = "While"
     kw["for"] = "For"
+    kw["break"] = "Break"
+    kw["continue"] = "Continue"
+    kw["pass"] = "Pass"
     kw["class"] = "Class"
     kw["struct"] = "Struct"
+    kw["and"] = "And"
+    kw["or"] = "Or"
+    kw["not"] = "Not"
+    kw["in"] = "In"
+    kw["is"] = "Is"
+    kw["lambda"] = "Lambda"
+    kw["true"] = "True"
+    kw["True"] = "True"
+    kw["false"] = "False"
+    kw["False"] = "False"
+    kw["none"] = "None"
+    kw["None"] = "None"
     if word in kw:
         return kw[word]
     return "Identifier"
@@ -742,9 +1323,15 @@ def tokenize(source: str) -> list<Token>:
                         break
                 if pos >= n:
                     break
-                if source[pos] == "\n" or source[pos] == "\r" or source[pos] == "#":
-                    pass
-                else:
+                cc = source[pos]
+                skip_indent = false
+                if cc == "\n":
+                    skip_indent = true
+                elif cc == "\r":
+                    skip_indent = true
+                elif cc == "#":
+                    skip_indent = true
+                if not skip_indent:
                     current = indent_stack[len(indent_stack) - 1]
                     if indent > current:
                         indent_stack.append(indent)
@@ -759,16 +1346,23 @@ def tokenize(source: str) -> list<Token>:
         if pos >= n:
             break
         c = source[pos]
-        if c == " " or c == "\t" or c == "\r":
+        if c == " ":
             pos = pos + 1
             col = col + 1
+            continue
+        if c == "\t":
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == "\r":
+            pos = pos + 1
             continue
         if c == "\n":
             if bracket_depth == 0:
                 if len(toks) > 0:
                     m = len(toks)
                     if toks[m - 1].kind != "Newline":
-                        toks.append(Token("Newline", "\n", line, col))
+                        toks.append(Token("Newline", "\\n", line, col))
             pos = pos + 1
             line = line + 1
             col = 1
@@ -784,20 +1378,28 @@ def tokenize(source: str) -> list<Token>:
                 col = col + 1
             continue
         if c.is_alpha() or c == "_":
-            sc = col
+            start_col = col
             text = ""
             while pos < n:
                 cc = source[pos]
-                if cc.is_alpha() or cc.is_digit() or cc == "_":
+                if cc.is_alpha():
+                    text = text + cc
+                    pos = pos + 1
+                    col = col + 1
+                elif cc.is_digit():
+                    text = text + cc
+                    pos = pos + 1
+                    col = col + 1
+                elif cc == "_":
                     text = text + cc
                     pos = pos + 1
                     col = col + 1
                 else:
                     break
-            toks.append(Token(keyword_kind(text), text, line, sc))
+            toks.append(Token(keyword_kind(text), text, line, start_col))
             continue
         if c.is_digit():
-            sc = col
+            start_col = col
             text = ""
             while true:
                 if pos >= n:
@@ -807,31 +1409,33 @@ def tokenize(source: str) -> list<Token>:
                 text = text + source[pos]
                 pos = pos + 1
                 col = col + 1
-            toks.append(Token("Int", text, line, sc))
+            toks.append(Token("Int", text, line, start_col))
             continue
         if c == "\"":
-            sc = col
+            start_col = col
             pos = pos + 1
             col = col + 1
             text = ""
-            while pos < n:
+            while true:
+                if pos >= n:
+                    break
                 if source[pos] == "\"":
                     break
                 if source[pos] == "\n":
                     break
                 if source[pos] == "\\":
                     if pos + 1 < n:
-                        e = source[pos + 1]
-                        if e == "n":
+                        esc = source[pos + 1]
+                        if esc == "n":
                             text = text + "\n"
-                        elif e == "t":
+                        elif esc == "t":
                             text = text + "\t"
-                        elif e == "\"":
+                        elif esc == "\"":
                             text = text + "\""
-                        elif e == "\\":
+                        elif esc == "\\":
                             text = text + "\\"
                         else:
-                            text = text + e
+                            text = text + esc
                         pos = pos + 2
                         col = col + 2
                         continue
@@ -841,148 +1445,148 @@ def tokenize(source: str) -> list<Token>:
             if pos < n:
                 pos = pos + 1
                 col = col + 1
-            toks.append(Token("String", text, line, sc))
+            toks.append(Token("String", text, line, start_col))
             continue
+        start_col = col
         nxt = ""
         if pos + 1 < n:
             nxt = source[pos + 1]
-        sc = col
         if c == "+":
             if nxt == "=":
-                toks.append(Token("PlusAssign", "+=", line, sc))
+                toks.append(Token("PlusAssign", "+=", line, start_col))
                 pos = pos + 2
                 col = col + 2
             else:
-                toks.append(Token("Plus", "+", line, sc))
+                toks.append(Token("Plus", "+", line, start_col))
                 pos = pos + 1
                 col = col + 1
             continue
         if c == "-":
             if nxt == "=":
-                toks.append(Token("MinusAssign", "-=", line, sc))
+                toks.append(Token("MinusAssign", "-=", line, start_col))
                 pos = pos + 2
                 col = col + 2
             elif nxt == ">":
-                toks.append(Token("Arrow", "->", line, sc))
+                toks.append(Token("Arrow", "->", line, start_col))
                 pos = pos + 2
                 col = col + 2
             else:
-                toks.append(Token("Minus", "-", line, sc))
+                toks.append(Token("Minus", "-", line, start_col))
                 pos = pos + 1
                 col = col + 1
             continue
         if c == "*":
             if nxt == "*":
-                toks.append(Token("StarStar", "**", line, sc))
+                toks.append(Token("StarStar", "**", line, start_col))
                 pos = pos + 2
                 col = col + 2
             else:
-                toks.append(Token("Star", "*", line, sc))
+                toks.append(Token("Star", "*", line, start_col))
                 pos = pos + 1
                 col = col + 1
             continue
         if c == "/":
             if nxt == "/":
-                toks.append(Token("SlashSlash", "//", line, sc))
+                toks.append(Token("SlashSlash", "//", line, start_col))
                 pos = pos + 2
                 col = col + 2
             else:
-                toks.append(Token("Slash", "/", line, sc))
+                toks.append(Token("Slash", "/", line, start_col))
                 pos = pos + 1
                 col = col + 1
             continue
         if c == "%":
-            toks.append(Token("Percent", "%", line, sc))
+            toks.append(Token("Percent", "%", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "=":
             if nxt == "=":
-                toks.append(Token("Eq", "==", line, sc))
+                toks.append(Token("Eq", "==", line, start_col))
                 pos = pos + 2
                 col = col + 2
             else:
-                toks.append(Token("Assign", "=", line, sc))
+                toks.append(Token("Assign", "=", line, start_col))
                 pos = pos + 1
                 col = col + 1
             continue
         if c == "!":
             if nxt == "=":
-                toks.append(Token("NotEq", "!=", line, sc))
+                toks.append(Token("NotEq", "!=", line, start_col))
                 pos = pos + 2
                 col = col + 2
             continue
         if c == "<":
             if nxt == "=":
-                toks.append(Token("LtEq", "<=", line, sc))
+                toks.append(Token("LtEq", "<=", line, start_col))
                 pos = pos + 2
                 col = col + 2
             else:
-                toks.append(Token("Lt", "<", line, sc))
+                toks.append(Token("Lt", "<", line, start_col))
                 pos = pos + 1
                 col = col + 1
             continue
         if c == ">":
             if nxt == "=":
-                toks.append(Token("GtEq", ">=", line, sc))
+                toks.append(Token("GtEq", ">=", line, start_col))
                 pos = pos + 2
                 col = col + 2
             else:
-                toks.append(Token("Gt", ">", line, sc))
+                toks.append(Token("Gt", ">", line, start_col))
                 pos = pos + 1
                 col = col + 1
             continue
         if c == "(":
             bracket_depth = bracket_depth + 1
-            toks.append(Token("LParen", "(", line, sc))
+            toks.append(Token("LParen", "(", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == ")":
             if bracket_depth > 0:
                 bracket_depth = bracket_depth - 1
-            toks.append(Token("RParen", ")", line, sc))
+            toks.append(Token("RParen", ")", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "[":
             bracket_depth = bracket_depth + 1
-            toks.append(Token("LBracket", "[", line, sc))
+            toks.append(Token("LBracket", "[", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "]":
             if bracket_depth > 0:
                 bracket_depth = bracket_depth - 1
-            toks.append(Token("RBracket", "]", line, sc))
+            toks.append(Token("RBracket", "]", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "{":
             bracket_depth = bracket_depth + 1
-            toks.append(Token("LBrace", "{", line, sc))
+            toks.append(Token("LBrace", "{", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "}":
             if bracket_depth > 0:
                 bracket_depth = bracket_depth - 1
-            toks.append(Token("RBrace", "}", line, sc))
+            toks.append(Token("RBrace", "}", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == ",":
-            toks.append(Token("Comma", ",", line, sc))
+            toks.append(Token("Comma", ",", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == ":":
-            toks.append(Token("Colon", ":", line, sc))
+            toks.append(Token("Colon", ":", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == ".":
-            toks.append(Token("Dot", ".", line, sc))
+            toks.append(Token("Dot", ".", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
@@ -992,7 +1596,7 @@ def tokenize(source: str) -> list<Token>:
     if len(toks) > 0:
         m = len(toks)
         if toks[m - 1].kind != "Newline":
-            toks.append(Token("Newline", "\n", line, col))
+            toks.append(Token("Newline", "\\n", line, col))
     while len(indent_stack) > 1:
         indent_stack.pop()
         toks.append(Token("Dedent", "", line, col))
