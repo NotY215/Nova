@@ -1,0 +1,10 @@
+a = 10
+b = 32
+c = a + b * 2
+print(c)
+
+print("Hello from Vayu codegen")
+
+print(1 + 2 * 3)
+
+print(a > 5)

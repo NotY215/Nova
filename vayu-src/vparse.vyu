@@ -1,10 +1,5 @@
 # vparse.vyu — Expression parser written in Vayu.
-# Usage:   vparse <source.vyu>
-# Output:  indented AST for the expressions in the file.
 
-# ===========================================================================
-# Token kinds (mirror the C++ lexer's names)
-# ===========================================================================
 class Token:
     kind: str
     lexeme: str
@@ -17,9 +12,6 @@ class Token:
         self.line = line
         self.col = col
 
-# ===========================================================================
-# AST arena
-# ===========================================================================
 class Node:
     kind: str
     value: str
@@ -41,7 +33,6 @@ class Ast:
 
     def __init__(self) -> None:
         self.nodes = []
-        # Reserve index 0 as "null"
         placeholder = Node("Null")
         self.nodes.append(placeholder)
 
@@ -50,12 +41,6 @@ class Ast:
         self.nodes.append(n)
         return len(self.nodes) - 1
 
-    def get(self, idx: int) -> Node:
-        return self.nodes[idx]
-
-# ===========================================================================
-# Parser
-# ===========================================================================
 class Parser:
     toks: list<Token>
     pos: int
@@ -66,9 +51,6 @@ class Parser:
         self.pos = 0
         self.ast = Ast()
 
-    # ---------------------------------------------------------------
-    # Cursor helpers
-    # ---------------------------------------------------------------
     def peek_kind(self) -> str:
         if self.pos >= len(self.toks):
             return "EOF"
@@ -107,9 +89,6 @@ class Parser:
         exit(1)
         return 0
 
-    # ---------------------------------------------------------------
-    # Entry: parse each non-blank line as an expression.
-    # ---------------------------------------------------------------
     def parse_program(self) -> int:
         root = self.ast.add("Program")
         last_child = 0
@@ -117,66 +96,92 @@ class Parser:
             self.skip_newlines()
             if self.check("EOF"):
                 break
-            # Skip stray structural tokens for now.
             if self.check("Indent") or self.check("Dedent"):
                 self.advance()
                 continue
             expr = self.parse_expression()
-            # Chain children via right-link for compact printing.
             if last_child == 0:
-                self.ast.get(root).left = expr
+                self.ast.nodes[root].left = expr
             else:
-                self.ast.get(last_child).right = expr
+                self.ast.nodes[last_child].right = expr
             last_child = expr
             self.match("Newline")
         return root
 
-    # ---------------------------------------------------------------
-    # Precedence table
-    # ---------------------------------------------------------------
     def bin_prec(self, kind: str) -> int:
-        if kind == "Or":        return 1
-        if kind == "And":       return 2
-        if kind == "Eq":        return 4
-        if kind == "NotEq":     return 4
-        if kind == "Lt":        return 4
-        if kind == "Gt":        return 4
-        if kind == "LtEq":      return 4
-        if kind == "GtEq":      return 4
-        if kind == "In":        return 4
-        if kind == "Is":        return 4
-        if kind == "Plus":      return 5
-        if kind == "Minus":     return 5
-        if kind == "Star":      return 6
-        if kind == "Slash":     return 6
-        if kind == "SlashSlash": return 6
-        if kind == "Percent":   return 6
-        if kind == "StarStar":  return 8
+        if kind == "Or":
+            return 1
+        if kind == "And":
+            return 2
+        if kind == "Eq":
+            return 4
+        if kind == "NotEq":
+            return 4
+        if kind == "Lt":
+            return 4
+        if kind == "Gt":
+            return 4
+        if kind == "LtEq":
+            return 4
+        if kind == "GtEq":
+            return 4
+        if kind == "In":
+            return 4
+        if kind == "Is":
+            return 4
+        if kind == "Plus":
+            return 5
+        if kind == "Minus":
+            return 5
+        if kind == "Star":
+            return 6
+        if kind == "Slash":
+            return 6
+        if kind == "SlashSlash":
+            return 6
+        if kind == "Percent":
+            return 6
+        if kind == "StarStar":
+            return 8
         return -1
 
     def bin_op_string(self, kind: str) -> str:
-        if kind == "Plus":       return "+"
-        if kind == "Minus":      return "-"
-        if kind == "Star":       return "*"
-        if kind == "Slash":      return "/"
-        if kind == "SlashSlash": return "//"
-        if kind == "Percent":    return "%"
-        if kind == "StarStar":   return "**"
-        if kind == "Eq":         return "=="
-        if kind == "NotEq":      return "!="
-        if kind == "Lt":         return "<"
-        if kind == "Gt":         return ">"
-        if kind == "LtEq":       return "<="
-        if kind == "GtEq":       return ">="
-        if kind == "And":        return "and"
-        if kind == "Or":         return "or"
-        if kind == "In":         return "in"
-        if kind == "Is":         return "is"
+        if kind == "Plus":
+            return "+"
+        if kind == "Minus":
+            return "-"
+        if kind == "Star":
+            return "*"
+        if kind == "Slash":
+            return "/"
+        if kind == "SlashSlash":
+            return "//"
+        if kind == "Percent":
+            return "%"
+        if kind == "StarStar":
+            return "**"
+        if kind == "Eq":
+            return "=="
+        if kind == "NotEq":
+            return "!="
+        if kind == "Lt":
+            return "<"
+        if kind == "Gt":
+            return ">"
+        if kind == "LtEq":
+            return "<="
+        if kind == "GtEq":
+            return ">="
+        if kind == "And":
+            return "and"
+        if kind == "Or":
+            return "or"
+        if kind == "In":
+            return "in"
+        if kind == "Is":
+            return "is"
         return "?"
 
-    # ---------------------------------------------------------------
-    # Expression grammar (precedence climbing)
-    # ---------------------------------------------------------------
     def parse_expression(self) -> int:
         return self.parse_binary(1)
 
@@ -194,10 +199,9 @@ class Parser:
                 next_min = prec + 1
             right = self.parse_binary(next_min)
             node_idx = self.ast.add("Binary")
-            n = self.ast.get(node_idx)
-            n.op = self.bin_op_string(op_kind)
-            n.left = left
-            n.right = right
+            self.ast.nodes[node_idx].op = self.bin_op_string(op_kind)
+            self.ast.nodes[node_idx].left = left
+            self.ast.nodes[node_idx].right = right
             left = node_idx
         return left
 
@@ -207,14 +211,13 @@ class Parser:
             tok = self.advance()
             operand = self.parse_unary()
             node_idx = self.ast.add("Unary")
-            n = self.ast.get(node_idx)
             if tok.kind == "Minus":
-                n.op = "-"
+                self.ast.nodes[node_idx].op = "-"
             elif tok.kind == "Plus":
-                n.op = "+"
+                self.ast.nodes[node_idx].op = "+"
             else:
-                n.op = "not"
-            n.left = operand
+                self.ast.nodes[node_idx].op = "not"
+            self.ast.nodes[node_idx].left = operand
             return node_idx
         return self.parse_postfix()
 
@@ -222,11 +225,10 @@ class Parser:
         e = self.parse_primary()
         while true:
             if self.match("Dot"):
-                # Attribute access: eat the name (not stored yet).
                 self.advance()
                 continue
             if self.check("LParen"):
-                open_tok = self.advance()
+                self.advance()
                 args = []
                 if not self.check("RParen"):
                     args.append(self.parse_expression())
@@ -235,12 +237,10 @@ class Parser:
                             break
                         args.append(self.parse_expression())
                 self.match("RParen")
-                # Store the first argument in `right` (single-arg only for now).
                 call_idx = self.ast.add("Call")
-                n = self.ast.get(call_idx)
-                n.left = e
+                self.ast.nodes[call_idx].left = e
                 if len(args) > 0:
-                    n.right = args[0]
+                    self.ast.nodes[call_idx].right = args[0]
                 e = call_idx
                 continue
             if self.check("LBracket"):
@@ -248,9 +248,8 @@ class Parser:
                 idx = self.parse_expression()
                 self.match("RBracket")
                 ix_idx = self.ast.add("Index")
-                n = self.ast.get(ix_idx)
-                n.left = e
-                n.right = idx
+                self.ast.nodes[ix_idx].left = e
+                self.ast.nodes[ix_idx].right = idx
                 e = ix_idx
                 continue
             break
@@ -261,22 +260,22 @@ class Parser:
         if k == "Int":
             tok = self.advance()
             idx = self.ast.add("Int")
-            self.ast.get(idx).value = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "Float":
             tok = self.advance()
             idx = self.ast.add("Float")
-            self.ast.get(idx).value = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "String":
             tok = self.advance()
             idx = self.ast.add("Str")
-            self.ast.get(idx).value = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "Char":
             tok = self.advance()
             idx = self.ast.add("Char")
-            self.ast.get(idx).value = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "True":
             self.advance()
@@ -284,7 +283,7 @@ class Parser:
         if k == "False":
             self.advance()
             idx = self.ast.add("Bool")
-            self.ast.get(idx).value = "false"
+            self.ast.nodes[idx].value = "false"
             return idx
         if k == "None":
             self.advance()
@@ -292,14 +291,14 @@ class Parser:
         if k == "Identifier":
             tok = self.advance()
             idx = self.ast.add("Name")
-            self.ast.get(idx).value = tok.lexeme
+            self.ast.nodes[idx].value = tok.lexeme
             return idx
         if k == "LParen":
             self.advance()
             inner = self.parse_expression()
             self.match("RParen")
             idx = self.ast.add("Group")
-            self.ast.get(idx).left = inner
+            self.ast.nodes[idx].left = inner
             return idx
         if k == "LBracket":
             return self.parse_list_literal()
@@ -307,7 +306,7 @@ class Parser:
         return 0
 
     def parse_list_literal(self) -> int:
-        self.advance()   # consume [
+        self.advance()
         node_idx = self.ast.add("List")
         first = 0
         last = 0
@@ -319,19 +318,16 @@ class Parser:
                 if self.check("RBracket"):
                     break
                 e = self.parse_expression()
-                self.ast.get(last).extra = e
+                self.ast.nodes[last].extra = e
                 last = e
         self.match("RBracket")
-        self.ast.get(node_idx).left = first
+        self.ast.nodes[node_idx].left = first
         return node_idx
 
-# ===========================================================================
-# AST printer
-# ===========================================================================
 def print_node(ast: Ast, idx: int, depth: int) -> None:
     if idx == 0:
         return
-    n = ast.get(idx)
+    n = ast.nodes[idx]
     pad = ""
     i = 0
     while i < depth:
@@ -378,19 +374,16 @@ def print_node(ast: Ast, idx: int, depth: int) -> None:
         cur = n.left
         while cur != 0:
             print_node(ast, cur, depth + 1)
-            cur = ast.get(cur).extra
+            cur = ast.nodes[cur].extra
     elif n.kind == "Program":
         print(pad + "Program")
         cur = n.left
         while cur != 0:
             print_node(ast, cur, depth + 1)
-            cur = ast.get(cur).right
+            cur = ast.nodes[cur].right
     else:
         print(pad + "<" + n.kind + ">")
 
-# ===========================================================================
-# Driver — parse a file, print its expression ASTs.
-# ===========================================================================
 def main() -> None:
     a = args()
     if len(a) < 1:
@@ -406,10 +399,6 @@ def main() -> None:
     root = parser.parse_program()
     print_node(parser.ast, root, 0)
 
-# ===========================================================================
-# Lexer — inlined so we don't need multi-module imports yet.
-# Only the fields we need for expression parsing are populated.
-# ===========================================================================
 def tokenize(source: str) -> list<Token>:
     toks = []
     pos = 0
@@ -494,7 +483,6 @@ def tokenize(source: str) -> list<Token>:
             toks.append(Token("String", text, line, start_col))
             continue
 
-        # Operators
         start_col = col
         nxt = ""
         if pos + 1 < n:
@@ -630,7 +618,6 @@ def tokenize(source: str) -> list<Token>:
             pos = pos + 1
             col = col + 1
             continue
-        # Unknown character: skip it to keep going.
         pos = pos + 1
         col = col + 1
 

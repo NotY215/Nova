@@ -82,7 +82,9 @@ class Lexer:
                 break
         if self.at_end():
             return
-        if self.peek(0) == "\n" or self.peek(0) == "\r":
+        if self.peek(0) == "\n":
+            return
+        if self.peek(0) == "\r":
             return
         if self.peek(0) == "#":
             return
@@ -279,7 +281,7 @@ class Lexer:
     # -----------------------------------------------------------------
     # Main loop
     # -----------------------------------------------------------------
-        def tokenize(self) -> None:
+    def tokenize(self) -> None:
         while not self.at_end():
             if self.at_line_start and self.bracket_depth == 0:
                 self.handle_line_start()

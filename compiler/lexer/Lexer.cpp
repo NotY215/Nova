@@ -193,22 +193,35 @@ namespace vayu {
 
     void Lexer::readString(char quote) {
         SourceLocation start = here();
-        advance();
-        size_t begin = pos_;
+        advance();  // opening quote
 
+        std::string body;
         while (!isAtEnd() && peek() != quote) {
-            if (peek() == '\\' && peek(1) != '\0') { advance(); advance(); continue; }
+            if (peek() == '\\' && peek(1) != '\0') {
+                advance();              // consume backslash
+                char e = advance();     // consume escape letter
+                switch (e) {
+                case 'n':  body += '\n'; break;
+                case 't':  body += '\t'; break;
+                case 'r':  body += '\r'; break;
+                case '0':  body += '\0'; break;
+                case '\\': body += '\\'; break;
+                case '"':  body += '"';  break;
+                case '\'': body += '\''; break;
+                default:   body += e;    break;
+                }
+                continue;
+            }
             if (peek() == '\n') break;
-            advance();
+            body += advance();
         }
 
         if (isAtEnd() || peek() != quote) {
-            tokens_.push_back(Token{ TokenType::Invalid, "unterminated string literal", start });
+            tokens_.push_back(Token{ TokenType::Invalid,
+                                     "unterminated string literal", start });
             return;
         }
-
-        std::string body = source_.substr(begin, pos_ - begin);
-        advance();
+        advance();  // closing quote
 
         TokenType type = (quote == '\'') ? TokenType::Char : TokenType::String;
         tokens_.push_back(Token{ type, std::move(body), start });

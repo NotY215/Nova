@@ -921,10 +921,12 @@ namespace vayu {
                     if (base.type != VType::Obj)
                         throw std::runtime_error(
                             "native: attribute access on non-object (type " +
-                            std::to_string((int)base.type) + ")");
+                            std::to_string((int)base.type) + ") at line " +
+                            std::to_string(e->loc.line));
                     auto ci = findClass(base.cls);
                     if (!ci) throw std::runtime_error("native: unknown class '" +
-                        base.cls + "'");
+                        base.cls + "' at line " +
+                        std::to_string(e->loc.line));
                     auto fit = ci->fieldOffsets.find(n->name);
                     if (fit == ci->fieldOffsets.end())
                         throw std::runtime_error(
@@ -1319,11 +1321,19 @@ namespace vayu {
                                 else {
                                     auto mit = defining->methods.find(attr->name);
                                     if (mit != defining->methods.end() &&
-                                        mit->second->returnType)
-                                        r.type = typeOfAnnotation(
-                                            mit->second->returnType.get());
-                                    else
+                                        mit->second->returnType) {
+                                        Val tmp;
+                                        inferFromAnnotation(
+                                            mit->second->returnType.get(), tmp);
+                                        r.type = tmp.type;
+                                        r.cls = tmp.cls;
+                                        r.elemType = tmp.elemType;
+                                        r.elemCls = tmp.elemCls;
+                                        r.valType = tmp.valType;
+                                    }
+                                    else {
                                         r.type = VType::Unknown;
+                                    }
                                 }
                                 return r;
                             }
@@ -1362,18 +1372,24 @@ namespace vayu {
                         std::string t = newTemp();
                         line(t + " =l call " + sym + "(" + argsStr + ")");
                         r.ssa = t;
-
                         if (attr->name == "__init__") {
                             r.type = VType::Void;
                         }
                         else {
                             auto mit = defining->methods.find(attr->name);
                             if (mit != defining->methods.end() &&
-                                mit->second->returnType)
-                                r.type = typeOfAnnotation(
-                                    mit->second->returnType.get());
-                            else
+                                mit->second->returnType) {
+                                Val tmp;
+                                inferFromAnnotation(mit->second->returnType.get(), tmp);
+                                r.type = tmp.type;
+                                r.cls = tmp.cls;
+                                r.elemType = tmp.elemType;
+                                r.elemCls = tmp.elemCls;
+                                r.valType = tmp.valType;
+                            }
+                            else {
                                 r.type = VType::Unknown;
+                            }
                         }
                         return r;
                     }

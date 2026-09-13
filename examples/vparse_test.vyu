@@ -1,11 +1,15 @@
-1 + 2 * 3
-(1 + 2) * 3
-2 ** 3 ** 2
--5 + 3
-not true or false
-a and b or c
-foo(1, 2, 3)
-obj.method(x)
-arr[0] + arr[1]
-"hello" + " " + name
-age >= 18 and score > 90
+name = "NotY"
+age = 17
+
+def greet(who: str) -> str:
+    return "Hello, " + who
+
+if age >= 18:
+    print(greet(name))
+else:
+    print("Minor")
+
+x = 0
+while x < 3:
+    print(x)
+    x = x + 1
