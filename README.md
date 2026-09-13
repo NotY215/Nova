@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="Vayu Logo" width="180">
+<a href="https://vayu.gt.tc">
+  <img src="assets/logo.svg" alt="Vayu Logo" width="150">
+</a>
 
 # Vayu
 
@@ -8,9 +10,50 @@
 
 **A modern general-purpose programming language designed to combine simplicity, performance, portability, and powerful application development.**
 
-[Syntax](docs/syntax.md) • [AI & ML](docs/ai.md) • [Package Manager](docs/package.md) • [Vision](docs/vision.md)
+<p>
+  <a href="https://vayu.gt.tc"><img src="https://img.shields.io/badge/Website-vayu.gt.tc-111827?style=for-the-badge" alt="Vayu Website"></a>
+  <a href="docs/syntax.md"><img src="https://img.shields.io/badge/Syntax-.vyu-111827?style=for-the-badge" alt="Vayu Syntax"></a>
+  <a href="https://vayu.gt.tc"><img src="https://img.shields.io/badge/Benchmarks-View-111827?style=for-the-badge" alt="Vayu Benchmarks"></a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/Language-Vayu-111827?style=flat-square" alt="Vayu">
+  <img src="https://img.shields.io/badge/Status-Early%20Stage-111827?style=flat-square" alt="Early Stage">
+  <img src="https://img.shields.io/badge/Source%20Extension-.vyu-111827?style=flat-square" alt=".vyu">
+  <img src="https://img.shields.io/badge/License-See%20LICENSE-111827?style=flat-square" alt="License">
+</p>
 
 </div>
+
+---
+
+<div align="center">
+
+## ⚡ Write Simple. Run Native. Control Everything.
+
+**Vayu** brings together Python-inspired readability, native-performance goals, low-level control, modern typing, AI/ML ambitions, and application-development capabilities in one language.
+
+**[🌐 Official Website](https://vayu.gt.tc) · [📖 Syntax](docs/syntax.md) · [🤖 AI & ML](docs/ai.md) · [📦 Packages](docs/package.md) · [🧭 Roadmap](docs/vision.md) · [📊 Benchmarks](https://vayu.gt.tc)**
+
+</div>
+
+---
+
+## 🌐 Website
+
+**[Visit the official Vayu website →](https://vayu.gt.tc)**
+
+The website is the primary place for the latest Vayu information, roadmap, syntax references, benchmark information, and project updates. The Vayu logo and the banner links at the top of this README are clickable and lead directly to the website.
+
+---
+
+## 📊 Benchmarks
+
+Vayu includes benchmarking as part of its development and performance evaluation process. Benchmarks are used to track compiler/runtime progress and compare representative workloads as the implementation evolves.
+
+**[→ View the Vayu website and current benchmark information](https://vayu.gt.tc/)**
+
+> Benchmark numbers are implementation- and environment-dependent. The website should be treated as the current source for published benchmark results rather than treating README numbers as permanent guarantees.
 
 ---
 
@@ -300,6 +343,7 @@ The official language name is **Vayu** and the official source extension is **`.
 | [`docs/package.md`](docs/package.md) | Package manager and ecosystem |
 | [`docs/ai.md`](docs/ai.md) | AI/ML direction and ecosystem |
 | [`docs/vision.md`](docs/vision.md) | Long-term vision and future roadmap |
+| [`CODE OF CONDUCT.md`](CODE%20OF%20CONDUCT.md) | Community standards and contributor conduct |
 
 ---
 
@@ -345,6 +389,14 @@ There is:
 Vayu is being developed as an independent project driven by experimentation, learning, engineering, and the goal of creating a language that combines ideas from several ecosystems.
 
 > **Small team. Big vision.**
+
+---
+
+# 🤝 Contributing
+
+Contributions, ideas, bug reports, documentation improvements, and language-design discussions are welcome.
+
+Before contributing, please read **[CODE OF CONDUCT.md](CODE%20OF%20CONDUCT.md)** and follow the project's community standards.
 
 ---
 
@@ -461,6 +513,12 @@ The compiler currently demonstrates core language capabilities including:
 
 The language will continue to expand incrementally.
 
+### Current development focus
+
+The project is progressing toward a stronger compiler/runtime foundation, broader standard-library support, memory/resource management, native code generation, interoperability, tooling, and the larger roadmap described in the project documentation.
+
+For the latest roadmap progress and benchmark information, see the **[official Vayu website](https://vayu.gt.tc)**.
+
 ---
 
 # 🌱 The Goal
@@ -485,98 +543,45 @@ without needing to completely change languages.
 
 Vayu is an independent project, but AI tools played an important role during its development.
 
-## 🐋 DeepSeek
-
-<div align="center">
+## DeepSeek
 
 <a href="https://www.deepseek.com/">
-<img src="https://www.deepseek.com/favicon.ico" alt="DeepSeek" width="90"/>
+<img src="https://www.deepseek.com/favicon.ico" alt="DeepSeek" width="80">
 </a>
 
-### **A Major Part of the Journey**
+**DeepSeek played the larger supporting role in the development process.**
 
-</div>
+It provided substantial assistance with:
 
-A **very special and major thank you to DeepSeek**.
+- Programming
+- Compiler development
+- Architecture discussions
+- Debugging
+- Language design
+- Implementation planning
+- Turning concepts into practical code
+- Exploring solutions during development
 
-DeepSeek provided substantial assistance throughout the development of the Vayu
-concept and its technical exploration.
-
-It was especially valuable for:
-
-- programming assistance
-- architecture discussions
-- technical problem solving
-- debugging
-- language-design exploration
-- compiler-related discussions
-- turning ideas into practical concepts
-- exploring different implementation possibilities
-- helping develop and refine technical ideas
-
-A significant amount of the technical exploration and coding assistance during
-Vayu's development was made possible with the help of DeepSeek.
-
-> **Thank you, DeepSeek, for being such a major part of the Vayu journey. ❤️**
-
-<div align="center">
-
-### [🐋 Visit DeepSeek →](https://www.deepseek.com/)
-
-</div>
+**Thank you, DeepSeek, for being a major part of the Vayu journey. ❤️**
 
 ---
 
-## 🤖 ChatGPT
-
-<div align="center">
+## ChatGPT
 
 <a href="https://chatgpt.com/">
-<img src="https://upload.wikimedia.org/wikipedia/commons/0/04/ChatGPT_logo.svg" alt="OpenAI" width="90"/>
+<img src="https://cdn.simpleicons.org/openai" alt="OpenAI / ChatGPT" width="80">
 </a>
 
-### **A Supporting Part of the Journey**
+**ChatGPT provided a smaller supporting role**, mainly helping with:
 
-</div>
+- Confirmation
+- Design discussions
+- Brainstorming
+- Documentation refinement
+- Reviewing ideas
+- Clarifying technical concepts
 
-A special thank you to **ChatGPT by OpenAI** for contributing to the Vayu
-journey through:
-
-- idea confirmation
-- technical discussions
-- language-design discussions
-- documentation refinement
-- concept review
-- brainstorming
-- additional perspectives
-
-ChatGPT played a **smaller supporting role** compared with DeepSeek, primarily
-helping with confirmation, refinement and additional perspectives.
-
-> **Thank you, ChatGPT, for being part of the Vayu journey. ❤️**
-
-<div align="center">
-
-### [🤖 Visit ChatGPT →](https://chatgpt.com/)
-
-</div>
-
----
-
-<div align="center">
-
-### 🐋 DeepSeek · 🤖 ChatGPT · 🌌 Vayu
-
-**Different tools. One idea. One journey.**
-
-</div>
-
----
-
-> **Disclaimer:** DeepSeek and OpenAI/ChatGPT are acknowledged as AI tools used
-> during the development of this independent project. This acknowledgement
-> does not imply sponsorship, partnership, endorsement, ownership or
-> affiliation with DeepSeek or OpenAI.
+**Thank you, ChatGPT, for being part of the Vayu journey. ❤️**
 
 ---
 
@@ -611,5 +616,7 @@ But the goal is simple:
 **Write simple. Run native. Control everything.**
 
 Made independently with ❤️, code, experimentation, and a lot of debugging.
+
+**[🌐 vayu.gt.tc](https://vayu.gt.tc)**
 
 </div>
