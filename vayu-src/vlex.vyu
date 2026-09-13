@@ -82,7 +82,7 @@ class Lexer:
                 break
         if self.at_end():
             return
-        if self.peek(0) == "\n":
+        if self.peek(0) == "\n" or self.peek(0) == "\r":
             return
         if self.peek(0) == "#":
             return
@@ -279,7 +279,7 @@ class Lexer:
     # -----------------------------------------------------------------
     # Main loop
     # -----------------------------------------------------------------
-    def tokenize(self) -> None:
+        def tokenize(self) -> None:
         while not self.at_end():
             if self.at_line_start and self.bracket_depth == 0:
                 self.handle_line_start()
@@ -292,8 +292,11 @@ class Lexer:
                 self.advance()
                 continue
             if c == "\n":
-                if self.bracket_depth == 0 and len(self.tokens) > 0:
-                    self.add("Newline", "\n", self.line, self.col)
+                if self.bracket_depth == 0:
+                    if len(self.tokens) > 0:
+                        n = len(self.tokens)
+                        if self.tokens[n - 1].kind != "Newline":
+                            self.add("Newline", "\n", self.line, self.col)
                 self.advance()
                 self.at_line_start = true
                 continue
@@ -310,6 +313,12 @@ class Lexer:
                 self.read_string(c)
                 continue
             self.read_operator()
+
+        if len(self.tokens) > 0:
+            n = len(self.tokens)
+            if self.tokens[n - 1].kind != "Newline":
+                self.add("Newline", "\n", self.line, self.col)
+
         while len(self.indent_stack) > 1:
             self.indent_stack.pop()
             self.add("Dedent", "", self.line, self.col)

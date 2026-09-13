@@ -1,0 +1,654 @@
+# vparse.vyu — Expression parser written in Vayu.
+# Usage:   vparse <source.vyu>
+# Output:  indented AST for the expressions in the file.
+
+# ===========================================================================
+# Token kinds (mirror the C++ lexer's names)
+# ===========================================================================
+class Token:
+    kind: str
+    lexeme: str
+    line: int
+    col: int
+
+    def __init__(self, kind: str, lexeme: str, line: int, col: int) -> None:
+        self.kind = kind
+        self.lexeme = lexeme
+        self.line = line
+        self.col = col
+
+# ===========================================================================
+# AST arena
+# ===========================================================================
+class Node:
+    kind: str
+    value: str
+    op: str
+    left: int
+    right: int
+    extra: int
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        self.value = ""
+        self.op = ""
+        self.left = 0
+        self.right = 0
+        self.extra = 0
+
+class Ast:
+    nodes: list<Node>
+
+    def __init__(self) -> None:
+        self.nodes = []
+        # Reserve index 0 as "null"
+        placeholder = Node("Null")
+        self.nodes.append(placeholder)
+
+    def add(self, kind: str) -> int:
+        n = Node(kind)
+        self.nodes.append(n)
+        return len(self.nodes) - 1
+
+    def get(self, idx: int) -> Node:
+        return self.nodes[idx]
+
+# ===========================================================================
+# Parser
+# ===========================================================================
+class Parser:
+    toks: list<Token>
+    pos: int
+    ast: Ast
+
+    def __init__(self, tokens: list<Token>) -> None:
+        self.toks = tokens
+        self.pos = 0
+        self.ast = Ast()
+
+    # ---------------------------------------------------------------
+    # Cursor helpers
+    # ---------------------------------------------------------------
+    def peek_kind(self) -> str:
+        if self.pos >= len(self.toks):
+            return "EOF"
+        return self.toks[self.pos].kind
+
+    def peek_lexeme(self) -> str:
+        if self.pos >= len(self.toks):
+            return ""
+        return self.toks[self.pos].lexeme
+
+    def advance(self) -> Token:
+        t = self.toks[self.pos]
+        self.pos = self.pos + 1
+        return t
+
+    def check(self, kind: str) -> bool:
+        return self.peek_kind() == kind
+
+    def match(self, kind: str) -> bool:
+        if self.check(kind):
+            self.advance()
+            return true
+        return false
+
+    def skip_newlines(self) -> None:
+        while self.check("Newline"):
+            self.advance()
+
+    def parse_error(self, msg: str) -> int:
+        line = 0
+        col = 0
+        if self.pos < len(self.toks):
+            line = self.toks[self.pos].line
+            col = self.toks[self.pos].col
+        print("parse error at " + str(line) + ":" + str(col) + ": " + msg)
+        exit(1)
+        return 0
+
+    # ---------------------------------------------------------------
+    # Entry: parse each non-blank line as an expression.
+    # ---------------------------------------------------------------
+    def parse_program(self) -> int:
+        root = self.ast.add("Program")
+        last_child = 0
+        while not self.check("EOF"):
+            self.skip_newlines()
+            if self.check("EOF"):
+                break
+            # Skip stray structural tokens for now.
+            if self.check("Indent") or self.check("Dedent"):
+                self.advance()
+                continue
+            expr = self.parse_expression()
+            # Chain children via right-link for compact printing.
+            if last_child == 0:
+                self.ast.get(root).left = expr
+            else:
+                self.ast.get(last_child).right = expr
+            last_child = expr
+            self.match("Newline")
+        return root
+
+    # ---------------------------------------------------------------
+    # Precedence table
+    # ---------------------------------------------------------------
+    def bin_prec(self, kind: str) -> int:
+        if kind == "Or":        return 1
+        if kind == "And":       return 2
+        if kind == "Eq":        return 4
+        if kind == "NotEq":     return 4
+        if kind == "Lt":        return 4
+        if kind == "Gt":        return 4
+        if kind == "LtEq":      return 4
+        if kind == "GtEq":      return 4
+        if kind == "In":        return 4
+        if kind == "Is":        return 4
+        if kind == "Plus":      return 5
+        if kind == "Minus":     return 5
+        if kind == "Star":      return 6
+        if kind == "Slash":     return 6
+        if kind == "SlashSlash": return 6
+        if kind == "Percent":   return 6
+        if kind == "StarStar":  return 8
+        return -1
+
+    def bin_op_string(self, kind: str) -> str:
+        if kind == "Plus":       return "+"
+        if kind == "Minus":      return "-"
+        if kind == "Star":       return "*"
+        if kind == "Slash":      return "/"
+        if kind == "SlashSlash": return "//"
+        if kind == "Percent":    return "%"
+        if kind == "StarStar":   return "**"
+        if kind == "Eq":         return "=="
+        if kind == "NotEq":      return "!="
+        if kind == "Lt":         return "<"
+        if kind == "Gt":         return ">"
+        if kind == "LtEq":       return "<="
+        if kind == "GtEq":       return ">="
+        if kind == "And":        return "and"
+        if kind == "Or":         return "or"
+        if kind == "In":         return "in"
+        if kind == "Is":         return "is"
+        return "?"
+
+    # ---------------------------------------------------------------
+    # Expression grammar (precedence climbing)
+    # ---------------------------------------------------------------
+    def parse_expression(self) -> int:
+        return self.parse_binary(1)
+
+    def parse_binary(self, min_prec: int) -> int:
+        left = self.parse_unary()
+        while true:
+            prec = self.bin_prec(self.peek_kind())
+            if prec < min_prec:
+                break
+            op_kind = self.peek_kind()
+            self.advance()
+            right_assoc = (op_kind == "StarStar")
+            next_min = prec
+            if not right_assoc:
+                next_min = prec + 1
+            right = self.parse_binary(next_min)
+            node_idx = self.ast.add("Binary")
+            n = self.ast.get(node_idx)
+            n.op = self.bin_op_string(op_kind)
+            n.left = left
+            n.right = right
+            left = node_idx
+        return left
+
+    def parse_unary(self) -> int:
+        k = self.peek_kind()
+        if k == "Minus" or k == "Plus" or k == "Not":
+            tok = self.advance()
+            operand = self.parse_unary()
+            node_idx = self.ast.add("Unary")
+            n = self.ast.get(node_idx)
+            if tok.kind == "Minus":
+                n.op = "-"
+            elif tok.kind == "Plus":
+                n.op = "+"
+            else:
+                n.op = "not"
+            n.left = operand
+            return node_idx
+        return self.parse_postfix()
+
+    def parse_postfix(self) -> int:
+        e = self.parse_primary()
+        while true:
+            if self.match("Dot"):
+                # Attribute access: eat the name (not stored yet).
+                self.advance()
+                continue
+            if self.check("LParen"):
+                open_tok = self.advance()
+                args = []
+                if not self.check("RParen"):
+                    args.append(self.parse_expression())
+                    while self.match("Comma"):
+                        if self.check("RParen"):
+                            break
+                        args.append(self.parse_expression())
+                self.match("RParen")
+                # Store the first argument in `right` (single-arg only for now).
+                call_idx = self.ast.add("Call")
+                n = self.ast.get(call_idx)
+                n.left = e
+                if len(args) > 0:
+                    n.right = args[0]
+                e = call_idx
+                continue
+            if self.check("LBracket"):
+                self.advance()
+                idx = self.parse_expression()
+                self.match("RBracket")
+                ix_idx = self.ast.add("Index")
+                n = self.ast.get(ix_idx)
+                n.left = e
+                n.right = idx
+                e = ix_idx
+                continue
+            break
+        return e
+
+    def parse_primary(self) -> int:
+        k = self.peek_kind()
+        if k == "Int":
+            tok = self.advance()
+            idx = self.ast.add("Int")
+            self.ast.get(idx).value = tok.lexeme
+            return idx
+        if k == "Float":
+            tok = self.advance()
+            idx = self.ast.add("Float")
+            self.ast.get(idx).value = tok.lexeme
+            return idx
+        if k == "String":
+            tok = self.advance()
+            idx = self.ast.add("Str")
+            self.ast.get(idx).value = tok.lexeme
+            return idx
+        if k == "Char":
+            tok = self.advance()
+            idx = self.ast.add("Char")
+            self.ast.get(idx).value = tok.lexeme
+            return idx
+        if k == "True":
+            self.advance()
+            return self.ast.add("Bool")
+        if k == "False":
+            self.advance()
+            idx = self.ast.add("Bool")
+            self.ast.get(idx).value = "false"
+            return idx
+        if k == "None":
+            self.advance()
+            return self.ast.add("None")
+        if k == "Identifier":
+            tok = self.advance()
+            idx = self.ast.add("Name")
+            self.ast.get(idx).value = tok.lexeme
+            return idx
+        if k == "LParen":
+            self.advance()
+            inner = self.parse_expression()
+            self.match("RParen")
+            idx = self.ast.add("Group")
+            self.ast.get(idx).left = inner
+            return idx
+        if k == "LBracket":
+            return self.parse_list_literal()
+        self.parse_error("expected expression, found '" + self.peek_lexeme() + "'")
+        return 0
+
+    def parse_list_literal(self) -> int:
+        self.advance()   # consume [
+        node_idx = self.ast.add("List")
+        first = 0
+        last = 0
+        if not self.check("RBracket"):
+            e = self.parse_expression()
+            first = e
+            last = e
+            while self.match("Comma"):
+                if self.check("RBracket"):
+                    break
+                e = self.parse_expression()
+                self.ast.get(last).extra = e
+                last = e
+        self.match("RBracket")
+        self.ast.get(node_idx).left = first
+        return node_idx
+
+# ===========================================================================
+# AST printer
+# ===========================================================================
+def print_node(ast: Ast, idx: int, depth: int) -> None:
+    if idx == 0:
+        return
+    n = ast.get(idx)
+    pad = ""
+    i = 0
+    while i < depth:
+        pad = pad + "  "
+        i = i + 1
+    if n.kind == "Int":
+        print(pad + "Int(" + n.value + ")")
+    elif n.kind == "Float":
+        print(pad + "Float(" + n.value + ")")
+    elif n.kind == "Str":
+        print(pad + "Str(\"" + n.value + "\")")
+    elif n.kind == "Char":
+        print(pad + "Char('" + n.value + "')")
+    elif n.kind == "Bool":
+        if n.value == "false":
+            print(pad + "Bool(false)")
+        else:
+            print(pad + "Bool(true)")
+    elif n.kind == "None":
+        print(pad + "None")
+    elif n.kind == "Name":
+        print(pad + "Name(" + n.value + ")")
+    elif n.kind == "Unary":
+        print(pad + "Unary(" + n.op + ")")
+        print_node(ast, n.left, depth + 1)
+    elif n.kind == "Binary":
+        print(pad + "Binary(" + n.op + ")")
+        print_node(ast, n.left, depth + 1)
+        print_node(ast, n.right, depth + 1)
+    elif n.kind == "Group":
+        print(pad + "Group")
+        print_node(ast, n.left, depth + 1)
+    elif n.kind == "Call":
+        print(pad + "Call")
+        print_node(ast, n.left, depth + 1)
+        if n.right != 0:
+            print_node(ast, n.right, depth + 1)
+    elif n.kind == "Index":
+        print(pad + "Index")
+        print_node(ast, n.left, depth + 1)
+        print_node(ast, n.right, depth + 1)
+    elif n.kind == "List":
+        print(pad + "List")
+        cur = n.left
+        while cur != 0:
+            print_node(ast, cur, depth + 1)
+            cur = ast.get(cur).extra
+    elif n.kind == "Program":
+        print(pad + "Program")
+        cur = n.left
+        while cur != 0:
+            print_node(ast, cur, depth + 1)
+            cur = ast.get(cur).right
+    else:
+        print(pad + "<" + n.kind + ">")
+
+# ===========================================================================
+# Driver — parse a file, print its expression ASTs.
+# ===========================================================================
+def main() -> None:
+    a = args()
+    if len(a) < 1:
+        print("usage: vparse <source.vyu>")
+        exit(1)
+    path = a[0]
+    if not file_exists(path):
+        print("vparse: cannot open " + path)
+        exit(1)
+    src = read_file(path)
+    toks = tokenize(src)
+    parser = Parser(toks)
+    root = parser.parse_program()
+    print_node(parser.ast, root, 0)
+
+# ===========================================================================
+# Lexer — inlined so we don't need multi-module imports yet.
+# Only the fields we need for expression parsing are populated.
+# ===========================================================================
+def tokenize(source: str) -> list<Token>:
+    toks = []
+    pos = 0
+    line = 1
+    col = 1
+    n = len(source)
+
+    while pos < n:
+        c = source[pos]
+
+        if c == " " or c == "\t" or c == "\r":
+            pos = pos + 1
+            if c == "\r":
+                continue
+            col = col + 1
+            continue
+
+        if c == "\n":
+            toks.append(Token("Newline", "\\n", line, col))
+            pos = pos + 1
+            line = line + 1
+            col = 1
+            continue
+
+        if c == "#":
+            while pos < n and source[pos] != "\n":
+                pos = pos + 1
+                col = col + 1
+            continue
+
+        if c.is_alpha() or c == "_":
+            start_col = col
+            text = ""
+            while pos < n:
+                cc = source[pos]
+                if cc.is_alpha() or cc.is_digit() or cc == "_":
+                    text = text + cc
+                    pos = pos + 1
+                    col = col + 1
+                else:
+                    break
+            toks.append(Token(keyword_kind(text), text, line, start_col))
+            continue
+
+        if c.is_digit():
+            start_col = col
+            text = ""
+            while pos < n and source[pos].is_digit():
+                text = text + source[pos]
+                pos = pos + 1
+                col = col + 1
+            toks.append(Token("Int", text, line, start_col))
+            continue
+
+        if c == "\"":
+            start_col = col
+            pos = pos + 1
+            col = col + 1
+            text = ""
+            while pos < n and source[pos] != "\"":
+                if source[pos] == "\\" and pos + 1 < n:
+                    esc = source[pos + 1]
+                    if esc == "n":
+                        text = text + "\n"
+                    elif esc == "t":
+                        text = text + "\t"
+                    elif esc == "\"":
+                        text = text + "\""
+                    elif esc == "\\":
+                        text = text + "\\"
+                    else:
+                        text = text + esc
+                    pos = pos + 2
+                    col = col + 2
+                    continue
+                text = text + source[pos]
+                pos = pos + 1
+                col = col + 1
+            if pos < n:
+                pos = pos + 1
+                col = col + 1
+            toks.append(Token("String", text, line, start_col))
+            continue
+
+        # Operators
+        start_col = col
+        nxt = ""
+        if pos + 1 < n:
+            nxt = source[pos + 1]
+
+        if c == "+":
+            if nxt == "=":
+                toks.append(Token("PlusAssign", "+=", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            else:
+                toks.append(Token("Plus", "+", line, start_col))
+                pos = pos + 1
+                col = col + 1
+            continue
+        if c == "-":
+            if nxt == "=":
+                toks.append(Token("MinusAssign", "-=", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            elif nxt == ">":
+                toks.append(Token("Arrow", "->", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            else:
+                toks.append(Token("Minus", "-", line, start_col))
+                pos = pos + 1
+                col = col + 1
+            continue
+        if c == "*":
+            if nxt == "*":
+                toks.append(Token("StarStar", "**", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            else:
+                toks.append(Token("Star", "*", line, start_col))
+                pos = pos + 1
+                col = col + 1
+            continue
+        if c == "/":
+            if nxt == "/":
+                toks.append(Token("SlashSlash", "//", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            else:
+                toks.append(Token("Slash", "/", line, start_col))
+                pos = pos + 1
+                col = col + 1
+            continue
+        if c == "%":
+            toks.append(Token("Percent", "%", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == "=":
+            if nxt == "=":
+                toks.append(Token("Eq", "==", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            else:
+                toks.append(Token("Assign", "=", line, start_col))
+                pos = pos + 1
+                col = col + 1
+            continue
+        if c == "!":
+            if nxt == "=":
+                toks.append(Token("NotEq", "!=", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            continue
+        if c == "<":
+            if nxt == "=":
+                toks.append(Token("LtEq", "<=", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            else:
+                toks.append(Token("Lt", "<", line, start_col))
+                pos = pos + 1
+                col = col + 1
+            continue
+        if c == ">":
+            if nxt == "=":
+                toks.append(Token("GtEq", ">=", line, start_col))
+                pos = pos + 2
+                col = col + 2
+            else:
+                toks.append(Token("Gt", ">", line, start_col))
+                pos = pos + 1
+                col = col + 1
+            continue
+        if c == "(":
+            toks.append(Token("LParen", "(", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == ")":
+            toks.append(Token("RParen", ")", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == "[":
+            toks.append(Token("LBracket", "[", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == "]":
+            toks.append(Token("RBracket", "]", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == "{":
+            toks.append(Token("LBrace", "{", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == "}":
+            toks.append(Token("RBrace", "}", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == ",":
+            toks.append(Token("Comma", ",", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == ":":
+            toks.append(Token("Colon", ":", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == ".":
+            toks.append(Token("Dot", ".", line, start_col))
+            pos = pos + 1
+            col = col + 1
+            continue
+        # Unknown character: skip it to keep going.
+        pos = pos + 1
+        col = col + 1
+
+    toks.append(Token("EOF", "", line, col))
+    return toks
+
+def keyword_kind(word: str) -> str:
+    kw = {}
+    kw["and"] = "And"
+    kw["or"] = "Or"
+    kw["not"] = "Not"
+    kw["in"] = "In"
+    kw["is"] = "Is"
+    kw["true"] = "True"
+    kw["false"] = "False"
+    kw["none"] = "None"
+    if word in kw:
+        return kw[word]
+    return "Identifier"
+
+main()
