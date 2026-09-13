@@ -3,3 +3,5 @@ out/
 .vs
 examples/bench/cpp/*.exe
 *.exe
+*.s
+*.ssa
