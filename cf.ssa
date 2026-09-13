@@ -1,0 +1,164 @@
+data $vayu_strlit_0 = { l 3, b "---", b 0 }
+data $vayu_strlit_1 = { l 3, b "big", b 0 }
+
+export function $vayu_main() {
+@start
+    %vx_slot =l alloc8 8
+    storel 0, %vx_slot
+    %vtotal_slot =l alloc8 8
+    storel 0, %vtotal_slot
+    %vi_slot =l alloc8 8
+    storel 0, %vi_slot
+    %vn_slot =l alloc8 8
+    storel 0, %vn_slot
+    storel 0, %vx_slot
+    jmp @while_cond_0
+@while_cond_0
+    %t0 =l loadl %vx_slot
+    %t1 =w csltl %t0, 5
+    %t2 =l extsw %t1
+    %t3 =w cnel %t2, 0
+    jnz %t3, @while_body_1, @while_end_2
+@while_body_1
+    %t4 =l loadl %vx_slot
+    call $vayu_print_int_noln(l %t4)
+    call $vayu_print_ln()
+    %t5 =l loadl %vx_slot
+    %t6 =l add %t5, 1
+    storel %t6, %vx_slot
+    jmp @while_cond_0
+@while_end_2
+    call $vayu_print_str_noln(l $vayu_strlit_0)
+    call $vayu_print_ln()
+    %t7 =l loadl %vx_slot
+    %t8 =w csgtl %t7, 3
+    %t9 =l extsw %t8
+    %t10 =w cnel %t9, 0
+    jnz %t10, @if_then_4, @if_next_5
+@if_then_4
+    call $vayu_print_str_noln(l $vayu_strlit_1)
+    call $vayu_print_ln()
+    jmp @if_end_3
+@if_next_5
+@if_end_3
+    call $vayu_print_str_noln(l $vayu_strlit_0)
+    call $vayu_print_ln()
+    storel 0, %vtotal_slot
+    storel 0, %vi_slot
+    jmp @for_cond_6
+@for_body_7
+    %t11 =l loadl %vtotal_slot
+    %t12 =l loadl %vi_slot
+    %t13 =l add %t11, %t12
+    storel %t13, %vtotal_slot
+    jmp @for_next_8
+@for_next_8
+    %t14 =l loadl %vi_slot
+    %t15 =l add %t14, 1
+    storel %t15, %vi_slot
+    jmp @for_cond_6
+@for_cond_6
+    %t16 =l loadl %vi_slot
+    %t17 =w csltl %t16, 10
+    jnz %t17, @for_body_7, @for_end_9
+@for_end_9
+    %t18 =l loadl %vtotal_slot
+    call $vayu_print_int_noln(l %t18)
+    call $vayu_print_ln()
+    call $vayu_print_str_noln(l $vayu_strlit_0)
+    call $vayu_print_ln()
+    %t19 =l call $vayu_fn_add(l 3, l 4)
+    call $vayu_print_int_noln(l %t19)
+    call $vayu_print_ln()
+    %t20 =l call $vayu_fn_add(l 10, l 20)
+    call $vayu_print_int_noln(l %t20)
+    call $vayu_print_ln()
+    %t21 =l call $vayu_fn_fact(l 5)
+    call $vayu_print_int_noln(l %t21)
+    call $vayu_print_ln()
+    storel 0, %vn_slot
+    storel 0, %vi_slot
+    jmp @for_cond_10
+@for_body_11
+    %t22 =l loadl %vi_slot
+    %t23 =w ceql %t22, 42
+    %t24 =l extsw %t23
+    %t25 =w cnel %t24, 0
+    jnz %t25, @if_then_15, @if_next_16
+@if_then_15
+    jmp @for_end_13
+@if_next_16
+    %t26 =l loadl %vi_slot
+    %t27 =l call $vayu_mod(l %t26, l 2)
+    %t28 =w ceql %t27, 0
+    %t29 =l extsw %t28
+    %t30 =w cnel %t29, 0
+    jnz %t30, @if_then_17, @if_next_18
+@if_then_17
+    jmp @for_next_12
+@if_next_18
+@if_end_14
+    %t31 =l loadl %vi_slot
+    %t32 =l call $vayu_mod(l %t31, l 2)
+    %t33 =w ceql %t32, 0
+    %t34 =l extsw %t33
+    %t35 =w cnel %t34, 0
+    jnz %t35, @if_then_20, @if_next_21
+@if_then_20
+    jmp @for_next_12
+@if_next_21
+@if_end_19
+    %t36 =l loadl %vn_slot
+    %t37 =l add %t36, 1
+    storel %t37, %vn_slot
+    jmp @for_next_12
+@for_next_12
+    %t38 =l loadl %vi_slot
+    %t39 =l add %t38, 1
+    storel %t39, %vi_slot
+    jmp @for_cond_10
+@for_cond_10
+    %t40 =l loadl %vi_slot
+    %t41 =w csltl %t40, 100
+    jnz %t41, @for_body_11, @for_end_13
+@for_end_13
+    %t42 =l loadl %vn_slot
+    call $vayu_print_int_noln(l %t42)
+    call $vayu_print_ln()
+    ret
+}
+
+function l $vayu_fn_add(l %p_a, l %p_b) {
+@start
+    %a_slot =l alloc8 8
+    storel %p_a, %a_slot
+    %b_slot =l alloc8 8
+    storel %p_b, %b_slot
+    %t0 =l loadl %a_slot
+    %t1 =l loadl %b_slot
+    %t2 =l add %t0, %t1
+    ret %t2
+}
+
+function l $vayu_fn_fact(l %p_n) {
+@start
+    %n_slot =l alloc8 8
+    storel %p_n, %n_slot
+    %t0 =l loadl %n_slot
+    %t1 =w cslel %t0, 1
+    %t2 =l extsw %t1
+    %t3 =w cnel %t2, 0
+    jnz %t3, @if_then_1, @if_next_2
+@if_then_1
+    ret 1
+@if_next_2
+@if_end_0
+    %t4 =l loadl %n_slot
+    %t5 =l loadl %n_slot
+    %t6 =l sub %t5, 1
+    %t7 =l call $vayu_fn_fact(l %t6)
+    %t8 =l mul %t4, %t7
+    ret %t8
+}
+
+

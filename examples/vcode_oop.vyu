@@ -1,0 +1,66 @@
+# 7E-2 + 7E-3 test.
+
+class Point:
+    x: int
+    y: int
+    def __init__(self, x: int, y: int) -> None:
+        self.x = x
+        self.y = y
+    def mag_sq(self) -> int:
+        return self.x * self.x + self.y * self.y
+
+p = Point(3, 4)
+print(p.x)
+print(p.y)
+print(p.mag_sq())
+
+print("---")
+
+class Animal:
+    name: str
+    def __init__(self, name: str) -> None:
+        self.name = name
+    def speak(self) -> str:
+        return self.name + " makes a sound"
+
+class Dog(Animal):
+    def speak(self) -> str:
+        return self.name + " says woof"
+
+d = Dog("Rex")
+print(d.speak())
+
+print("---")
+
+lst = [10, 20, 30]
+print(len(lst))
+print(lst[0])
+print(lst[2])
+lst[1] = 99
+print(lst[1])
+lst.append(40)
+print(len(lst))
+
+print("---")
+
+nums = [1, 2, 3, 4, 5]
+total = 0
+for i in range(len(nums)):
+    total = total + nums[i]
+print(total)
+
+print("---")
+
+s = "hello world"
+print(s.upper())
+print(s.contains("world"))
+print(s.find("world"))
+print(s.starts_with("hello"))
+print(s.ends_with("d"))
+
+print("---")
+
+print(str(42))
+print(int("123") + 1)
+print("abc" + "def")
+print("a" == "a")
