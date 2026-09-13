@@ -397,11 +397,16 @@ class Parser:
         self.ast.nodes[node].left = first
         return node
 
-        def parse_type_expr(self) -> int:
+    def parse_type_expr(self) -> int:
         k = self.peek_kind()
-        if k != "Identifier":
-            if k != "None":
-                self.parse_error("expected type name, found '" + self.peek_lexeme() + "'")
+        if k == "Identifier":
+            return self.parse_type_name()
+        if k == "None":
+            return self.parse_type_name()
+        self.parse_error("expected type name, found '" + self.peek_lexeme() + "'")
+        return 0
+
+    def parse_type_name(self) -> int:
         tok = self.advance()
         node = self.ast.add("TypeName")
         self.ast.nodes[node].value = tok.lexeme
@@ -413,7 +418,7 @@ class Parser:
                     break
                 if self.check("Lt"):
                     depth = depth + 1
-                elif self.check("Gt"):
+                if self.check("Gt"):
                     depth = depth - 1
                 self.advance()
         return node
