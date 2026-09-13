@@ -51,7 +51,7 @@ The website is the primary place for the latest Vayu information, roadmap, synta
 
 Vayu includes benchmarking as part of its development and performance evaluation process. Benchmarks are used to track compiler/runtime progress and compare representative workloads as the implementation evolves.
 
-**[→ View the Vayu website and current benchmark information](https://vayu.gt.tc)**
+**[→ View the Vayu website and current benchmark information](https://vayu.gt.tc/speed)**
 
 > Benchmark numbers are implementation- and environment-dependent. The website should be treated as the current source for published benchmark results rather than treating README numbers as permanent guarantees.
 
