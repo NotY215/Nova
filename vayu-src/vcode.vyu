@@ -714,12 +714,12 @@ def keyword_kind(word: str) -> str:
     return "Identifier"
 
 def tokenize(source: str) -> list<Token>:
-    toks = []
+    toks: list<Token> = []
     pos = 0
     line = 1
     col = 1
     n = len(source)
-    indent_stack = [0]
+    indent_stack: list<int> = [0]
     bracket_depth = 0
     at_line_start = true
 
@@ -775,7 +775,11 @@ def tokenize(source: str) -> list<Token>:
             at_line_start = true
             continue
         if c == "#":
-            while pos < n and source[pos] != "\n":
+            while true:
+                if pos >= n:
+                    break
+                if source[pos] == "\n":
+                    break
                 pos = pos + 1
                 col = col + 1
             continue
@@ -795,7 +799,11 @@ def tokenize(source: str) -> list<Token>:
         if c.is_digit():
             sc = col
             text = ""
-            while pos < n and source[pos].is_digit():
+            while true:
+                if pos >= n:
+                    break
+                if not source[pos].is_digit():
+                    break
                 text = text + source[pos]
                 pos = pos + 1
                 col = col + 1

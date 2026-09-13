@@ -191,6 +191,11 @@ namespace vayu {
                                  std::move(text), start });
     }
 
+    // ------------------------------------------------------------------
+    // String / char literals.  Escape sequences ARE decoded:
+    //   \n \t \r \0 \\ \" \'  -> the corresponding byte
+    //   anything else         -> the escaped character itself (i.e. "\x" -> 'x')
+    // ------------------------------------------------------------------
     void Lexer::readString(char quote) {
         SourceLocation start = here();
         advance();  // opening quote
@@ -257,13 +262,9 @@ namespace vayu {
             addAt(TokenType::Invalid, start, "unexpected '!'"); return;
         case '<':
             if (match('=')) { addAt(TokenType::LtEq, start, "<="); return; }
-            // NOTE: '<<' is NOT combined into a single token. Two '<'s are
-            // emitted so that nested generics like list<list<int>> can be
-            // parsed. Shift operators are not yet implemented.
             addAt(TokenType::Lt, start, "<"); return;
         case '>':
             if (match('=')) { addAt(TokenType::GtEq, start, ">="); return; }
-            // NOTE: '>>' is NOT combined. See comment above.
             addAt(TokenType::Gt, start, ">"); return;
         case '.':
             if (match('.')) { addAt(TokenType::Invalid, start, "unexpected '..'"); return; }

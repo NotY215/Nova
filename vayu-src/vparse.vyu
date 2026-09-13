@@ -1,4 +1,4 @@
-# vparse.vyu — Expression parser written in Vayu.
+# vparse.vyu — expression + statement parser written in Vayu.
 
 class Token:
     kind: str
@@ -33,8 +33,7 @@ class Ast:
 
     def __init__(self) -> None:
         self.nodes = []
-        placeholder = Node("Null")
-        self.nodes.append(placeholder)
+        self.nodes.append(Node("Null"))
 
     def add(self, kind: str) -> int:
         n = Node(kind)
@@ -61,6 +60,12 @@ class Parser:
             return ""
         return self.toks[self.pos].lexeme
 
+    def peek_at(self, ahead: int) -> str:
+        i = self.pos + ahead
+        if i >= len(self.toks):
+            return "EOF"
+        return self.toks[i].kind
+
     def advance(self) -> Token:
         t = self.toks[self.pos]
         self.pos = self.pos + 1
@@ -74,6 +79,20 @@ class Parser:
             self.advance()
             return true
         return false
+
+    def expect(self, kind: str, what: str) -> Token:
+        if self.check(kind):
+            return self.advance()
+        line = 0
+        col = 0
+        if self.pos < len(self.toks):
+            line = self.toks[self.pos].line
+            col = self.toks[self.pos].col
+        print("parse error at " + str(line) + ":" + str(col) +
+              ": expected " + what + ", found '" + self.peek_lexeme() + "'")
+        exit(1)
+        fallback = Token("", "", 0, 0)
+        return fallback
 
     def skip_newlines(self) -> None:
         while self.check("Newline"):
@@ -89,24 +108,346 @@ class Parser:
         exit(1)
         return 0
 
+    # ---------------------------------------------------------------
+    # Program & blocks
+    # ---------------------------------------------------------------
     def parse_program(self) -> int:
         root = self.ast.add("Program")
-        last_child = 0
+        first = 0
+        last = 0
         while not self.check("EOF"):
             self.skip_newlines()
             if self.check("EOF"):
                 break
-            if self.check("Indent") or self.check("Dedent"):
+            if self.check("Indent"):
                 self.advance()
                 continue
-            expr = self.parse_expression()
-            if last_child == 0:
-                self.ast.nodes[root].left = expr
+            if self.check("Dedent"):
+                self.advance()
+                continue
+            stmt = self.parse_statement()
+            if first == 0:
+                first = stmt
             else:
-                self.ast.nodes[last_child].right = expr
-            last_child = expr
-            self.match("Newline")
+                self.ast.nodes[last].extra = stmt
+            last = stmt
+        self.ast.nodes[root].left = first
         return root
+
+    def parse_block(self) -> int:
+        blk = self.ast.add("Block")
+        self.expect("Newline", "newline after ':'")
+        self.skip_newlines()
+        if self.check("Indent"):
+            self.advance()
+        else:
+            self.parse_error("expected an indented block")
+        first = 0
+        last = 0
+        while true:
+            self.skip_newlines()
+            if self.check("Dedent"):
+                self.advance()
+                break
+            if self.check("EOF"):
+                break
+            if self.check("Indent"):
+                self.advance()
+                continue
+            stmt = self.parse_statement()
+            if first == 0:
+                first = stmt
+            else:
+                self.ast.nodes[last].extra = stmt
+            last = stmt
+        self.ast.nodes[blk].left = first
+        return blk
+
+    # ---------------------------------------------------------------
+    # Statements
+    # ---------------------------------------------------------------
+    def parse_statement(self) -> int:
+        k = self.peek_kind()
+        if k == "Def":
+            return self.parse_def()
+        if k == "If":
+            return self.parse_if()
+        if k == "While":
+            return self.parse_while()
+        if k == "For":
+            return self.parse_for()
+        if k == "Return":
+            return self.parse_return()
+        if k == "Class":
+            return self.parse_class()
+        if k == "Struct":
+            return self.parse_struct()
+        if k == "Pass":
+            self.advance()
+            return self.ast.add("Pass")
+        if k == "Break":
+            self.advance()
+            return self.ast.add("Break")
+        if k == "Continue":
+            self.advance()
+            return self.ast.add("Continue")
+        if k == "Identifier":
+            if self.peek_at(1) == "Colon":
+                return self.parse_annot_assign()
+        return self.parse_expr_or_assign()
+
+    def parse_annot_assign(self) -> int:
+        name = self.advance()
+        self.expect("Colon", "':' after variable name")
+        typ = self.parse_type_expr()
+        node = self.ast.add("AnnotAssign")
+        self.ast.nodes[node].value = name.lexeme
+        self.ast.nodes[node].left = typ
+        if self.match("Assign"):
+            v = self.parse_expression()
+            self.ast.nodes[node].right = v
+        return node
+
+    def parse_expr_or_assign(self) -> int:
+        expr = self.parse_expression()
+        if self.match("Assign"):
+            value = self.parse_expression()
+            node = self.ast.add("Assign")
+            self.ast.nodes[node].left = expr
+            self.ast.nodes[node].right = value
+            return node
+        node = self.ast.add("ExprStmt")
+        self.ast.nodes[node].left = expr
+        return node
+
+    def parse_return(self) -> int:
+        self.advance()
+        node = self.ast.add("Return")
+        k = self.peek_kind()
+        if k == "Newline":
+            return node
+        if k == "Dedent":
+            return node
+        if k == "EOF":
+            return node
+        v = self.parse_expression()
+        self.ast.nodes[node].left = v
+        return node
+
+    def parse_if(self) -> int:
+        self.advance()
+        cond = self.parse_expression()
+        self.expect("Colon", "':' after if condition")
+        then = self.parse_block()
+        node = self.ast.add("If")
+        self.ast.nodes[node].left = cond
+        self.ast.nodes[node].right = then
+        last = node
+        while self.check("Elif"):
+            self.advance()
+            econd = self.parse_expression()
+            self.expect("Colon", "':' after elif condition")
+            ebody = self.parse_block()
+            enode = self.ast.add("If")
+            self.ast.nodes[enode].left = econd
+            self.ast.nodes[enode].right = ebody
+            self.ast.nodes[last].extra = enode
+            last = enode
+        if self.check("Else"):
+            self.advance()
+            self.expect("Colon", "':' after else")
+            ebody = self.parse_block()
+            enode = self.ast.add("Else")
+            self.ast.nodes[enode].right = ebody
+            self.ast.nodes[last].extra = enode
+        return node
+
+    def parse_while(self) -> int:
+        self.advance()
+        cond = self.parse_expression()
+        self.expect("Colon", "':' after while condition")
+        body = self.parse_block()
+        node = self.ast.add("While")
+        self.ast.nodes[node].left = cond
+        self.ast.nodes[node].right = body
+        return node
+
+    def parse_for(self) -> int:
+        self.advance()
+        var = self.expect("Identifier", "loop variable")
+        self.expect("In", "'in' after loop variable")
+        iter_expr = self.parse_expression()
+        self.expect("Colon", "':' after iterable")
+        body = self.parse_block()
+        node = self.ast.add("For")
+        self.ast.nodes[node].value = var.lexeme
+        self.ast.nodes[node].left = iter_expr
+        self.ast.nodes[node].right = body
+        return node
+
+    def parse_params(self) -> int:
+        self.expect("LParen", "'('")
+        first = 0
+        last = 0
+        if not self.check("RParen"):
+            while true:
+                pname = self.expect("Identifier", "parameter name")
+                pnode = self.ast.add("Param")
+                self.ast.nodes[pnode].value = pname.lexeme
+                if self.match("Colon"):
+                    ptype = self.parse_type_expr()
+                    self.ast.nodes[pnode].left = ptype
+                if first == 0:
+                    first = pnode
+                else:
+                    self.ast.nodes[last].extra = pnode
+                last = pnode
+                if not self.match("Comma"):
+                    break
+                if self.check("RParen"):
+                    break
+        self.expect("RParen", "')'")
+        return first
+
+    def parse_def(self) -> int:
+        self.advance()
+        name = self.expect("Identifier", "function name")
+        params = self.parse_params()
+        ret_type = 0
+        if self.match("Arrow"):
+            ret_type = self.parse_type_expr()
+        self.expect("Colon", "':' before function body")
+        body = self.parse_block()
+        node = self.ast.add("Def")
+        self.ast.nodes[node].value = name.lexeme
+        self.ast.nodes[node].left = params
+        self.ast.nodes[node].right = body
+        self.ast.nodes[node].extra = ret_type
+        return node
+
+    def parse_struct(self) -> int:
+        self.advance()
+        name = self.expect("Identifier", "struct name")
+        self.expect("Colon", "':' after struct name")
+        self.expect("Newline", "newline after ':'")
+        self.skip_newlines()
+        if self.check("Indent"):
+            self.advance()
+        else:
+            self.parse_error("expected indented struct body")
+        node = self.ast.add("Struct")
+        self.ast.nodes[node].value = name.lexeme
+        first = 0
+        last = 0
+        while true:
+            self.skip_newlines()
+            if self.check("Dedent"):
+                self.advance()
+                break
+            if self.check("EOF"):
+                break
+            fname = self.expect("Identifier", "field name")
+            self.expect("Colon", "':' after field name")
+            ftype = self.parse_type_expr()
+            fnode = self.ast.add("FieldDef")
+            self.ast.nodes[fnode].value = fname.lexeme
+            self.ast.nodes[fnode].left = ftype
+            if first == 0:
+                first = fnode
+            else:
+                self.ast.nodes[last].extra = fnode
+            last = fnode
+        self.ast.nodes[node].left = first
+        return node
+
+    def parse_class(self) -> int:
+        self.advance()
+        name = self.expect("Identifier", "class name")
+        parent = 0
+        if self.match("LParen"):
+            pname = self.expect("Identifier", "parent class name")
+            parent = self.ast.add("Name")
+            self.ast.nodes[parent].value = pname.lexeme
+            self.expect("RParen", "')'")
+        self.expect("Colon", "':' after class name")
+        self.expect("Newline", "newline after ':'")
+        self.skip_newlines()
+        if self.check("Indent"):
+            self.advance()
+        else:
+            self.parse_error("expected indented class body")
+        node = self.ast.add("Class")
+        self.ast.nodes[node].value = name.lexeme
+        self.ast.nodes[node].right = parent
+        first = 0
+        last = 0
+        while true:
+            self.skip_newlines()
+            if self.check("Dedent"):
+                self.advance()
+                break
+            if self.check("EOF"):
+                break
+            member = self.parse_statement()
+            if first == 0:
+                first = member
+            else:
+                self.ast.nodes[last].extra = member
+            last = member
+        self.ast.nodes[node].left = first
+        return node
+
+        def parse_type_expr(self) -> int:
+        k = self.peek_kind()
+        if k != "Identifier":
+            if k != "None":
+                self.parse_error("expected type name, found '" + self.peek_lexeme() + "'")
+        tok = self.advance()
+        node = self.ast.add("TypeName")
+        self.ast.nodes[node].value = tok.lexeme
+        if self.check("Lt"):
+            self.advance()
+            depth = 1
+            while depth > 0:
+                if self.check("EOF"):
+                    break
+                if self.check("Lt"):
+                    depth = depth + 1
+                elif self.check("Gt"):
+                    depth = depth - 1
+                self.advance()
+        return node
+
+    # ---------------------------------------------------------------
+    # Expressions
+    # ---------------------------------------------------------------
+    def parse_expression(self) -> int:
+        if self.check("Lambda"):
+            return self.parse_lambda()
+        return self.parse_binary(1)
+
+    def parse_lambda(self) -> int:
+        self.advance()
+        node = self.ast.add("Lambda")
+        first = 0
+        last = 0
+        if not self.check("Colon"):
+            while true:
+                pname = self.expect("Identifier", "lambda parameter")
+                pnode = self.ast.add("Param")
+                self.ast.nodes[pnode].value = pname.lexeme
+                if first == 0:
+                    first = pnode
+                else:
+                    self.ast.nodes[last].extra = pnode
+                last = pnode
+                if not self.match("Comma"):
+                    break
+        self.ast.nodes[node].left = first
+        self.expect("Colon", "':' after lambda parameters")
+        body = self.parse_expression()
+        self.ast.nodes[node].right = body
+        return node
 
     def bin_prec(self, kind: str) -> int:
         if kind == "Or":
@@ -182,9 +523,6 @@ class Parser:
             return "is"
         return "?"
 
-    def parse_expression(self) -> int:
-        return self.parse_binary(1)
-
     def parse_binary(self, min_prec: int) -> int:
         left = self.parse_unary()
         while true:
@@ -193,64 +531,83 @@ class Parser:
                 break
             op_kind = self.peek_kind()
             self.advance()
-            right_assoc = (op_kind == "StarStar")
-            next_min = prec
-            if not right_assoc:
-                next_min = prec + 1
+            next_min = prec + 1
+            if op_kind == "StarStar":
+                next_min = prec
             right = self.parse_binary(next_min)
-            node_idx = self.ast.add("Binary")
-            self.ast.nodes[node_idx].op = self.bin_op_string(op_kind)
-            self.ast.nodes[node_idx].left = left
-            self.ast.nodes[node_idx].right = right
-            left = node_idx
+            node = self.ast.add("Binary")
+            self.ast.nodes[node].op = self.bin_op_string(op_kind)
+            self.ast.nodes[node].left = left
+            self.ast.nodes[node].right = right
+            left = node
         return left
 
     def parse_unary(self) -> int:
         k = self.peek_kind()
-        if k == "Minus" or k == "Plus" or k == "Not":
+        if k == "Minus":
             tok = self.advance()
             operand = self.parse_unary()
-            node_idx = self.ast.add("Unary")
-            if tok.kind == "Minus":
-                self.ast.nodes[node_idx].op = "-"
-            elif tok.kind == "Plus":
-                self.ast.nodes[node_idx].op = "+"
-            else:
-                self.ast.nodes[node_idx].op = "not"
-            self.ast.nodes[node_idx].left = operand
-            return node_idx
+            node = self.ast.add("Unary")
+            self.ast.nodes[node].op = "-"
+            self.ast.nodes[node].left = operand
+            return node
+        if k == "Plus":
+            self.advance()
+            operand = self.parse_unary()
+            node = self.ast.add("Unary")
+            self.ast.nodes[node].op = "+"
+            self.ast.nodes[node].left = operand
+            return node
+        if k == "Not":
+            self.advance()
+            operand = self.parse_unary()
+            node = self.ast.add("Unary")
+            self.ast.nodes[node].op = "not"
+            self.ast.nodes[node].left = operand
+            return node
         return self.parse_postfix()
 
     def parse_postfix(self) -> int:
         e = self.parse_primary()
         while true:
-            if self.match("Dot"):
+            if self.check("Dot"):
                 self.advance()
+                name = self.advance()
+                attr = self.ast.add("Attr")
+                self.ast.nodes[attr].value = name.lexeme
+                self.ast.nodes[attr].left = e
+                e = attr
                 continue
             if self.check("LParen"):
                 self.advance()
-                args = []
+                args_first = 0
+                args_last = 0
                 if not self.check("RParen"):
-                    args.append(self.parse_expression())
-                    while self.match("Comma"):
+                    while true:
+                        a = self.parse_expression()
+                        if args_first == 0:
+                            args_first = a
+                        else:
+                            self.ast.nodes[args_last].extra = a
+                        args_last = a
+                        if not self.match("Comma"):
+                            break
                         if self.check("RParen"):
                             break
-                        args.append(self.parse_expression())
-                self.match("RParen")
-                call_idx = self.ast.add("Call")
-                self.ast.nodes[call_idx].left = e
-                if len(args) > 0:
-                    self.ast.nodes[call_idx].right = args[0]
-                e = call_idx
+                self.expect("RParen", "')'")
+                call = self.ast.add("Call")
+                self.ast.nodes[call].left = e
+                self.ast.nodes[call].right = args_first
+                e = call
                 continue
             if self.check("LBracket"):
                 self.advance()
                 idx = self.parse_expression()
-                self.match("RBracket")
-                ix_idx = self.ast.add("Index")
-                self.ast.nodes[ix_idx].left = e
-                self.ast.nodes[ix_idx].right = idx
-                e = ix_idx
+                self.expect("RBracket", "']'")
+                ix = self.ast.add("Index")
+                self.ast.nodes[ix].left = e
+                self.ast.nodes[ix].right = idx
+                e = ix
                 continue
             break
         return e
@@ -296,7 +653,7 @@ class Parser:
         if k == "LParen":
             self.advance()
             inner = self.parse_expression()
-            self.match("RParen")
+            self.expect("RParen", "')'")
             idx = self.ast.add("Group")
             self.ast.nodes[idx].left = inner
             return idx
@@ -307,32 +664,49 @@ class Parser:
 
     def parse_list_literal(self) -> int:
         self.advance()
-        node_idx = self.ast.add("List")
+        node = self.ast.add("List")
         first = 0
         last = 0
         if not self.check("RBracket"):
-            e = self.parse_expression()
-            first = e
-            last = e
-            while self.match("Comma"):
+            while true:
+                e = self.parse_expression()
+                if first == 0:
+                    first = e
+                else:
+                    self.ast.nodes[last].extra = e
+                last = e
+                if not self.match("Comma"):
+                    break
                 if self.check("RBracket"):
                     break
-                e = self.parse_expression()
-                self.ast.nodes[last].extra = e
-                last = e
-        self.match("RBracket")
-        self.ast.nodes[node_idx].left = first
-        return node_idx
+        self.expect("RBracket", "']'")
+        self.ast.nodes[node].left = first
+        return node
 
-def print_node(ast: Ast, idx: int, depth: int) -> None:
-    if idx == 0:
-        return
-    n = ast.nodes[idx]
+# ===========================================================================
+# AST printer
+# ===========================================================================
+def indent_pad(depth: int) -> str:
     pad = ""
     i = 0
     while i < depth:
         pad = pad + "  "
         i = i + 1
+    return pad
+
+def print_block(ast: Ast, blk: int, depth: int) -> None:
+    if blk == 0:
+        return
+    cur = ast.nodes[blk].left
+    while cur != 0:
+        print_node(ast, cur, depth)
+        cur = ast.nodes[cur].extra
+
+def print_node(ast: Ast, idx: int, depth: int) -> None:
+    if idx == 0:
+        return
+    n = ast.nodes[idx]
+    pad = indent_pad(depth)
     if n.kind == "Int":
         print(pad + "Int(" + n.value + ")")
     elif n.kind == "Float":
@@ -363,27 +737,134 @@ def print_node(ast: Ast, idx: int, depth: int) -> None:
     elif n.kind == "Call":
         print(pad + "Call")
         print_node(ast, n.left, depth + 1)
-        if n.right != 0:
-            print_node(ast, n.right, depth + 1)
+        cur = n.right
+        while cur != 0:
+            print_node(ast, cur, depth + 1)
+            cur = ast.nodes[cur].extra
     elif n.kind == "Index":
         print(pad + "Index")
         print_node(ast, n.left, depth + 1)
         print_node(ast, n.right, depth + 1)
+    elif n.kind == "Attr":
+        print(pad + "Attr(." + n.value + ")")
+        print_node(ast, n.left, depth + 1)
     elif n.kind == "List":
         print(pad + "List")
         cur = n.left
         while cur != 0:
             print_node(ast, cur, depth + 1)
             cur = ast.nodes[cur].extra
+    elif n.kind == "Lambda":
+        print(pad + "Lambda")
+        cur = n.left
+        while cur != 0:
+            print_node(ast, cur, depth + 1)
+            cur = ast.nodes[cur].extra
+        print_node(ast, n.right, depth + 1)
+    elif n.kind == "TypeName":
+        print(pad + "Type(" + n.value + ")")
+    elif n.kind == "ExprStmt":
+        print(pad + "ExprStmt")
+        print_node(ast, n.left, depth + 1)
+    elif n.kind == "Assign":
+        print(pad + "Assign")
+        print_node(ast, n.left, depth + 1)
+        print_node(ast, n.right, depth + 1)
+    elif n.kind == "AnnotAssign":
+        print(pad + "AnnotAssign(" + n.value + ")")
+        print_node(ast, n.left, depth + 1)
+        if n.right != 0:
+            print_node(ast, n.right, depth + 1)
+    elif n.kind == "If":
+        print(pad + "If")
+        print(pad + "  cond:")
+        print_node(ast, n.left, depth + 2)
+        print(pad + "  then:")
+        print_block(ast, n.right, depth + 2)
+        if n.extra != 0:
+            print_node(ast, n.extra, depth + 1)
+    elif n.kind == "Else":
+        print(pad + "Else")
+        print_block(ast, n.right, depth + 1)
+    elif n.kind == "While":
+        print(pad + "While")
+        print(pad + "  cond:")
+        print_node(ast, n.left, depth + 2)
+        print(pad + "  body:")
+        print_block(ast, n.right, depth + 2)
+    elif n.kind == "For":
+        print(pad + "For(" + n.value + ")")
+        print(pad + "  iter:")
+        print_node(ast, n.left, depth + 2)
+        print(pad + "  body:")
+        print_block(ast, n.right, depth + 2)
+    elif n.kind == "Return":
+        print(pad + "Return")
+        if n.left != 0:
+            print_node(ast, n.left, depth + 1)
+    elif n.kind == "Def":
+        print(pad + "Def(" + n.value + ")")
+        if n.left != 0:
+            print(pad + "  params:")
+            cur = n.left
+            while cur != 0:
+                print_node(ast, cur, depth + 2)
+                cur = ast.nodes[cur].extra
+        if n.extra != 0:
+            print(pad + "  ret:")
+            print_node(ast, n.extra, depth + 2)
+        print(pad + "  body:")
+        print_block(ast, n.right, depth + 2)
+    elif n.kind == "Param":
+        if n.left != 0:
+            print(pad + "Param(" + n.value + ": ...)")
+        else:
+            print(pad + "Param(" + n.value + ")")
+    elif n.kind == "Class":
+        print(pad + "Class(" + n.value + ")")
+        if n.right != 0:
+            print(pad + "  parent:")
+            print_node(ast, n.right, depth + 2)
+        if n.left != 0:
+            print(pad + "  members:")
+            cur = n.left
+            while cur != 0:
+                print_node(ast, cur, depth + 2)
+                cur = ast.nodes[cur].extra
+    elif n.kind == "Struct":
+        print(pad + "Struct(" + n.value + ")")
+        cur = n.left
+        while cur != 0:
+            print_node(ast, cur, depth + 1)
+            cur = ast.nodes[cur].extra
+    elif n.kind == "FieldDef":
+        print(pad + "Field(" + n.value + ")")
+        if n.left != 0:
+            print_node(ast, n.left, depth + 1)
+    elif n.kind == "Pass":
+        print(pad + "Pass")
+    elif n.kind == "Break":
+        print(pad + "Break")
+    elif n.kind == "Continue":
+        print(pad + "Continue")
     elif n.kind == "Program":
         print(pad + "Program")
         cur = n.left
         while cur != 0:
             print_node(ast, cur, depth + 1)
-            cur = ast.nodes[cur].right
+            cur = ast.nodes[cur].extra
+    elif n.kind == "Block":
+        print(pad + "Block")
+        cur = n.left
+        while cur != 0:
+            print_node(ast, cur, depth + 1)
+            cur = ast.nodes[cur].extra
     else:
         print(pad + "<" + n.kind + ">")
 
+# ===========================================================================
+# Driver
+# ===========================================================================
 def main() -> None:
     a = args()
     if len(a) < 1:
@@ -399,42 +880,136 @@ def main() -> None:
     root = parser.parse_program()
     print_node(parser.ast, root, 0)
 
+# ===========================================================================
+# Tokenizer
+# ===========================================================================
+def keyword_kind(word: str) -> str:
+    kw = {}
+    kw["def"] = "Def"
+    kw["return"] = "Return"
+    kw["if"] = "If"
+    kw["elif"] = "Elif"
+    kw["else"] = "Else"
+    kw["while"] = "While"
+    kw["for"] = "For"
+    kw["break"] = "Break"
+    kw["continue"] = "Continue"
+    kw["pass"] = "Pass"
+    kw["class"] = "Class"
+    kw["struct"] = "Struct"
+    kw["and"] = "And"
+    kw["or"] = "Or"
+    kw["not"] = "Not"
+    kw["in"] = "In"
+    kw["is"] = "Is"
+    kw["lambda"] = "Lambda"
+    kw["true"] = "True"
+    kw["True"] = "True"
+    kw["false"] = "False"
+    kw["False"] = "False"
+    kw["none"] = "None"
+    kw["None"] = "None"
+    if word in kw:
+        return kw[word]
+    return "Identifier"
+
 def tokenize(source: str) -> list<Token>:
-    toks = []
+    toks: list<Token> = []
     pos = 0
     line = 1
     col = 1
     n = len(source)
+    indent_stack: list<int> = [0]
+    bracket_depth = 0
+    at_line_start = true
 
     while pos < n:
+        if at_line_start:
+            if bracket_depth == 0:
+                at_line_start = false
+                indent = 0
+                while pos < n:
+                    cc = source[pos]
+                    if cc == " ":
+                        indent = indent + 1
+                        pos = pos + 1
+                        col = col + 1
+                    elif cc == "\t":
+                        indent = indent + 4
+                        pos = pos + 1
+                        col = col + 1
+                    else:
+                        break
+                if pos >= n:
+                    break
+                cc = source[pos]
+                skip_indent = false
+                if cc == "\n":
+                    skip_indent = true
+                elif cc == "\r":
+                    skip_indent = true
+                elif cc == "#":
+                    skip_indent = true
+                if not skip_indent:
+                    current = indent_stack[len(indent_stack) - 1]
+                    if indent > current:
+                        indent_stack.append(indent)
+                        toks.append(Token("Indent", "", line, col))
+                    elif indent < current:
+                        while len(indent_stack) > 1:
+                            top = indent_stack[len(indent_stack) - 1]
+                            if top <= indent:
+                                break
+                            indent_stack.pop()
+                            toks.append(Token("Dedent", "", line, col))
+        if pos >= n:
+            break
         c = source[pos]
-
-        if c == " " or c == "\t" or c == "\r":
+        if c == " ":
             pos = pos + 1
-            if c == "\r":
-                continue
             col = col + 1
             continue
-
+        if c == "\t":
+            pos = pos + 1
+            col = col + 1
+            continue
+        if c == "\r":
+            pos = pos + 1
+            continue
         if c == "\n":
-            toks.append(Token("Newline", "\\n", line, col))
+            if bracket_depth == 0:
+                if len(toks) > 0:
+                    m = len(toks)
+                    if toks[m - 1].kind != "Newline":
+                        toks.append(Token("Newline", "\\n", line, col))
             pos = pos + 1
             line = line + 1
             col = 1
+            at_line_start = true
             continue
-
         if c == "#":
-            while pos < n and source[pos] != "\n":
+            while true:
+                if pos >= n:
+                    break
+                if source[pos] == "\n":
+                    break
                 pos = pos + 1
                 col = col + 1
             continue
-
         if c.is_alpha() or c == "_":
             start_col = col
             text = ""
             while pos < n:
                 cc = source[pos]
-                if cc.is_alpha() or cc.is_digit() or cc == "_":
+                if cc.is_alpha():
+                    text = text + cc
+                    pos = pos + 1
+                    col = col + 1
+                elif cc.is_digit():
+                    text = text + cc
+                    pos = pos + 1
+                    col = col + 1
+                elif cc == "_":
                     text = text + cc
                     pos = pos + 1
                     col = col + 1
@@ -442,38 +1017,47 @@ def tokenize(source: str) -> list<Token>:
                     break
             toks.append(Token(keyword_kind(text), text, line, start_col))
             continue
-
         if c.is_digit():
             start_col = col
             text = ""
-            while pos < n and source[pos].is_digit():
+            while true:
+                if pos >= n:
+                    break
+                if not source[pos].is_digit():
+                    break
                 text = text + source[pos]
                 pos = pos + 1
                 col = col + 1
             toks.append(Token("Int", text, line, start_col))
             continue
-
         if c == "\"":
             start_col = col
             pos = pos + 1
             col = col + 1
             text = ""
-            while pos < n and source[pos] != "\"":
-                if source[pos] == "\\" and pos + 1 < n:
-                    esc = source[pos + 1]
-                    if esc == "n":
-                        text = text + "\n"
-                    elif esc == "t":
-                        text = text + "\t"
-                    elif esc == "\"":
-                        text = text + "\""
-                    elif esc == "\\":
-                        text = text + "\\"
-                    else:
-                        text = text + esc
-                    pos = pos + 2
-                    col = col + 2
-                    continue
+            while true:
+                if pos >= n:
+                    break
+                if source[pos] == "\"":
+                    break
+                if source[pos] == "\n":
+                    break
+                if source[pos] == "\\":
+                    if pos + 1 < n:
+                        esc = source[pos + 1]
+                        if esc == "n":
+                            text = text + "\n"
+                        elif esc == "t":
+                            text = text + "\t"
+                        elif esc == "\"":
+                            text = text + "\""
+                        elif esc == "\\":
+                            text = text + "\\"
+                        else:
+                            text = text + esc
+                        pos = pos + 2
+                        col = col + 2
+                        continue
                 text = text + source[pos]
                 pos = pos + 1
                 col = col + 1
@@ -482,12 +1066,10 @@ def tokenize(source: str) -> list<Token>:
                 col = col + 1
             toks.append(Token("String", text, line, start_col))
             continue
-
         start_col = col
         nxt = ""
         if pos + 1 < n:
             nxt = source[pos + 1]
-
         if c == "+":
             if nxt == "=":
                 toks.append(Token("PlusAssign", "+=", line, start_col))
@@ -574,31 +1156,40 @@ def tokenize(source: str) -> list<Token>:
                 col = col + 1
             continue
         if c == "(":
+            bracket_depth = bracket_depth + 1
             toks.append(Token("LParen", "(", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == ")":
+            if bracket_depth > 0:
+                bracket_depth = bracket_depth - 1
             toks.append(Token("RParen", ")", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "[":
+            bracket_depth = bracket_depth + 1
             toks.append(Token("LBracket", "[", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "]":
+            if bracket_depth > 0:
+                bracket_depth = bracket_depth - 1
             toks.append(Token("RBracket", "]", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "{":
+            bracket_depth = bracket_depth + 1
             toks.append(Token("LBrace", "{", line, start_col))
             pos = pos + 1
             col = col + 1
             continue
         if c == "}":
+            if bracket_depth > 0:
+                bracket_depth = bracket_depth - 1
             toks.append(Token("RBrace", "}", line, start_col))
             pos = pos + 1
             col = col + 1
@@ -621,21 +1212,14 @@ def tokenize(source: str) -> list<Token>:
         pos = pos + 1
         col = col + 1
 
+    if len(toks) > 0:
+        m = len(toks)
+        if toks[m - 1].kind != "Newline":
+            toks.append(Token("Newline", "\\n", line, col))
+    while len(indent_stack) > 1:
+        indent_stack.pop()
+        toks.append(Token("Dedent", "", line, col))
     toks.append(Token("EOF", "", line, col))
     return toks
-
-def keyword_kind(word: str) -> str:
-    kw = {}
-    kw["and"] = "And"
-    kw["or"] = "Or"
-    kw["not"] = "Not"
-    kw["in"] = "In"
-    kw["is"] = "Is"
-    kw["true"] = "True"
-    kw["false"] = "False"
-    kw["none"] = "None"
-    if word in kw:
-        return kw[word]
-    return "Identifier"
 
 main()

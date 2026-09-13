@@ -922,7 +922,7 @@ namespace vayu {
                         throw std::runtime_error(
                             "native: attribute access on non-object (type " +
                             std::to_string((int)base.type) + ") at line " +
-                            std::to_string(e->loc.line));
+                            std::to_string(e->loc.line) + " in " + sourceDir_);
                     auto ci = findClass(base.cls);
                     if (!ci) throw std::runtime_error("native: unknown class '" +
                         base.cls + "' at line " +
