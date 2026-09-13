@@ -2,4 +2,4 @@ build/
 out/
 .vs
 examples/bench/cpp/*.exe
-vlex.exe
+*.exe
