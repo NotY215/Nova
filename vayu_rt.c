@@ -8,6 +8,9 @@ typedef struct { int64_t len; int64_t cap; int64_t* items; } VayuList;
 typedef struct { VayuStr* key; int64_t value; uint8_t used; } VayuMapEntry;
 typedef struct { int64_t len; int64_t cap; VayuMapEntry* entries; } VayuMap;
 
+static int g_argc = 0;
+static char** g_argv = NULL;
+
 void* vayu_alloc(int64_t size) {
     void* p = malloc((size_t)size);
     if (!p) { fprintf(stderr, "vayu: oom\n"); exit(1); }
@@ -104,6 +107,15 @@ int64_t vayu_str_to_int(VayuStr* s) {
         n = n * 10 + (c - '0');
     }
     return neg ? -n : n;
+}
+VayuStr* vayu_str_char_at(VayuStr* s, int64_t i) {
+    if (i < 0) i += s->len;
+    if (i < 0 || i >= s->len) { fprintf(stderr, "IndexError: string\n"); exit(1); }
+    VayuStr* r = (VayuStr*)malloc(sizeof(VayuStr) + 2);
+    r->len = 1;
+    r->data[0] = s->data[i];
+    r->data[1] = 0;
+    return r;
 }
 
 VayuList* vayu_list_new() {
@@ -215,10 +227,52 @@ long long vayu_mod(long long a, long long b) {
     return r;
 }
 
+VayuStr* vayu_read_file(VayuStr* path) {
+    char buf[4096];
+    int64_t n = path->len < 4095 ? path->len : 4095;
+    memcpy(buf, path->data, (size_t)n);
+    buf[n] = 0;
+    FILE* f = fopen(buf, "rb");
+    if (!f) { fprintf(stderr, "cannot open file\n"); exit(1); }
+    fseek(f, 0, SEEK_END);
+    long long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)sz + 1);
+    s->len = sz;
+    if (sz > 0) fread(s->data, 1, (size_t)sz, f);
+    s->data[sz] = 0;
+    fclose(f);
+    return s;
+}
+
+int64_t vayu_file_exists(VayuStr* path) {
+    char buf[4096];
+    int64_t n = path->len < 4095 ? path->len : 4095;
+    memcpy(buf, path->data, (size_t)n);
+    buf[n] = 0;
+    FILE* f = fopen(buf, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+VayuList* vayu_get_args(void) {
+    VayuList* l = vayu_list_new();
+    int i = 1;
+    while (i < g_argc) {
+        vayu_list_push(l, (int64_t)vayu_mkstr(g_argv[i], (int64_t)strlen(g_argv[i])));
+        i = i + 1;
+    }
+    return l;
+}
+
+void vayu_exit(int64_t code) { exit((int)code); }
+
 extern void vayu_main(void);
 
 int main(int argc, char** argv) {
-    (void)argc; (void)argv;
+    g_argc = argc;
+    g_argv = argv;
     vayu_main();
     return 0;
 }

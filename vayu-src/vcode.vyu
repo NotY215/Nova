@@ -1,6 +1,97 @@
 # vcode.vyu — Vayu source -> QBE IL.
-# 7E-2 (classes) + 7E-3 (collections / builtins).
+# 7E-4: typed lists/maps, method return inference, map literals,
+#        string indexing, `in`, read_file/args/exit, class self-reference.
 
+# =========================================================================
+# Type-string helpers
+# =========================================================================
+def type_kind_of(tstr: str) -> str:
+    if tstr == "int":
+        return "int"
+    if tstr == "float":
+        return "int"
+    if tstr == "bool":
+        return "bool"
+    if tstr == "str":
+        return "str"
+    if tstr == "char":
+        return "str"
+    if tstr == "None":
+        return ""
+    if tstr == "":
+        return ""
+    if len(tstr) >= 4:
+        if tstr[0] == "l":
+            if tstr[1] == "i":
+                if tstr[2] == "s":
+                    if tstr[3] == "t":
+                        return "list"
+    if len(tstr) >= 3:
+        if tstr[0] == "m":
+            if tstr[1] == "a":
+                if tstr[2] == "p":
+                    return "map"
+    return "obj"
+
+def type_class_of(tstr: str) -> str:
+    if type_kind_of(tstr) == "obj":
+        return tstr
+    return ""
+
+def inner_of_generic(tstr: str) -> str:
+    i = 0
+    start = -1
+    end = -1
+    while i < len(tstr):
+        c = tstr[i]
+        if c == "<":
+            start = i + 1
+        if c == ">":
+            end = i
+            break
+        i = i + 1
+    if start < 0:
+        return ""
+    if end < 0:
+        return ""
+    result = ""
+    j = start
+    while j < end:
+        result = result + tstr[j]
+        j = j + 1
+    return result
+
+def type_list_elem_of(tstr: str) -> str:
+    if type_kind_of(tstr) != "list":
+        return ""
+    return inner_of_generic(tstr)
+
+def type_map_val_of(tstr: str) -> str:
+    if type_kind_of(tstr) != "map":
+        return ""
+    inner = inner_of_generic(tstr)
+    k = 0
+    comma = -1
+    while k < len(inner):
+        if inner[k] == ",":
+            comma = k
+            break
+        k = k + 1
+    if comma < 0:
+        return ""
+    result = ""
+    j = comma + 1
+    while j < len(inner):
+        c = inner[j]
+        if c != " ":
+            result = result + c
+        j = j + 1
+    return result
+
+# =========================================================================
+# Lex / parse (same as 7E-3 except parse_type_name captures generics
+# and map literals are parsed)
+# =========================================================================
 class Token:
     kind: str
     lexeme: str
@@ -41,33 +132,6 @@ class Ast:
         self.nodes.append(n)
         return len(self.nodes) - 1
 
-class ClassInfo:
-    name: str
-    parent_name: str
-    own_field_names: list<str>
-    own_field_types: list<str>
-    all_field_names: list<str>
-    method_names: list<str>
-    method_decls: list<int>
-    has_init: bool
-    init_decl: int
-    total_size: int
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.parent_name = ""
-        self.own_field_names = []
-        self.own_field_types = []
-        self.all_field_names = []
-        self.method_names = []
-        self.method_decls = []
-        self.has_init = false
-        self.init_decl = 0
-        self.total_size = 0
-
-# =========================================================================
-# Parser (identical to 7E-1)
-# =========================================================================
 class Parser:
     toks: list<Token>
     pos: int
@@ -429,9 +493,9 @@ class Parser:
 
     def parse_type_name(self) -> int:
         tok = self.advance()
-        node = self.ast.add("TypeName")
-        self.ast.nodes[node].value = tok.lexeme
+        tstr = tok.lexeme
         if self.check("Lt"):
+            tstr = tstr + "<"
             self.advance()
             depth = 1
             while depth > 0:
@@ -439,9 +503,27 @@ class Parser:
                     break
                 if self.check("Lt"):
                     depth = depth + 1
-                if self.check("Gt"):
+                    tstr = tstr + "<"
+                    self.advance()
+                elif self.check("Gt"):
                     depth = depth - 1
-                self.advance()
+                    if depth > 0:
+                        tstr = tstr + ">"
+                    self.advance()
+                elif self.check("Comma"):
+                    tstr = tstr + ","
+                    self.advance()
+                elif self.check("Identifier"):
+                    t2 = self.advance()
+                    tstr = tstr + t2.lexeme
+                elif self.check("None"):
+                    self.advance()
+                    tstr = tstr + "None"
+                else:
+                    self.advance()
+            tstr = tstr + ">"
+        node = self.ast.add("TypeName")
+        self.ast.nodes[node].value = tstr
         return node
 
     def parse_expression(self) -> int:
@@ -657,6 +739,8 @@ class Parser:
             return idx
         if k == "LBracket":
             return self.parse_list_literal()
+        if k == "LBrace":
+            return self.parse_map_literal()
         self.parse_error("expected expression, found '" + self.peek_lexeme() + "'")
         return 0
 
@@ -681,6 +765,35 @@ class Parser:
         self.ast.nodes[node].left = first
         return node
 
+    def parse_map_literal(self) -> int:
+        self.advance()
+        node = self.ast.add("Map")
+        first = 0
+        last = 0
+        if not self.check("RBrace"):
+            while true:
+                key = self.parse_expression()
+                self.expect("Colon", "':' in map literal")
+                val = self.parse_expression()
+                entry = self.ast.add("MapEntry")
+                self.ast.nodes[entry].left = key
+                self.ast.nodes[entry].right = val
+                if first == 0:
+                    first = entry
+                else:
+                    self.ast.nodes[last].extra = entry
+                last = entry
+                if not self.match("Comma"):
+                    break
+                if self.check("RBrace"):
+                    break
+        self.expect("RBrace", "'}'")
+        self.ast.nodes[node].left = first
+        return node
+
+# =========================================================================
+# Loop context and class info
+# =========================================================================
 class LoopContext:
     continue_label: str
     break_label: str
@@ -689,6 +802,35 @@ class LoopContext:
         self.continue_label = cont
         self.break_label = brk
 
+class ClassInfo:
+    name: str
+    parent_name: str
+    own_field_names: list<str>
+    own_field_type_strs: list<str>
+    all_field_names: list<str>
+    method_names: list<str>
+    method_decls: list<int>
+    method_return_type_strs: list<str>
+    has_init: bool
+    init_decl: int
+    total_size: int
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.parent_name = ""
+        self.own_field_names = []
+        self.own_field_type_strs = []
+        self.all_field_names = []
+        self.method_names = []
+        self.method_decls = []
+        self.method_return_type_strs = []
+        self.has_init = false
+        self.init_decl = 0
+        self.total_size = 0
+
+# =========================================================================
+# Codegen
+# =========================================================================
 class Codegen:
     ast: Ast
     out: list<str>
@@ -699,8 +841,10 @@ class Codegen:
     str_label_next: int
     var_slots: list<str>
     var_names: list<str>
-    var_classes: list<str>
     var_kinds: list<str>
+    var_classes: list<str>
+    var_elem_classes: list<str>
+    var_val_classes: list<str>
     loop_stack: list<LoopContext>
     terminated: bool
     class_infos: list<ClassInfo>
@@ -708,8 +852,10 @@ class Codegen:
     field_offsets: list<int>
     next_field_offset: int
     current_class: str
-    last_class: str
     last_kind: str
+    last_class: str
+    last_elem_class: str
+    last_val_class: str
     final: str
 
     def __init__(self, ast: Ast) -> None:
@@ -722,8 +868,10 @@ class Codegen:
         self.str_label_next = 0
         self.var_slots = []
         self.var_names = []
-        self.var_classes = []
         self.var_kinds = []
+        self.var_classes = []
+        self.var_elem_classes = []
+        self.var_val_classes = []
         self.loop_stack = []
         self.terminated = false
         self.class_infos = []
@@ -731,8 +879,10 @@ class Codegen:
         self.field_offsets = []
         self.next_field_offset = 0
         self.current_class = ""
-        self.last_class = ""
         self.last_kind = ""
+        self.last_class = ""
+        self.last_elem_class = ""
+        self.last_val_class = ""
         self.final = ""
 
     def emit(self, s: str) -> None:
@@ -777,43 +927,54 @@ class Codegen:
         slot = "%v" + name + "_slot"
         self.var_names.append(name)
         self.var_slots.append(slot)
-        self.var_classes.append("")
         self.var_kinds.append("")
+        self.var_classes.append("")
+        self.var_elem_classes.append("")
+        self.var_val_classes.append("")
         self.emit(slot + " =l alloc8 8")
         self.emit("storel 0, " + slot)
         return slot
 
-    def class_of_var(self, name: str) -> str:
+    def idx_of_var(self, name: str) -> int:
         i = 0
         while i < len(self.var_names):
             if self.var_names[i] == name:
-                return self.var_classes[i]
+                return i
             i = i + 1
-        return ""
+        return -1
 
     def kind_of_var(self, name: str) -> str:
-        i = 0
-        while i < len(self.var_names):
-            if self.var_names[i] == name:
-                return self.var_kinds[i]
-            i = i + 1
-        return ""
+        i = self.idx_of_var(name)
+        if i < 0:
+            return ""
+        return self.var_kinds[i]
 
-    def set_var_class(self, name: str, cls: str) -> None:
-        i = 0
-        while i < len(self.var_names):
-            if self.var_names[i] == name:
-                self.var_classes[i] = cls
-                return
-            i = i + 1
+    def class_of_var(self, name: str) -> str:
+        i = self.idx_of_var(name)
+        if i < 0:
+            return ""
+        return self.var_classes[i]
 
-    def set_var_kind(self, name: str, k: str) -> None:
-        i = 0
-        while i < len(self.var_names):
-            if self.var_names[i] == name:
-                self.var_kinds[i] = k
-                return
-            i = i + 1
+    def elem_of_var(self, name: str) -> str:
+        i = self.idx_of_var(name)
+        if i < 0:
+            return ""
+        return self.var_elem_classes[i]
+
+    def val_of_var(self, name: str) -> str:
+        i = self.idx_of_var(name)
+        if i < 0:
+            return ""
+        return self.var_val_classes[i]
+
+    def set_var_info(self, name: str, kind: str, cls: str, elem: str, val: str) -> None:
+        i = self.idx_of_var(name)
+        if i < 0:
+            return
+        self.var_kinds[i] = kind
+        self.var_classes[i] = cls
+        self.var_elem_classes[i] = elem
+        self.var_val_classes[i] = val
 
     def intern_str(self, s: str) -> str:
         i = 0
@@ -845,7 +1006,6 @@ class Codegen:
         self.data.append(line)
         return "$vayu_strlit_" + str(idx)
 
-    # ---------------- class tables ----------------
     def find_class_idx(self, name: str) -> int:
         i = 0
         while i < len(self.class_infos):
@@ -872,6 +1032,21 @@ class Codegen:
         self.next_field_offset = self.next_field_offset + 8
         return off
 
+    def find_field_type_str(self, cls_name: str, field_name: str) -> str:
+        cur = cls_name
+        while cur != "":
+            ci = self.find_class_idx(cur)
+            if ci == -1:
+                return ""
+            info = self.class_infos[ci]
+            i = 0
+            while i < len(info.own_field_names):
+                if info.own_field_names[i] == field_name:
+                    return info.own_field_type_strs[i]
+                i = i + 1
+            cur = info.parent_name
+        return ""
+
     def find_method_owner(self, cls_name: str, method_name: str) -> str:
         cur = cls_name
         while cur != "":
@@ -887,7 +1062,7 @@ class Codegen:
             cur = info.parent_name
         return ""
 
-    def find_field_type_class(self, cls_name: str, field_name: str) -> str:
+    def find_method_return_type_str(self, cls_name: str, method_name: str) -> str:
         cur = cls_name
         while cur != "":
             ci = self.find_class_idx(cur)
@@ -895,17 +1070,13 @@ class Codegen:
                 return ""
             info = self.class_infos[ci]
             i = 0
-            while i < len(info.own_field_names):
-                if info.own_field_names[i] == field_name:
-                    t = info.own_field_types[i]
-                    if self.find_class_idx(t) != -1:
-                        return t
-                    return ""
+            while i < len(info.method_names):
+                if info.method_names[i] == method_name:
+                    return info.method_return_type_strs[i]
                 i = i + 1
             cur = info.parent_name
         return ""
 
-    # ---------------- collect classes ----------------
     def register_class(self, n: Node) -> None:
         info = ClassInfo(n.value)
         if n.right != 0:
@@ -916,10 +1087,10 @@ class Codegen:
             m = self.ast.nodes[cur]
             if m.kind == "AnnotAssign":
                 info.own_field_names.append(m.value)
-                tn = ""
+                tstr = ""
                 if m.left != 0:
-                    tn = self.ast.nodes[m.left].value
-                info.own_field_types.append(tn)
+                    tstr = self.ast.nodes[m.left].value
+                info.own_field_type_strs.append(tstr)
             elif m.kind == "Def":
                 if m.value == "__init__":
                     info.has_init = true
@@ -927,6 +1098,10 @@ class Codegen:
                 else:
                     info.method_names.append(m.value)
                     info.method_decls.append(cur)
+                    rt = ""
+                    if m.extra != 0:
+                        rt = self.ast.nodes[m.extra].value
+                    info.method_return_type_strs.append(rt)
             cur = m.extra
         self.class_infos.append(info)
 
@@ -937,10 +1112,10 @@ class Codegen:
             m = self.ast.nodes[cur]
             if m.kind == "FieldDef":
                 info.own_field_names.append(m.value)
-                tn = ""
+                tstr = ""
                 if m.left != 0:
-                    tn = self.ast.nodes[m.left].value
-                info.own_field_types.append(tn)
+                    tstr = self.ast.nodes[m.left].value
+                info.own_field_type_strs.append(tstr)
             cur = m.extra
         self.class_infos.append(info)
 
@@ -1008,103 +1183,7 @@ class Codegen:
                             info.init_decl = p.init_decl
             i = i + 1
 
-    # ---------------- kind inference ----------------
-    def kind_of_expr(self, idx: int) -> str:
-        if idx == 0:
-            return ""
-        n = self.ast.nodes[idx]
-        if n.kind == "Int":
-            return "int"
-        if n.kind == "Float":
-            return "int"
-        if n.kind == "Bool":
-            return "bool"
-        if n.kind == "Str":
-            return "str"
-        if n.kind == "Char":
-            return "str"
-        if n.kind == "List":
-            return "list"
-        if n.kind == "Name":
-            return self.kind_of_var(n.value)
-        if n.kind == "Group":
-            return self.kind_of_expr(n.left)
-        if n.kind == "Attr":
-            base_kind = self.kind_of_expr(n.left)
-            if base_kind == "list":
-                return ""
-            if base_kind == "map":
-                return ""
-            return ""
-        if n.kind == "Call":
-            callee = self.ast.nodes[n.left]
-            if callee.kind == "Name":
-                if callee.value == "str":
-                    return "str"
-                if callee.value == "int":
-                    return "int"
-                if callee.value == "len":
-                    return "int"
-                ci = self.find_class_idx(callee.value)
-                if ci != -1:
-                    return "obj"
-            if callee.kind == "Attr":
-                base_kind = self.kind_of_expr(callee.left)
-                if base_kind == "str":
-                    if callee.value == "upper":
-                        return "str"
-                    if callee.value == "lower":
-                        return "str"
-                    if callee.value == "contains":
-                        return "bool"
-                    if callee.value == "find":
-                        return "int"
-                    if callee.value == "starts_with":
-                        return "bool"
-                    if callee.value == "ends_with":
-                        return "bool"
-                    if callee.value == "to_int":
-                        return "int"
-                if base_kind == "list":
-                    if callee.value == "pop":
-                        return ""
-                    if callee.value == "contains":
-                        return "bool"
-                if base_kind == "map":
-                    if callee.value == "contains":
-                        return "bool"
-                    if callee.value == "get":
-                        return ""
-            return ""
-        if n.kind == "Index":
-            base_kind = self.kind_of_expr(n.left)
-            if base_kind == "str":
-                return "str"
-            return ""
-        if n.kind == "Binary":
-            if n.op == "+":
-                l = self.kind_of_expr(n.left)
-                if l == "str":
-                    return "str"
-                return "int"
-            if n.op == "-":
-                return "int"
-            if n.op == "*":
-                return "int"
-            if n.op == "/":
-                return "int"
-            if n.op == "//":
-                return "int"
-            if n.op == "%":
-                return "int"
-            return "bool"
-        if n.kind == "Unary":
-            if n.op == "not":
-                return "bool"
-            return "int"
-        return ""
-
-    # ---------------- collect assigned vars ----------------
+    # ---------------- collect assigned ----------------
     def collect_assigned(self, idx: int) -> None:
         if idx == 0:
             return
@@ -1182,6 +1261,14 @@ class Codegen:
                 self.collect_assigned(cur)
                 cur = self.ast.nodes[cur].extra
             return
+        if n.kind == "Map":
+            cur = n.left
+            while cur != 0:
+                e = self.ast.nodes[cur]
+                self.collect_assigned(e.left)
+                self.collect_assigned(e.right)
+                cur = e.extra
+            return
         if n.kind == "Attr":
             self.collect_assigned(n.left)
             return
@@ -1226,6 +1313,8 @@ class Codegen:
             self.emit(t + " =l loadl " + slot)
             self.last_kind = self.kind_of_var(n.value)
             self.last_class = self.class_of_var(n.value)
+            self.last_elem_class = self.elem_of_var(n.value)
+            self.last_val_class = self.val_of_var(n.value)
             return t
         if n.kind == "Group":
             return self.gen_expr(n.left)
@@ -1235,6 +1324,7 @@ class Codegen:
                 t = self.new_temp()
                 self.emit(t + " =l sub 0, " + v)
                 self.last_kind = "int"
+                self.last_class = ""
                 return t
             if n.op == "+":
                 return v
@@ -1243,6 +1333,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + c)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if n.kind == "Binary":
             return self.gen_binary(n)
@@ -1254,6 +1345,8 @@ class Codegen:
             return self.gen_index(n)
         if n.kind == "List":
             return self.gen_list_lit(n)
+        if n.kind == "Map":
+            return self.gen_map_lit(n)
         print("vcode: unsupported expression kind '" + n.kind + "'")
         exit(1)
         return "0"
@@ -1269,48 +1362,78 @@ class Codegen:
                 t = self.new_temp()
                 self.emit(t + " =l call $vayu_str_concat(l " + a + ", l " + b + ")")
                 self.last_kind = "str"
+                self.last_class = ""
                 return t
         if op == "==":
             if a_kind == "str" or b_kind == "str":
                 c = self.new_temp()
                 self.emit(c + " =l call $vayu_str_eq(l " + a + ", l " + b + ")")
                 self.last_kind = "bool"
+                self.last_class = ""
                 return c
         if op == "!=":
             if a_kind == "str" or b_kind == "str":
                 c = self.new_temp()
                 self.emit(c + " =l call $vayu_str_ne(l " + a + ", l " + b + ")")
                 self.last_kind = "bool"
+                self.last_class = ""
                 return c
+        if op == "in":
+            if b_kind == "map":
+                t = self.new_temp()
+                self.emit(t + " =l call $vayu_map_has(l " + b + ", l " + a + ")")
+                self.last_kind = "bool"
+                self.last_class = ""
+                return t
+            if b_kind == "list":
+                t = self.new_temp()
+                self.emit(t + " =l call $vayu_list_contains(l " + b + ", l " + a + ")")
+                self.last_kind = "bool"
+                self.last_class = ""
+                return t
+            if b_kind == "str":
+                t = self.new_temp()
+                self.emit(t + " =l call $vayu_str_contains(l " + b + ", l " + a + ")")
+                self.last_kind = "bool"
+                self.last_class = ""
+                return t
+            print("vcode: 'in' on unsupported type")
+            exit(1)
         if op == "+":
             t = self.new_temp()
             self.emit(t + " =l add " + a + ", " + b)
             self.last_kind = "int"
+            self.last_class = ""
             return t
         if op == "-":
             t = self.new_temp()
             self.emit(t + " =l sub " + a + ", " + b)
             self.last_kind = "int"
+            self.last_class = ""
             return t
         if op == "*":
             t = self.new_temp()
             self.emit(t + " =l mul " + a + ", " + b)
             self.last_kind = "int"
+            self.last_class = ""
             return t
         if op == "/":
             t = self.new_temp()
             self.emit(t + " =l div " + a + ", " + b)
             self.last_kind = "int"
+            self.last_class = ""
             return t
         if op == "//":
             t = self.new_temp()
             self.emit(t + " =l call $vayu_floordiv(l " + a + ", l " + b + ")")
             self.last_kind = "int"
+            self.last_class = ""
             return t
         if op == "%":
             t = self.new_temp()
             self.emit(t + " =l call $vayu_mod(l " + a + ", l " + b + ")")
             self.last_kind = "int"
+            self.last_class = ""
             return t
         if op == "==":
             c = self.new_temp()
@@ -1318,6 +1441,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + c)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if op == "!=":
             c = self.new_temp()
@@ -1325,6 +1449,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + c)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if op == "<":
             c = self.new_temp()
@@ -1332,6 +1457,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + c)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if op == ">":
             c = self.new_temp()
@@ -1339,6 +1465,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + c)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if op == "<=":
             c = self.new_temp()
@@ -1346,6 +1473,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + c)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if op == ">=":
             c = self.new_temp()
@@ -1353,6 +1481,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + c)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if op == "and":
             ab = self.new_temp()
@@ -1364,6 +1493,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + r)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         if op == "or":
             ab = self.new_temp()
@@ -1375,6 +1505,7 @@ class Codegen:
             ext = self.new_temp()
             self.emit(ext + " =l extsw " + r)
             self.last_kind = "bool"
+            self.last_class = ""
             return ext
         print("vcode: unsupported binary operator '" + op + "'")
         exit(1)
@@ -1390,34 +1521,46 @@ class Codegen:
         if off < 0:
             print("vcode: unknown field '" + n.value + "'")
             exit(1)
+        ftype = self.find_field_type_str(base_class, n.value)
         addr = self.new_temp()
         self.emit(addr + " =l add " + base_ssa + ", " + str(off))
         t = self.new_temp()
         self.emit(t + " =l loadl " + addr)
-        self.last_class = self.find_field_type_class(base_class, n.value)
-        if self.last_class == "":
-            self.last_kind = ""
-        else:
-            self.last_kind = "obj"
+        self.last_kind = type_kind_of(ftype)
+        self.last_class = type_class_of(ftype)
+        self.last_elem_class = type_list_elem_of(ftype)
+        self.last_val_class = type_map_val_of(ftype)
         return t
 
     def gen_index(self, n: Node) -> str:
         base_ssa = self.gen_expr(n.left)
         base_kind = self.last_kind
+        base_elem = self.last_elem_class
+        base_val = self.last_val_class
         idx_ssa = self.gen_expr(n.right)
         t = self.new_temp()
         if base_kind == "list":
             self.emit(t + " =l call $vayu_list_get(l " + base_ssa + ", l " + idx_ssa + ")")
-            self.last_kind = ""
+            self.last_kind = type_kind_of(base_elem)
+            self.last_class = type_class_of(base_elem)
+            self.last_elem_class = type_list_elem_of(base_elem)
+            self.last_val_class = ""
             return t
         if base_kind == "map":
             self.emit(t + " =l call $vayu_map_get(l " + base_ssa + ", l " + idx_ssa + ")")
-            self.last_kind = ""
+            self.last_kind = type_kind_of(base_val)
+            self.last_class = type_class_of(base_val)
+            self.last_elem_class = ""
+            self.last_val_class = ""
             return t
         if base_kind == "str":
-            print("vcode: string indexing not yet supported")
-            exit(1)
-        print("vcode: index on value of unknown kind")
+            self.emit(t + " =l call $vayu_str_char_at(l " + base_ssa + ", l " + idx_ssa + ")")
+            self.last_kind = "str"
+            self.last_class = ""
+            self.last_elem_class = ""
+            self.last_val_class = ""
+            return t
+        print("vcode: index on unknown-kind value")
         exit(1)
         return "0"
 
@@ -1431,11 +1574,28 @@ class Codegen:
             cur = self.ast.nodes[cur].extra
         self.last_kind = "list"
         self.last_class = ""
+        self.last_elem_class = ""
+        self.last_val_class = ""
         return lst
+
+    def gen_map_lit(self, n: Node) -> str:
+        m = self.new_temp()
+        self.emit(m + " =l call $vayu_map_new()")
+        cur = n.left
+        while cur != 0:
+            e = self.ast.nodes[cur]
+            k = self.gen_expr(e.left)
+            v = self.gen_expr(e.right)
+            self.emit("call $vayu_map_put(l " + m + ", l " + k + ", l " + v + ")")
+            cur = e.extra
+        self.last_kind = "map"
+        self.last_class = ""
+        self.last_elem_class = ""
+        self.last_val_class = ""
+        return m
 
     def gen_call(self, n: Node) -> str:
         callee = self.ast.nodes[n.left]
-        # Super call: super().__init__(args)
         if callee.kind == "Attr":
             if callee.left != 0:
                 inner = self.ast.nodes[callee.left]
@@ -1456,8 +1616,10 @@ class Codegen:
             if arg == 0:
                 print("vcode: len() requires 1 argument")
                 exit(1)
-            arg_kind = self.kind_of_expr(arg)
+            arg_kind = type_kind_of("")
+            saved = self.last_kind
             v = self.gen_expr(arg)
+            arg_kind = self.last_kind
             kind_num = -1
             if arg_kind == "str":
                 kind_num = 0
@@ -1475,8 +1637,8 @@ class Codegen:
             return t
         if name == "str":
             arg = n.right
-            arg_kind = self.kind_of_expr(arg)
             v = self.gen_expr(arg)
+            arg_kind = self.last_kind
             kind_num = 0
             if arg_kind == "bool":
                 kind_num = 1
@@ -1487,8 +1649,8 @@ class Codegen:
             return t
         if name == "int":
             arg = n.right
-            arg_kind = self.kind_of_expr(arg)
             v = self.gen_expr(arg)
+            arg_kind = self.last_kind
             if arg_kind == "str":
                 t = self.new_temp()
                 self.emit(t + " =l call $vayu_str_to_int(l " + v + ")")
@@ -1498,7 +1660,37 @@ class Codegen:
             self.last_kind = "int"
             self.last_class = ""
             return v
-        # constructor call
+        if name == "read_file":
+            arg = n.right
+            v = self.gen_expr(arg)
+            t = self.new_temp()
+            self.emit(t + " =l call $vayu_read_file(l " + v + ")")
+            self.last_kind = "str"
+            self.last_class = ""
+            return t
+        if name == "file_exists":
+            arg = n.right
+            v = self.gen_expr(arg)
+            t = self.new_temp()
+            self.emit(t + " =l call $vayu_file_exists(l " + v + ")")
+            self.last_kind = "bool"
+            self.last_class = ""
+            return t
+        if name == "args":
+            t = self.new_temp()
+            self.emit(t + " =l call $vayu_get_args()")
+            self.last_kind = "list"
+            self.last_class = ""
+            self.last_elem_class = "str"
+            self.last_val_class = ""
+            return t
+        if name == "exit":
+            arg = n.right
+            v = self.gen_expr(arg)
+            self.emit("call $vayu_exit(l " + v + ")")
+            self.last_kind = ""
+            self.last_class = ""
+            return "0"
         ci = self.find_class_idx(name)
         if ci != -1:
             args_ssa: list<str> = []
@@ -1517,8 +1709,9 @@ class Codegen:
             self.emit(t + " =l call $vayu_ctor_" + name + "(" + args_str + ")")
             self.last_kind = "obj"
             self.last_class = name
+            self.last_elem_class = ""
+            self.last_val_class = ""
             return t
-        # user function
         args_ssa: list<str> = []
         cur = n.right
         while cur != 0:
@@ -1535,6 +1728,8 @@ class Codegen:
         self.emit(t + " =l call $vayu_fn_" + name + "(" + args_str + ")")
         self.last_kind = ""
         self.last_class = ""
+        self.last_elem_class = ""
+        self.last_val_class = ""
         return t
 
     def gen_print(self, n: Node) -> str:
@@ -1594,8 +1789,11 @@ class Codegen:
         sym = "$vayu_mth_" + owner + "_" + method_name
         t = self.new_temp()
         self.emit(t + " =l call " + sym + "(" + args_str + ")")
-        self.last_kind = ""
-        self.last_class = ""
+        rt = self.find_method_return_type_str(owner, method_name)
+        self.last_kind = type_kind_of(rt)
+        self.last_class = type_class_of(rt)
+        self.last_elem_class = type_list_elem_of(rt)
+        self.last_val_class = type_map_val_of(rt)
         return t
 
     def gen_method_call(self, n: Node, callee: Node) -> str:
@@ -1603,7 +1801,6 @@ class Codegen:
         recv_class = self.last_class
         recv_kind = self.last_kind
         method = callee.value
-        # builtin dispatch
         if recv_kind == "str":
             return self.gen_str_method(recv_ssa, method, n)
         if recv_kind == "list":
@@ -1630,8 +1827,11 @@ class Codegen:
         sym = "$vayu_mth_" + owner + "_" + method
         t = self.new_temp()
         self.emit(t + " =l call " + sym + "(" + args_str + ")")
-        self.last_kind = ""
-        self.last_class = ""
+        rt = self.find_method_return_type_str(owner, method)
+        self.last_kind = type_kind_of(rt)
+        self.last_class = type_class_of(rt)
+        self.last_elem_class = type_list_elem_of(rt)
+        self.last_val_class = type_map_val_of(rt)
         return t
 
     def gen_str_method(self, recv: str, method: str, n: Node) -> str:
@@ -1741,11 +1941,17 @@ class Codegen:
             return
         if n.kind == "AnnotAssign":
             slot = self.declare_var(n.value)
+            tstr = ""
+            if n.left != 0:
+                tstr = self.ast.nodes[n.left].value
             if n.right != 0:
                 v = self.gen_expr(n.right)
                 self.emit("storel " + v + ", " + slot)
-                self.set_var_kind(n.value, self.last_kind)
-                self.set_var_class(n.value, self.last_class)
+            self.set_var_info(n.value,
+                              type_kind_of(tstr),
+                              type_class_of(tstr),
+                              type_list_elem_of(tstr),
+                              type_map_val_of(tstr))
             return
         if n.kind == "If":
             end_label = self.new_label("if_end_")
@@ -1797,12 +2003,15 @@ class Codegen:
         lhs = self.ast.nodes[n.left]
         if lhs.kind == "Name":
             v = self.gen_expr(n.right)
+            vkind = self.last_kind
+            vcls = self.last_class
+            velem = self.last_elem_class
+            vval = self.last_val_class
             slot = self.slot_for(lhs.value)
             if slot == "":
                 slot = self.declare_var(lhs.value)
             self.emit("storel " + v + ", " + slot)
-            self.set_var_kind(lhs.value, self.last_kind)
-            self.set_var_class(lhs.value, self.last_class)
+            self.set_var_info(lhs.value, vkind, vcls, velem, vval)
             return
         if lhs.kind == "Attr":
             base = self.gen_expr(lhs.left)
@@ -1914,6 +2123,7 @@ class Codegen:
             stop_expr_idx = first_arg.extra
 
         var_slot = self.declare_var(n.value)
+        self.set_var_info(n.value, "int", "", "", "")
         self.emit("storel " + start_ssa + ", " + var_slot)
 
         cond_label = self.new_label("for_cond_")
@@ -1949,7 +2159,7 @@ class Codegen:
 
         self.emit_raw(end_label)
 
-    # ---------------- functions and methods ----------------
+    # ---------------- functions / methods ----------------
     def param_names_of(self, params_idx: int) -> list<str>:
         names: list<str> = []
         cur = params_idx
@@ -1979,8 +2189,10 @@ class Codegen:
 
         saved_names = self.var_names
         saved_slots = self.var_slots
-        saved_classes = self.var_classes
         saved_kinds = self.var_kinds
+        saved_classes = self.var_classes
+        saved_elems = self.var_elem_classes
+        saved_vals = self.var_val_classes
         saved_out = self.out
         saved_temp = self.next_temp
         saved_label = self.next_label
@@ -1988,8 +2200,10 @@ class Codegen:
         saved_class = self.current_class
         self.var_names = []
         self.var_slots = []
-        self.var_classes = []
         self.var_kinds = []
+        self.var_classes = []
+        self.var_elem_classes = []
+        self.var_val_classes = []
         self.out = []
         self.next_temp = 0
         self.next_label = 0
@@ -2015,12 +2229,10 @@ class Codegen:
             self.var_names.append(pname)
             self.var_slots.append(slot)
             pt = param_types[i]
-            if self.find_class_idx(pt) != -1:
-                self.var_classes.append(pt)
-                self.var_kinds.append("obj")
-            else:
-                self.var_classes.append("")
-                self.var_kinds.append("")
+            self.var_kinds.append(type_kind_of(pt))
+            self.var_classes.append(type_class_of(pt))
+            self.var_elem_classes.append(type_list_elem_of(pt))
+            self.var_val_classes.append(type_map_val_of(pt))
             self.emit(slot + " =l alloc8 8")
             self.emit("storel %p_" + pname + ", " + slot)
             i = i + 1
@@ -2035,8 +2247,10 @@ class Codegen:
         self.out = saved_out
         self.var_names = saved_names
         self.var_slots = saved_slots
-        self.var_classes = saved_classes
         self.var_kinds = saved_kinds
+        self.var_classes = saved_classes
+        self.var_elem_classes = saved_elems
+        self.var_val_classes = saved_vals
         self.next_temp = saved_temp
         self.next_label = saved_label
         self.loop_stack = saved_loops
@@ -2059,8 +2273,10 @@ class Codegen:
 
         saved_names = self.var_names
         saved_slots = self.var_slots
-        saved_classes = self.var_classes
         saved_kinds = self.var_kinds
+        saved_classes = self.var_classes
+        saved_elems = self.var_elem_classes
+        saved_vals = self.var_val_classes
         saved_out = self.out
         saved_temp = self.next_temp
         saved_label = self.next_label
@@ -2068,8 +2284,10 @@ class Codegen:
         saved_class = self.current_class
         self.var_names = []
         self.var_slots = []
-        self.var_classes = []
         self.var_kinds = []
+        self.var_classes = []
+        self.var_elem_classes = []
+        self.var_val_classes = []
         self.out = []
         self.next_temp = 0
         self.next_label = 0
@@ -2096,16 +2314,16 @@ class Codegen:
             self.var_names.append(pname)
             self.var_slots.append(slot)
             if i == 0 and pname == "self":
-                self.var_classes.append(info.name)
                 self.var_kinds.append("obj")
+                self.var_classes.append(info.name)
+                self.var_elem_classes.append("")
+                self.var_val_classes.append("")
             else:
                 pt = param_types[i]
-                if self.find_class_idx(pt) != -1:
-                    self.var_classes.append(pt)
-                    self.var_kinds.append("obj")
-                else:
-                    self.var_classes.append("")
-                    self.var_kinds.append("")
+                self.var_kinds.append(type_kind_of(pt))
+                self.var_classes.append(type_class_of(pt))
+                self.var_elem_classes.append(type_list_elem_of(pt))
+                self.var_val_classes.append(type_map_val_of(pt))
             self.emit(slot + " =l alloc8 8")
             self.emit("storel %p_" + pname + ", " + slot)
             i = i + 1
@@ -2120,8 +2338,10 @@ class Codegen:
         self.out = saved_out
         self.var_names = saved_names
         self.var_slots = saved_slots
-        self.var_classes = saved_classes
         self.var_kinds = saved_kinds
+        self.var_classes = saved_classes
+        self.var_elem_classes = saved_elems
+        self.var_val_classes = saved_vals
         self.next_temp = saved_temp
         self.next_label = saved_label
         self.loop_stack = saved_loops
@@ -2134,7 +2354,6 @@ class Codegen:
         self.emit_raw("")
 
     def gen_class_ctor(self, info: ClassInfo) -> None:
-        # Determine ctor params
         param_names: list<str> = []
         if info.has_init:
             init_def = self.ast.nodes[info.init_decl]
@@ -2151,8 +2370,10 @@ class Codegen:
 
         saved_names = self.var_names
         saved_slots = self.var_slots
-        saved_classes = self.var_classes
         saved_kinds = self.var_kinds
+        saved_classes = self.var_classes
+        saved_elems = self.var_elem_classes
+        saved_vals = self.var_val_classes
         saved_out = self.out
         saved_temp = self.next_temp
         saved_label = self.next_label
@@ -2160,8 +2381,10 @@ class Codegen:
         saved_class = self.current_class
         self.var_names = []
         self.var_slots = []
-        self.var_classes = []
         self.var_kinds = []
+        self.var_classes = []
+        self.var_elem_classes = []
+        self.var_val_classes = []
         self.out = []
         self.next_temp = 0
         self.next_label = 0
@@ -2212,8 +2435,10 @@ class Codegen:
         self.out = saved_out
         self.var_names = saved_names
         self.var_slots = saved_slots
-        self.var_classes = saved_classes
         self.var_kinds = saved_kinds
+        self.var_classes = saved_classes
+        self.var_elem_classes = saved_elems
+        self.var_val_classes = saved_vals
         self.next_temp = saved_temp
         self.next_label = saved_label
         self.loop_stack = saved_loops
@@ -2225,7 +2450,6 @@ class Codegen:
             i = i + 1
         self.emit_raw("")
 
-    # ---------------- top level ----------------
     def gen_program(self, root_idx: int) -> None:
         self.collect_classes(root_idx)
         self.resolve_classes()
@@ -2233,13 +2457,17 @@ class Codegen:
 
         saved_vars_names = self.var_names
         saved_vars_slots = self.var_slots
-        saved_vars_classes = self.var_classes
         saved_vars_kinds = self.var_kinds
+        saved_vars_classes = self.var_classes
+        saved_vars_elems = self.var_elem_classes
+        saved_vars_vals = self.var_val_classes
         self.out = []
         self.var_names = []
         self.var_slots = []
-        self.var_classes = []
         self.var_kinds = []
+        self.var_classes = []
+        self.var_elem_classes = []
+        self.var_val_classes = []
         self.terminated = false
 
         self.emit_raw("export function $vayu_main() {")
@@ -2251,8 +2479,10 @@ class Codegen:
             slot = "%v" + name + "_slot"
             self.var_names.append(name)
             self.var_slots.append(slot)
-            self.var_classes.append("")
             self.var_kinds.append("")
+            self.var_classes.append("")
+            self.var_elem_classes.append("")
+            self.var_val_classes.append("")
             self.emit(slot + " =l alloc8 8")
             self.emit("storel 0, " + slot)
             i = i + 1
@@ -2278,7 +2508,6 @@ class Codegen:
         self.emit_raw("}")
         self.emit_raw("")
 
-        # user functions
         cur = root.left
         while cur != 0:
             n = self.ast.nodes[cur]
@@ -2286,7 +2515,6 @@ class Codegen:
                 self.gen_function(n)
             cur = n.extra
 
-        # classes: methods then ctor
         i = 0
         while i < len(self.class_infos):
             info = self.class_infos[i]
