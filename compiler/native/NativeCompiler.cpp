@@ -80,18 +80,14 @@ namespace vayu {
                 collectClasses(program);
                 for (auto& kv : modules_) collectClasses(kv.second);
 
-                // Best-effort pre-pass.  Correctness no longer depends on this
-                // finding every literal — see the final assembly step below.
+                collectFunctions(program);
+
                 collectStringLiterals(program);
                 for (auto& kv : modules_) collectStringLiterals(kv.second);
                 collectExceptionLiterals();
 
-                // Generate all code.  This may add MORE string literals to
-                // strLitData_ as expressions like  map["k"] = "v"  are lowered.
                 emitCodeBody(program);
 
-                // Assemble: data section first, then code.  By this point every
-                // literal referenced anywhere in the code has been registered.
                 std::string result;
                 if (!strLitData_.empty()) {
                     result += strLitData_;
@@ -103,7 +99,6 @@ namespace vayu {
             }
 
             void emitCodeBody(const Block& program) {
-                // ---------- $vayu_main ----------
                 resetFunctionState();
                 raw("export function $vayu_main() {");
                 raw("@start");
@@ -134,7 +129,6 @@ namespace vayu {
                 raw("}");
                 raw("");
 
-                // ---------- user functions ----------
                 for (auto& s : program.stmts) {
                     if (s->kind != StmtKind::Def) continue;
                     emitFunction(static_cast<const DefStmt*>(s.get()), nullptr, "");
@@ -149,7 +143,6 @@ namespace vayu {
                     }
                 }
 
-                // ---------- methods ----------
                 for (auto& kv : classes_) {
                     const ClassInfo& ci = kv.second;
                     for (auto& m : ci.decl->methods) {
@@ -175,6 +168,7 @@ namespace vayu {
             std::unordered_map<std::string, ClassInfo> classes_;
             std::unordered_map<std::string, int>       fieldGlobals_;
             int                                        nextFieldOffset_ = 0;
+            std::unordered_map<std::string, const DefStmt*> topFnDecls_;
 
             std::string                                  strLitData_;
             std::unordered_map<std::string, std::string> strLitLabels_;
@@ -233,10 +227,6 @@ namespace vayu {
                 }
                 return r;
             }
-
-            // =========================================================================
-            // Module loading
-            // =========================================================================
 
             bool findModuleFile(const std::string& name, std::string& pathOut) const {
                 if (!sourceDir_.empty()) {
@@ -322,10 +312,6 @@ namespace vayu {
                 }
                 currentModulePrefix_.clear();
             }
-
-            // =========================================================================
-            // String literals
-            // =========================================================================
 
             std::string internString(const std::string& s) {
                 auto it = strLitLabels_.find(s);
@@ -501,12 +487,16 @@ namespace vayu {
                 internString("AttributeError");
             }
 
-            // =========================================================================
-            // Classes
-            // =========================================================================
+            void collectFunctions(const Block& program) {
+                for (auto& s : program.stmts) {
+                    if (s->kind == StmtKind::Def) {
+                        auto* d = static_cast<const DefStmt*>(s.get());
+                        topFnDecls_[d->name] = d;
+                    }
+                }
+            }
 
             void collectClasses(const Block& program) {
-                // Pass 1: field offsets.
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Class) {
                         auto* n = static_cast<const ClassStmt*>(s.get());
@@ -519,7 +509,6 @@ namespace vayu {
                         for (auto& f : n->fields) allocFieldOffset(f.name);
                     }
                 }
-                // Pass 2: ClassInfo with own fields.
                 for (auto& stmt : program.stmts) {
                     if (stmt->kind != StmtKind::Class) continue;
                     auto* n = static_cast<const ClassStmt*>(stmt.get());
@@ -538,14 +527,12 @@ namespace vayu {
                     }
                     classes_[n->name] = std::move(ci);
                 }
-                // Pass 3: parent pointers.
                 for (auto it = classes_.begin(); it != classes_.end(); ++it) {
                     ClassInfo& ci = it->second;
                     if (ci.parentName.empty()) continue;
                     auto pit = classes_.find(ci.parentName);
                     if (pit != classes_.end()) ci.parent = &pit->second;
                 }
-                // Pass 4: inherited fields (fixed point).
                 std::unordered_map<std::string, std::vector<std::string>> ownFields;
                 for (auto it = classes_.begin(); it != classes_.end(); ++it)
                     ownFields[it->first] = it->second.fields;
@@ -569,12 +556,10 @@ namespace vayu {
                     }
                     if (!changed) break;
                 }
-                // Pass 5a: mark init owner.
                 for (auto it = classes_.begin(); it != classes_.end(); ++it) {
                     ClassInfo& ci = it->second;
                     if (ci.hasInit && !ci.initOwner) ci.initOwner = &ci;
                 }
-                // Pass 5b: propagate __init__ signature.
                 for (int pass = 0; pass < 8; ++pass) {
                     bool changed = false;
                     for (auto it = classes_.begin(); it != classes_.end(); ++it) {
@@ -587,7 +572,6 @@ namespace vayu {
                     }
                     if (!changed) break;
                 }
-                // Pass 6: offsets + size.
                 for (auto it = classes_.begin(); it != classes_.end(); ++it) {
                     ClassInfo& ci = it->second;
                     for (auto& f : ci.fields) ci.fieldOffsets[f] = fieldGlobals_.at(f);
@@ -628,10 +612,6 @@ namespace vayu {
             static void collectVarsStmt(const Stmt* s, std::unordered_set<std::string>& out);
             static void collectVarsBlock(const Block& b, std::unordered_set<std::string>& out);
 
-            // =========================================================================
-            // Expressions
-            // =========================================================================
-
             struct Val {
                 std::string ssa;
                 VType       type = VType::Unknown;
@@ -647,6 +627,50 @@ namespace vayu {
                 case VType::Bool: return 1;
                 case VType::Str:  return 2;
                 default:          return 0;
+                }
+            }
+
+            void inferFromAnnotation(const Expr* e, Val& v) {
+                if (!e) return;
+                if (e->kind == ExprKind::NameRef) {
+                    const auto* n = static_cast<const NameRefExpr*>(e);
+                    const std::string& s = n->name;
+                    if (s == "int")   v.type = VType::Int;
+                    else if (s == "bool")  v.type = VType::Bool;
+                    else if (s == "str")   v.type = VType::Str;
+                    else if (s == "float") v.type = VType::Int;
+                    else if (s == "list")  v.type = VType::List;
+                    else if (s == "map")   v.type = VType::Map;
+                    else if (classes_.count(s)) {
+                        v.type = VType::Obj;
+                        v.cls = s;
+                    }
+                    return;
+                }
+                if (e->kind == ExprKind::GenericType) {
+                    const auto* g = static_cast<const GenericTypeExpr*>(e);
+                    if (g->name == "list") {
+                        v.type = VType::List;
+                        if (!g->typeArgs.empty()) {
+                            Val inner;
+                            inferFromAnnotation(g->typeArgs[0].get(), inner);
+                            v.elemType = inner.type;
+                            v.elemCls = inner.cls;
+                        }
+                        return;
+                    }
+                    if (g->name == "map") {
+                        v.type = VType::Map;
+                        if (g->typeArgs.size() >= 2) {
+                            Val kk, vv;
+                            inferFromAnnotation(g->typeArgs[0].get(), kk);
+                            inferFromAnnotation(g->typeArgs[1].get(), vv);
+                            v.elemType = kk.type;
+                            v.elemCls = kk.cls;
+                            v.valType = vv.type;
+                        }
+                        return;
+                    }
                 }
             }
 
@@ -861,7 +885,7 @@ namespace vayu {
                         line(t + " =l call $vayu_list_get(l " + tgt.ssa + ", l " + idx.ssa + ")");
                         r.ssa = t;
                         if (tgt.elemType == VType::Unknown) {
-                            r.type = VType::Int;   // best-effort fallback
+                            r.type = VType::Int;
                         }
                         else {
                             r.type = tgt.elemType;
@@ -877,7 +901,6 @@ namespace vayu {
                         return r;
                     }
                     if (tgt.type == VType::Str) {
-                        // String indexing: return a length-1 VayuStr.
                         std::string t = newTemp();
                         line(t + " =l call $vayu_str_char_at(l " + tgt.ssa +
                             ", l " + idx.ssa + ")");
@@ -922,7 +945,7 @@ namespace vayu {
                         throw std::runtime_error(
                             "native: attribute access on non-object (type " +
                             std::to_string((int)base.type) + ") at line " +
-                            std::to_string(e->loc.line) + " in " + sourceDir_);
+                            std::to_string(e->loc.line));
                     auto ci = findClass(base.cls);
                     if (!ci) throw std::runtime_error("native: unknown class '" +
                         base.cls + "' at line " +
@@ -1024,52 +1047,6 @@ namespace vayu {
                 return VType::Unknown;
             }
 
-            /// Same as typeOfAnnotation, but also fills in `cls`, `elemType`,
-            /// `elemCls`, and `valType` for object / generic annotations.
-            void inferFromAnnotation(const Expr* e, Val& v) {
-                if (!e) return;
-                if (e->kind == ExprKind::NameRef) {
-                    const auto* n = static_cast<const NameRefExpr*>(e);
-                    const std::string& s = n->name;
-                    if (s == "int")   v.type = VType::Int;
-                    else if (s == "bool")  v.type = VType::Bool;
-                    else if (s == "str")   v.type = VType::Str;
-                    else if (s == "float") v.type = VType::Int;
-                    else if (s == "list")  v.type = VType::List;
-                    else if (s == "map")   v.type = VType::Map;
-                    else if (classes_.count(s)) {
-                        v.type = VType::Obj;
-                        v.cls = s;
-                    }
-                    return;
-                }
-                if (e->kind == ExprKind::GenericType) {
-                    const auto* g = static_cast<const GenericTypeExpr*>(e);
-                    if (g->name == "list") {
-                        v.type = VType::List;
-                        if (!g->typeArgs.empty()) {
-                            Val inner;
-                            inferFromAnnotation(g->typeArgs[0].get(), inner);
-                            v.elemType = inner.type;
-                            v.elemCls = inner.cls;
-                        }
-                        return;
-                    }
-                    if (g->name == "map") {
-                        v.type = VType::Map;
-                        if (g->typeArgs.size() >= 2) {
-                            Val kk, vv;
-                            inferFromAnnotation(g->typeArgs[0].get(), kk);
-                            inferFromAnnotation(g->typeArgs[1].get(), vv);
-                            v.elemType = kk.type;
-                            v.elemCls = kk.cls;
-                            v.valType = vv.type;
-                        }
-                        return;
-                    }
-                }
-            }
-
             std::string classNameOfAnnotation(const Expr* e) {
                 if (e && e->kind == ExprKind::NameRef) {
                     const auto* n = static_cast<const NameRefExpr*>(e);
@@ -1077,10 +1054,6 @@ namespace vayu {
                 }
                 return {};
             }
-
-            // =========================================================================
-            // Builtin methods on list / map / str
-            // =========================================================================
 
             bool tryBuiltinMethod(const std::string& recvName, const Val& recv,
                 const CallExpr* call, Val& r) {
@@ -1183,7 +1156,6 @@ namespace vayu {
                         line(t + " =l call " + fn + "(l " + recv.ssa + ", l " + sub.ssa + ")");
                         r.ssa = t; r.type = VType::Bool; return true;
                     }
-                    // ---- Phase 7A: new string methods ----
                     if (recvName == "char_at") {
                         Val i = argV(0);
                         std::string t = newTemp();
@@ -1249,17 +1221,12 @@ namespace vayu {
                 return false;
             }
 
-            // =========================================================================
-            // Calls
-            // =========================================================================
-
             Val emitCall(const CallExpr* n) {
                 Val r;
 
                 if (n->callee->kind == ExprKind::Attr) {
                     auto* attr = static_cast<const AttrExpr*>(n->callee.get());
 
-                    // ---- super().method(args) ----
                     if (attr->target->kind == ExprKind::Call) {
                         auto* inner = static_cast<const CallExpr*>(attr->target.get());
                         if (inner->callee->kind == ExprKind::NameRef &&
@@ -1372,6 +1339,7 @@ namespace vayu {
                         std::string t = newTemp();
                         line(t + " =l call " + sym + "(" + argsStr + ")");
                         r.ssa = t;
+
                         if (attr->name == "__init__") {
                             r.type = VType::Void;
                         }
@@ -1380,7 +1348,8 @@ namespace vayu {
                             if (mit != defining->methods.end() &&
                                 mit->second->returnType) {
                                 Val tmp;
-                                inferFromAnnotation(mit->second->returnType.get(), tmp);
+                                inferFromAnnotation(
+                                    mit->second->returnType.get(), tmp);
                                 r.type = tmp.type;
                                 r.cls = tmp.cls;
                                 r.elemType = tmp.elemType;
@@ -1490,7 +1459,7 @@ namespace vayu {
                 if (name == "int") {
                     Val v = emitExpr(n->args[0].value.get());
                     if (v.type == VType::Int)  return v;
-                    if (v.type == VType::Bool) return v;   // bools are 0/1 as i64
+                    if (v.type == VType::Bool) return v;
                     if (v.type == VType::Str) {
                         std::string t = newTemp();
                         line(t + " =l call $vayu_str_to_int(l " + v.ssa + ")");
@@ -1502,7 +1471,6 @@ namespace vayu {
                 }
 
                 if (name == "float") {
-                    // No floats in the native backend yet; pass numeric values through.
                     Val v = emitExpr(n->args[0].value.get());
                     return v;
                 }
@@ -1586,8 +1554,6 @@ namespace vayu {
                         line("call $vayu_print_raw(l " + v.ssa + ")");
                     }
                     else {
-                        // Fall back: format to a temp string then print raw.
-                        // For simplicity, require a str argument.
                         throw std::runtime_error(
                             "native: print_raw() requires a str argument");
                     }
@@ -1634,7 +1600,6 @@ namespace vayu {
                 }
 
                 if (name == "join") {
-                    // join(sep, list) -> str
                     Val sep = emitExpr(n->args[0].value.get());
                     Val lst = emitExpr(n->args[1].value.get());
                     std::string t = newTemp();
@@ -1694,23 +1659,21 @@ namespace vayu {
                 std::string t = newTemp();
                 line(t + " =l call $vayu_fn_" + mangle(fnName) + "(" + argsStr + ")");
                 r.ssa = t;
-                // Try to recover the declared return type from the callee.
-                const DefStmt* target = nullptr;
-                for (const auto& s : modules_[fi != fromImports_.end()
-                    ? fi->second : ""].stmts) {
-                    if (s->kind == StmtKind::Def) {
-                        auto* d = static_cast<const DefStmt*>(s.get());
-                        if (d->name == name) { target = d; break; }
-                    }
+                auto fit = topFnDecls_.find(name);
+                if (fit != topFnDecls_.end() && fit->second->returnType) {
+                    Val tmp;
+                    inferFromAnnotation(fit->second->returnType.get(), tmp);
+                    r.type = tmp.type;
+                    r.cls = tmp.cls;
+                    r.elemType = tmp.elemType;
+                    r.elemCls = tmp.elemCls;
+                    r.valType = tmp.valType;
                 }
-                (void)target;
-                r.type = VType::Unknown;
+                else {
+                    r.type = VType::Unknown;
+                }
                 return r;
             }
-
-            // =========================================================================
-            // Statements
-            // =========================================================================
 
             void emitStmt(const Stmt* s) {
                 if (!s) return;
@@ -2340,9 +2303,6 @@ namespace vayu {
                 currentModulePrefix_ = std::move(savedModPrefix);
             }
 
-            // Emit a branch-condition expression as a `w` SSA value suitable for
-            // `jnz`.  When the expression is itself a comparison, we bypass the
-            // usual i64 round-trip and emit the compare directly at width `w`.
             std::string emitCond(const Expr* e) {
                 if (!e) return "0";
 
@@ -2478,10 +2438,6 @@ namespace vayu {
 
     } // anonymous namespace
 
-    // ===========================================================================
-    // Runtime C — Phase 7A adds file I/O, process, args, and string helpers.
-    // ===========================================================================
-
     static const char* kRuntimeC = R"C(
 #include <stdio.h>
 #include <stdlib.h>
@@ -2499,11 +2455,9 @@ typedef struct { VayuStr* typeName; VayuStr* message; } VayuExc;
 void vayu_raise_str(VayuStr* typeName, VayuStr* msg);
 int64_t vayu_str_to_int(VayuStr* s);
 
-// ---- process-global argv (set once at startup) ----------------------------
 static int    g_argc = 0;
 static char** g_argv = NULL;
 
-// ---- allocation -----------------------------------------------------------
 void* vayu_alloc(int64_t size) {
     void* p = malloc((size_t)size);
     if (!p) { fprintf(stderr, "vayu: oom\n"); exit(1); }
@@ -2521,7 +2475,6 @@ static VayuStr* vayu_mkstr_c(const char* cstr) {
     return vayu_mkstr(cstr, (int64_t)strlen(cstr));
 }
 
-// ---- printing -------------------------------------------------------------
 void vayu_print_int(long long v) { printf("%lld\n", v); }
 void vayu_print_bool(long long v) { printf("%s\n", v ? "true" : "false"); }
 void vayu_print_int_noln(long long v) { printf("%lld", v); }
@@ -2535,8 +2488,6 @@ void vayu_print_str_noln(VayuStr* s) {
     fwrite(s->data, 1, (size_t)s->len, stdout);
 }
 
-
-// ---- input primitives -----------------------------------------------------
 void vayu_print_raw(VayuStr* s) {
     fwrite(s->data, 1, (size_t)s->len, stdout);
     fflush(stdout);
@@ -2554,7 +2505,6 @@ VayuStr* vayu_read_line(void) {
         free(buf);
         return vayu_mkstr("", 0);
     }
-    // Strip a trailing \r if present (Windows line endings).
     if (len > 0 && buf[len - 1] == '\r') --len;
     VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + len + 1);
     s->len = (int64_t)len;
@@ -2585,7 +2535,6 @@ int64_t vayu_read_int(void) {
     return vayu_str_to_int(s);
 }
 
-// ---- Python-style input ------------------------------------------------
 VayuStr* vayu_input_plain(void) {
     return vayu_read_line();
 }
@@ -2596,7 +2545,6 @@ VayuStr* vayu_input_prompt(VayuStr* prompt) {
     return vayu_read_line();
 }
 
-// ---- string concat helper for building diagnostic messages ---------------
 static VayuStr* vayu_concat_c(const char* prefix, VayuStr* s) {
     int64_t plen = (int64_t)strlen(prefix);
     VayuStr* r = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)(plen + s->len) + 1);
@@ -2607,7 +2555,6 @@ static VayuStr* vayu_concat_c(const char* prefix, VayuStr* s) {
     return r;
 }
 
-// ---- strings --------------------------------------------------------------
 VayuStr* vayu_str_concat(VayuStr* a, VayuStr* b) {
     int64_t n = a->len + b->len;
     VayuStr* s = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)n + 1);
@@ -2674,7 +2621,6 @@ int64_t vayu_str_ends_with(VayuStr* s, VayuStr* p) {
     return memcmp(s->data + (s->len - p->len), p->data, (size_t)p->len) == 0;
 }
 
-// ---- NEW: string indexing, slicing, split/join/replace --------------------
 VayuStr* vayu_str_char_at(VayuStr* s, int64_t i) {
     if (i < 0) i += s->len;
     if (i < 0 || i >= s->len) {
@@ -2693,10 +2639,8 @@ VayuStr* vayu_str_substr(VayuStr* s, int64_t start, int64_t end) {
 }
 VayuStr* vayu_str_replace(VayuStr* s, VayuStr* from, VayuStr* to) {
     if (from->len == 0) {
-        // Python returns the original if `from` is empty.
         return vayu_mkstr(s->data, s->len);
     }
-    // Count occurrences.
     int64_t count = 0;
     for (int64_t i = 0; i + from->len <= s->len; ) {
         if (memcmp(s->data + i, from->data, (size_t)from->len) == 0) {
@@ -2753,7 +2697,6 @@ int64_t vayu_str_is_space(VayuStr* s) {
     return 1;
 }
 int64_t vayu_str_to_int(VayuStr* s) {
-    // Simple decimal parse; leading whitespace allowed.
     int64_t n = 0;
     int64_t i = 0;
     int     neg = 0;
@@ -2769,7 +2712,6 @@ int64_t vayu_str_to_int(VayuStr* s) {
     return neg ? -n : n;
 }
 
-// ---- NEW: ord/chr --------------------------------------------------------
 int64_t vayu_ord(VayuStr* s) {
     if (s->len != 1) {
         vayu_raise_str(vayu_mkstr_c("ValueError"),
@@ -2786,7 +2728,6 @@ VayuStr* vayu_chr(int64_t n) {
     return vayu_mkstr(&c, 1);
 }
 
-// ---- lists ----------------------------------------------------------------
 VayuList* vayu_list_new() {
     VayuList* l = (VayuList*)malloc(sizeof(VayuList));
     l->len = 0; l->cap = 4;
@@ -2851,11 +2792,9 @@ void vayu_list_remove(VayuList* l, int64_t v) {
     }
 }
 
-// ---- NEW: string split/join ----------------------------------------------
 VayuList* vayu_str_split(VayuStr* s, VayuStr* sep) {
     VayuList* out = vayu_list_new();
     if (sep->len == 0) {
-        // Split into individual characters.
         for (int64_t i = 0; i < s->len; ++i)
             vayu_list_push(out, (int64_t)vayu_mkstr(s->data + i, 1));
         return out;
@@ -2878,7 +2817,6 @@ VayuList* vayu_str_split(VayuStr* s, VayuStr* sep) {
     return out;
 }
 VayuStr* vayu_str_join(VayuStr* sep, VayuList* parts) {
-    // Compute total size.
     int64_t total = 0;
     for (int64_t i = 0; i < parts->len; ++i) {
         VayuStr* p = (VayuStr*)parts->items[i];
@@ -2901,7 +2839,6 @@ VayuStr* vayu_str_join(VayuStr* sep, VayuList* parts) {
     return r;
 }
 
-// ---- maps -----------------------------------------------------------------
 static uint64_t hash_str(VayuStr* s) {
     uint64_t h = 1469598103934665603ULL;
     for (int64_t i = 0; i < s->len; ++i) { h ^= (uint8_t)s->data[i]; h *= 1099511628211ULL; }
@@ -2971,7 +2908,6 @@ VayuList* vayu_map_keys(VayuMap* m) {
     return l;
 }
 
-// ---- generic helpers ------------------------------------------------------
 int64_t vayu_len(int64_t v, int64_t kind) {
     switch (kind) {
         case 0: return vayu_str_len((VayuStr*)v);
@@ -3020,7 +2956,6 @@ void vayu_print_map(VayuMap* m, int64_t vk) {
     vayu_print_map_noln(m, vk); putchar('\n');
 }
 
-// ---- arithmetic -----------------------------------------------------------
 long long vayu_floordiv(long long a, long long b) {
     if (b == 0) {
         vayu_raise_str(vayu_mkstr_c("ZeroDivisionError"),
@@ -3040,9 +2975,7 @@ long long vayu_mod(long long a, long long b) {
     return r;
 }
 
-// ---- NEW: file I/O -------------------------------------------------------
 VayuStr* vayu_read_file(VayuStr* path) {
-    // NUL-terminate the path into a stack buffer.
     char buf[4096];
     int64_t n = path->len < 4095 ? path->len : 4095;
     memcpy(buf, path->data, (size_t)n);
@@ -3088,7 +3021,6 @@ int64_t vayu_file_exists(VayuStr* path) {
     return 1;
 }
 
-// ---- NEW: process + args + exit ------------------------------------------
 VayuList* vayu_get_args(void) {
     VayuList* l = vayu_list_new();
     for (int i = 1; i < g_argc; ++i) {
@@ -3108,7 +3040,6 @@ void vayu_exit(int64_t code) {
     exit((int)code);
 }
 
-// ---- exceptions -----------------------------------------------------------
 #define VAYU_MAX_TRY 64
 
 static jmp_buf  g_jmpBufs[VAYU_MAX_TRY];
