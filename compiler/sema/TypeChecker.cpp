@@ -103,6 +103,16 @@ namespace vayu {
         B("read_all", Types::Function({}, Types::Str()));
         B("read_int", Types::Function({}, Types::Int()));
         B("print_raw", Types::Function({ Types::Str() }, Types::None()));
+
+        // ---- Phase 10 builtin modules (name-only registration) ----
+        // The compiler's native backend handles fs / time / json / regex /
+        // thread directly.  The type checker just needs to know these names
+        // exist and be liberal about their members.
+        B("fs", Types::Any());
+        B("time", Types::Any());
+        B("json", Types::Any());
+        B("regex", Types::Any());
+        B("thread", Types::Any());
     }
 
     void TypeChecker::installBuiltinExceptions() {
@@ -299,7 +309,7 @@ namespace vayu {
         if (n == "None")  return Types::None();
         if (n == "any")   return Types::Any();
         if (n == "list")  return Types::List(Types::Any());
-        if (n == "map")   return Types::Map(Types::Str(), Types::Any()); 
+        if (n == "map")   return Types::Map(Types::Str(), Types::Any());
 
         auto it = structs_.find(n);
         if (it != structs_.end()) return it->second;
@@ -1064,9 +1074,24 @@ namespace vayu {
             TypePtr callee = checkExpr(n->callee.get());
 
             // Methods with optional trailing args: split/strip.
+            // But not for builtin modules — regex.split takes 2 args, and
+            // the native backend routes .split calls to regex_split, not to
+            // the str.split rule.  Skip this special-case when the receiver
+            // is a builtin module name.
             if (n->callee->kind == ExprKind::Attr) {
                 auto* attr = static_cast<const AttrExpr*>(n->callee.get());
-                if (attr->name == "split" || attr->name == "strip") {
+                bool fromBuiltinModule = false;
+                if (attr->target->kind == ExprKind::NameRef) {
+                    const auto* tgt = static_cast<const NameRefExpr*>(
+                        attr->target.get());
+                    const std::string& tname = tgt->name;
+                    if (tname == "fs" || tname == "time" || tname == "json" ||
+                        tname == "regex" || tname == "thread") {
+                        fromBuiltinModule = true;
+                    }
+                }
+                if (!fromBuiltinModule &&
+                    (attr->name == "split" || attr->name == "strip")) {
                     std::vector<TypePtr> argTypes;
                     for (auto& a : n->args)
                         argTypes.push_back(checkExpr(a.value.get()));

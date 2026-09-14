@@ -1,0 +1,39 @@
+import json
+
+src = "{\"name\":\"Vayu\",\"age\":3,\"tags\":[\"fast\",\"safe\"],\"ok\":true}"
+v = json.parse(src)
+
+print(json.type(v))
+print(json.has(v, "name"))
+print(json.has(v, "nope"))
+print(json.len(v))
+print(json.as_str(json.get(v, "name")))
+print(json.as_int(json.get(v, "age")))
+
+tags = json.get(v, "tags")
+print(json.is_list(tags))
+print(json.len(tags))
+print(json.as_str(json.index(tags, 0)))
+print(json.as_str(json.index(tags, 1)))
+
+print(json.is_bool(json.get(v, "ok")))
+print(json.as_bool(json.get(v, "ok")))
+
+keys = json.keys(v)
+print(json.len(v) == len(keys))
+
+# round-trip a constructed object
+n = json.make_int(42)
+s = json.stringify(n)
+print(s)
+
+b = json.make_bool(true)
+print(json.stringify(b))
+
+sn = json.make_str("hi")
+print(json.stringify(sn))
+
+# parse-then-stringify a scalar
+n2 = json.parse("7")
+print(json.as_int(n2))
+print(json.stringify(n2))

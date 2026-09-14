@@ -1,0 +1,19 @@
+import thread
+
+def worker(n: int) -> int:
+    return n * n
+
+t = thread.spawn("worker", 7)
+result = thread.join(t)
+print(result)
+
+t2 = thread.spawn("worker", 12)
+print(thread.join(t2))
+
+main_id = thread.id()
+print(main_id != 0)
+
+m = thread.mutex_new()
+thread.lock(m)
+thread.unlock(m)
+print(true)

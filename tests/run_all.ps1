@@ -35,7 +35,10 @@ $skip = @(
     "stdlib.vyu",       # uses math module, unsupported in native
     "native_collections.vyu",  # prints whole maps; iteration order is impl-defined
     "fs_test.vyu",             # native-only; interp/VM don't yet support the fs module
-    "time_test.vyu"            # native-only; same reason
+    "time_test.vyu",           # native-only; same reason
+    "json_test.vyu",           # native-only; same reason
+    "regex_test.vyu",          # native-only; same reason
+    "thread_test.vyu"          # native-only; same reason
 )
 
 function Invoke-Backend {

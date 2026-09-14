@@ -416,7 +416,24 @@ namespace vayu {
         ExprPtr e = parsePrimary();
         for (;;) {
             if (match(TokenType::Dot)) {
-                Token name = expect(TokenType::Identifier, "attribute name after '.'");
+                // Accept any identifier-shaped token (including keywords) as
+                // the attribute name.  Keywords like `spawn`, `wait`, `new`,
+                // `ref`, `unique` are common method names.
+                Token name = peek();
+                if (name.lexeme.empty()) {
+                    throw ParseError("expected attribute name after '.'",
+                        name.location);
+                }
+                char c0 = name.lexeme[0];
+                bool identish = (c0 == '_' ||
+                    (c0 >= 'a' && c0 <= 'z') ||
+                    (c0 >= 'A' && c0 <= 'Z'));
+                if (!identish) {
+                    throw ParseError(
+                        std::string("expected attribute name after '.', found '") +
+                        name.lexeme + "'", name.location);
+                }
+                advance();
                 e = std::make_unique<AttrExpr>(std::move(e), name.lexeme, name.location);
             }
             else if (check(TokenType::LParen)) {

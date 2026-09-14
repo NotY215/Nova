@@ -1,0 +1,38 @@
+import regex
+
+print(regex.match("abc", "abc"))
+print(regex.match("abc", "abcd"))
+print(regex.match("a.c", "abc"))
+print(regex.match("a.c", "abbc"))
+
+print(regex.match("a*", ""))
+print(regex.match("a*", "aaa"))
+print(regex.match("a+", ""))
+print(regex.match("a+", "aa"))
+print(regex.match("ab?c", "ac"))
+print(regex.match("ab?c", "abc"))
+
+print(regex.match("^hello$", "hello"))
+print(regex.match("^hello$", "hello!"))
+
+print(regex.match("[0-9]+", "123"))
+print(regex.match("[0-9]+", "12a"))
+print(regex.match("[^0-9]+", "abc"))
+print(regex.match("\\d+", "42"))
+print(regex.match("\\w+", "abc_123"))
+
+print(regex.search("world", "hello world"))
+print(regex.search("xyz", "hello world"))
+
+matches = regex.find_all("[0-9]+", "a1 b22 c333")
+print(len(matches))
+print(matches[0])
+print(matches[2])
+
+r = regex.replace("[0-9]+", "a1 b22 c333", "#")
+print(r)
+
+parts = regex.fields(",\\s*", "one, two,three, four")
+print(len(parts))
+print(parts[0])
+print(parts[3])

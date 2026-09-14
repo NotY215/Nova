@@ -278,13 +278,15 @@ namespace vayu {
                     if (s->kind == StmtKind::Import) {
                         auto* n = static_cast<const ImportStmt*>(s.get());
                         if (n->moduleName != "fs" && n->moduleName != "time" &&
-                            !modules_.count(n->moduleName))
+                            n->moduleName != "json" && n->moduleName != "regex" &&
+                            n->moduleName != "thread" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                     }
                     else if (s->kind == StmtKind::FromImport) {
                         auto* n = static_cast<const FromImportStmt*>(s.get());
                         if (n->moduleName != "fs" && n->moduleName != "time" &&
-                            !modules_.count(n->moduleName))
+                            n->moduleName != "json" && n->moduleName != "regex" &&
+                            n->moduleName != "thread" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                         for (auto& item : n->items) {
                             const std::string& local = item.alias.empty() ? item.name : item.alias;
@@ -1692,6 +1694,240 @@ namespace vayu {
                 throw std::runtime_error("native: time has no method '" + m + "'");
             }
 
+            Val emitJsonCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+                auto a0 = [&]() { return emitExpr(n->args[0].value.get()); };
+                auto a1 = [&]() { return emitExpr(n->args[1].value.get()); };
+
+                if (m == "parse") {
+                    Val s = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_parse(l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Json";
+                    return r;
+                }
+                if (m == "stringify") {
+                    Val v = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_stringify(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "get") {
+                    Val v = a0(); Val k = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_get(l " + v.ssa + ", l " + k.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Json";
+                    return r;
+                }
+                if (m == "index") {
+                    Val v = a0(); Val i = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_index(l " + v.ssa + ", l " + i.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Json";
+                    return r;
+                }
+                if (m == "as_int") {
+                    Val v = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_as_int(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "as_str") {
+                    Val v = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_as_str(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "as_bool") {
+                    Val v = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_as_bool(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+                if (m == "len") {
+                    Val v = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_len(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "has") {
+                    Val v = a0(); Val k = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_has(l " + v.ssa + ", l " + k.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+                if (m == "type") {
+                    Val v = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_type(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "is_null" || m == "is_int" || m == "is_str" ||
+                    m == "is_bool" || m == "is_list" || m == "is_map") {
+                    Val v = a0();
+                    std::string fn;
+                    if (m == "is_null") fn = "$vayu_json_is_null";
+                    else if (m == "is_int")  fn = "$vayu_json_is_int";
+                    else if (m == "is_str")  fn = "$vayu_json_is_str";
+                    else if (m == "is_bool") fn = "$vayu_json_is_bool";
+                    else if (m == "is_list") fn = "$vayu_json_is_list";
+                    else                     fn = "$vayu_json_is_map";
+                    std::string t = newTemp();
+                    line(t + " =l call " + fn + "(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+                if (m == "keys") {
+                    Val v = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_keys(l " + v.ssa + ")");
+                    r.ssa = t; r.type = VType::List; r.elemType = VType::Str;
+                    return r;
+                }
+                if (m == "make_null") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_make_null()");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Json";
+                    return r;
+                }
+                if (m == "make_int") {
+                    Val x = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_make_int(l " + x.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Json";
+                    return r;
+                }
+                if (m == "make_str") {
+                    Val x = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_make_str(l " + x.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Json";
+                    return r;
+                }
+                if (m == "make_bool") {
+                    Val x = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_json_make_bool(l " + x.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Json";
+                    return r;
+                }
+                throw std::runtime_error("native: json has no method '" + m + "'");
+            }
+            Val emitRegexCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+                auto a0 = [&]() { return emitExpr(n->args[0].value.get()); };
+                auto a1 = [&]() { return emitExpr(n->args[1].value.get()); };
+
+                if (m == "match") {
+                    Val p = a0(); Val s = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_regex_match(l " + p.ssa + ", l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+                if (m == "search") {
+                    Val p = a0(); Val s = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_regex_search(l " + p.ssa + ", l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "find_all") {
+                    Val p = a0(); Val s = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_regex_find_all(l " + p.ssa + ", l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::List; r.elemType = VType::Str;
+                    return r;
+                }
+                if (m == "replace") {
+                    Val p = a0(); Val s = a1();
+                    Val repl = emitExpr(n->args[2].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_regex_replace(l " + p.ssa + ", l " + s.ssa +
+                        ", l " + repl.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "fields") {
+                    Val p = a0(); Val s = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_regex_split(l " + p.ssa + ", l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::List; r.elemType = VType::Str;
+                    return r;
+                }
+                throw std::runtime_error("native: regex has no method '" + m + "'");
+            }
+            Val emitThreadCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+
+                if (m == "spawn") {
+                    if (n->args.size() != 2)
+                        throw std::runtime_error("native: thread.spawn expects (name, arg)");
+                    if (n->args[0].value->kind != ExprKind::StringLit)
+                        throw std::runtime_error(
+                            "native: thread.spawn first argument must be a string literal");
+                    const auto* sl = static_cast<const StringLitExpr*>(
+                        n->args[0].value.get());
+                    const std::string& fnName = sl->value;
+                    auto fit = topFnDecls_.find(fnName);
+                    if (fit == topFnDecls_.end())
+                        throw std::runtime_error(
+                            "native: thread.spawn: no function named '" + fnName + "'");
+                    if (fit->second->params.size() != 1)
+                        throw std::runtime_error(
+                            "native: thread.spawn: '" + fnName +
+                            "' must take exactly one parameter");
+                    Val arg = emitExpr(n->args[1].value.get());
+                    std::string sym = "$vayu_fn_" + mangle(fnName);
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_thread_spawn(l " + sym +
+                        ", l " + arg.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Thread";
+                    return r;
+                }
+                if (m == "join") {
+                    Val h = emitExpr(n->args[0].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_thread_join(l " + h.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "id") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_thread_id()");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "mutex_new") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_mutex_new()");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Mutex";
+                    return r;
+                }
+                if (m == "lock") {
+                    Val h = emitExpr(n->args[0].value.get());
+                    line("call $vayu_mutex_lock(l " + h.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "unlock") {
+                    Val h = emitExpr(n->args[0].value.get());
+                    line("call $vayu_mutex_unlock(l " + h.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                throw std::runtime_error("native: thread has no method '" + m + "'");
+            }
 
             Val emitCall(const CallExpr* n) {
                 Val r;
@@ -1787,6 +2023,15 @@ namespace vayu {
                         }
                         if (tn0->name == "time") {
                             return emitTimeCall(n, attr);
+                        }
+                        if (tn0->name == "json") {
+                            return emitJsonCall(n, attr);
+                        }
+                        if (tn0->name == "regex") {
+                            return emitRegexCall(n, attr);
+                        }
+                        if (tn0->name == "thread") {
+                            return emitThreadCall(n, attr);
                         }
                     }
 
@@ -2994,12 +3239,16 @@ namespace vayu {
 #include <setjmp.h>
 #include <ctype.h>
 #include <time.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
 #ifdef _WIN32
 #  include <direct.h>
 #  include <windows.h>
+#else
+#  include <pthread.h>
+#  include <unistd.h>
 #endif
 
 typedef struct { int64_t len; char data[]; } VayuStr;
@@ -3947,6 +4196,718 @@ VayuStr* vayu_time_format(int64_t unix_secs, VayuStr* fmt) {
     char out[512];
     size_t len = strftime(out, sizeof(out), fmtbuf, &tmv);
     return vayu_mkstr(out, (int64_t)len);
+}
+
+// ---- Phase 10.3: json module ----
+// A JSON value is a tagged box.  Tags:
+//   0 null   1 bool   2 int   3 str   4 array   5 object
+// For 3/4/5, `data` is a pointer to the corresponding Vayu runtime object.
+
+typedef struct VayuJsonValue {
+    int32_t tag;
+    int32_t pad;
+    int64_t data;
+} VayuJsonValue;
+
+typedef struct { const char* s; int64_t n; int64_t i; } JsonParser;
+
+static VayuJsonValue* jp_new(int32_t tag, int64_t data) {
+    VayuJsonValue* v = (VayuJsonValue*)malloc(sizeof(VayuJsonValue));
+    v->tag = tag; v->pad = 0; v->data = data;
+    return v;
+}
+
+static void jp_skip_ws(JsonParser* p) {
+    while (p->i < p->n) {
+        char c = p->s[p->i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') p->i++;
+        else break;
+    }
+}
+
+static VayuJsonValue* jp_parse_value(JsonParser* p);
+
+static VayuJsonValue* jp_parse_string(JsonParser* p) {
+    p->i++;
+    size_t cap = 32, len = 0;
+    char* buf = (char*)malloc(cap);
+    while (p->i < p->n) {
+        unsigned char c = (unsigned char)p->s[p->i];
+        if (c == '"') { p->i++; break; }
+        if (c == '\\') {
+            p->i++;
+            if (p->i >= p->n) break;
+            char e = p->s[p->i++];
+            if (e == 'u') {
+                if (p->i + 4 > p->n) continue;
+                unsigned int cp = 0;
+                for (int k = 0; k < 4; k++) {
+                    char h = p->s[p->i++];
+                    cp <<= 4;
+                    if (h >= '0' && h <= '9') cp |= (unsigned)(h - '0');
+                    else if (h >= 'a' && h <= 'f') cp |= (unsigned)(h - 'a' + 10);
+                    else if (h >= 'A' && h <= 'F') cp |= (unsigned)(h - 'A' + 10);
+                }
+                if (len + 5 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                if (cp < 0x80) buf[len++] = (char)cp;
+                else if (cp < 0x800) {
+                    buf[len++] = (char)(0xC0 | (cp >> 6));
+                    buf[len++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    buf[len++] = (char)(0xE0 | (cp >> 12));
+                    buf[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    buf[len++] = (char)(0x80 | (cp & 0x3F));
+                }
+                continue;
+            }
+            char out;
+            switch (e) {
+                case 'n': out = '\n'; break;
+                case 't': out = '\t'; break;
+                case 'r': out = '\r'; break;
+                case 'b': out = '\b'; break;
+                case 'f': out = '\f'; break;
+                case '"': out = '"'; break;
+                case '\\': out = '\\'; break;
+                case '/': out = '/'; break;
+                default:  out = e; break;
+            }
+            if (len + 2 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+            buf[len++] = out;
+            continue;
+        }
+        if (len + 2 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        buf[len++] = (char)c;
+        p->i++;
+    }
+    VayuStr* s = vayu_mkstr(buf, (int64_t)len);
+    free(buf);
+    return jp_new(3, (int64_t)s);
+}
+
+static VayuJsonValue* jp_parse_number(JsonParser* p) {
+    int neg = 0;
+    if (p->i < p->n && p->s[p->i] == '-') { neg = 1; p->i++; }
+    int64_t n = 0;
+    while (p->i < p->n && p->s[p->i] >= '0' && p->s[p->i] <= '9') {
+        n = n * 10 + (p->s[p->i] - '0');
+        p->i++;
+    }
+    if (p->i < p->n && p->s[p->i] == '.') {
+        p->i++;
+        while (p->i < p->n && p->s[p->i] >= '0' && p->s[p->i] <= '9') p->i++;
+    }
+    if (p->i < p->n && (p->s[p->i] == 'e' || p->s[p->i] == 'E')) {
+        p->i++;
+        if (p->i < p->n && (p->s[p->i] == '+' || p->s[p->i] == '-')) p->i++;
+        while (p->i < p->n && p->s[p->i] >= '0' && p->s[p->i] <= '9') p->i++;
+    }
+    if (neg) n = -n;
+    return jp_new(2, n);
+}
+
+static VayuJsonValue* jp_parse_array(JsonParser* p) {
+    p->i++;
+    VayuList* lst = vayu_list_new();
+    jp_skip_ws(p);
+    if (p->i < p->n && p->s[p->i] == ']') {
+        p->i++;
+        return jp_new(4, (int64_t)lst);
+    }
+    while (p->i < p->n) {
+        jp_skip_ws(p);
+        VayuJsonValue* v = jp_parse_value(p);
+        vayu_list_push(lst, (int64_t)v);
+        jp_skip_ws(p);
+        if (p->i < p->n && p->s[p->i] == ',') { p->i++; continue; }
+        if (p->i < p->n && p->s[p->i] == ']') { p->i++; break; }
+        break;
+    }
+    return jp_new(4, (int64_t)lst);
+}
+
+static VayuJsonValue* jp_parse_object(JsonParser* p) {
+    p->i++;
+    VayuMap* m = vayu_map_new();
+    jp_skip_ws(p);
+    if (p->i < p->n && p->s[p->i] == '}') {
+        p->i++;
+        return jp_new(5, (int64_t)m);
+    }
+    while (p->i < p->n) {
+        jp_skip_ws(p);
+        if (p->i >= p->n || p->s[p->i] != '"') break;
+        VayuJsonValue* k = jp_parse_string(p);
+        VayuStr* key = (VayuStr*)k->data;
+        free(k);
+        jp_skip_ws(p);
+        if (p->i < p->n && p->s[p->i] == ':') p->i++;
+        jp_skip_ws(p);
+        VayuJsonValue* v = jp_parse_value(p);
+        vayu_map_put(m, key, (int64_t)v);
+        jp_skip_ws(p);
+        if (p->i < p->n && p->s[p->i] == ',') { p->i++; continue; }
+        if (p->i < p->n && p->s[p->i] == '}') { p->i++; break; }
+        break;
+    }
+    return jp_new(5, (int64_t)m);
+}
+
+static VayuJsonValue* jp_parse_value(JsonParser* p) {
+    jp_skip_ws(p);
+    if (p->i >= p->n) return jp_new(0, 0);
+    char c = p->s[p->i];
+    if (c == 'n' && p->i + 4 <= p->n && strncmp(p->s + p->i, "null", 4) == 0) {
+        p->i += 4; return jp_new(0, 0);
+    }
+    if (c == 't' && p->i + 4 <= p->n && strncmp(p->s + p->i, "true", 4) == 0) {
+        p->i += 4; return jp_new(1, 1);
+    }
+    if (c == 'f' && p->i + 5 <= p->n && strncmp(p->s + p->i, "false", 5) == 0) {
+        p->i += 5; return jp_new(1, 0);
+    }
+    if (c == '"') return jp_parse_string(p);
+    if (c == '[') return jp_parse_array(p);
+    if (c == '{') return jp_parse_object(p);
+    if (c == '-' || (c >= '0' && c <= '9')) return jp_parse_number(p);
+    return jp_new(0, 0);
+}
+
+VayuJsonValue* vayu_json_parse(VayuStr* s) {
+    JsonParser p;
+    p.s = s->data;
+    p.n = s->len;
+    p.i = 0;
+    return jp_parse_value(&p);
+}
+
+static void vayu_json_stringify_to(VayuJsonValue* v, VayuList* chunks) {
+    if (!v) { vayu_list_push(chunks, (int64_t)vayu_mkstr_c("null")); return; }
+    if (v->tag == 0) { vayu_list_push(chunks, (int64_t)vayu_mkstr_c("null")); return; }
+    if (v->tag == 1) {
+        vayu_list_push(chunks, (int64_t)vayu_mkstr_c(v->data ? "true" : "false"));
+        return;
+    }
+    if (v->tag == 2) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "%lld", (long long)v->data);
+        vayu_list_push(chunks, (int64_t)vayu_mkstr(buf, n));
+        return;
+    }
+    if (v->tag == 3) {
+        VayuStr* s = (VayuStr*)v->data;
+        size_t cap = (size_t)s->len + 16, len = 0;
+        char* buf = (char*)malloc(cap);
+        buf[len++] = '"';
+        for (int64_t i = 0; i < s->len; i++) {
+            unsigned char c = (unsigned char)s->data[i];
+            const char* esc = NULL;
+            switch (c) {
+                case '"':  esc = "\\\""; break;
+                case '\\': esc = "\\\\"; break;
+                case '\n': esc = "\\n";  break;
+                case '\r': esc = "\\r";  break;
+                case '\t': esc = "\\t";  break;
+                case '\b': esc = "\\b";  break;
+                case '\f': esc = "\\f";  break;
+            }
+            if (esc) {
+                while (len + 4 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                buf[len++] = esc[0]; buf[len++] = esc[1];
+            } else if (c < 0x20) {
+                while (len + 8 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                len += (size_t)snprintf(buf + len, cap - len, "\\u%04x", c);
+            } else {
+                while (len + 2 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+                buf[len++] = (char)c;
+            }
+        }
+        buf[len++] = '"';
+        VayuStr* out = vayu_mkstr(buf, (int64_t)len);
+        free(buf);
+        vayu_list_push(chunks, (int64_t)out);
+        return;
+    }
+    if (v->tag == 4) {
+        VayuList* lst = (VayuList*)v->data;
+        vayu_list_push(chunks, (int64_t)vayu_mkstr_c("["));
+        for (int64_t i = 0; i < lst->len; i++) {
+            if (i) vayu_list_push(chunks, (int64_t)vayu_mkstr_c(","));
+            vayu_json_stringify_to((VayuJsonValue*)lst->items[i], chunks);
+        }
+        vayu_list_push(chunks, (int64_t)vayu_mkstr_c("]"));
+        return;
+    }
+    if (v->tag == 5) {
+        VayuMap* m = (VayuMap*)v->data;
+        vayu_list_push(chunks, (int64_t)vayu_mkstr_c("{"));
+        int64_t printed = 0;
+        for (int64_t i = 0; i < m->cap; i++) {
+            if (!m->entries[i].used) continue;
+            if (printed) vayu_list_push(chunks, (int64_t)vayu_mkstr_c(","));
+            VayuJsonValue tmp;
+            tmp.tag = 3; tmp.pad = 0; tmp.data = (int64_t)m->entries[i].key;
+            vayu_json_stringify_to(&tmp, chunks);
+            vayu_list_push(chunks, (int64_t)vayu_mkstr_c(":"));
+            vayu_json_stringify_to((VayuJsonValue*)m->entries[i].value, chunks);
+            printed++;
+        }
+        vayu_list_push(chunks, (int64_t)vayu_mkstr_c("}"));
+        return;
+    }
+    vayu_list_push(chunks, (int64_t)vayu_mkstr_c("null"));
+}
+
+VayuStr* vayu_json_stringify(VayuJsonValue* v) {
+    VayuList* chunks = vayu_list_new();
+    vayu_json_stringify_to(v, chunks);
+    int64_t total = 0;
+    for (int64_t i = 0; i < chunks->len; i++)
+        total += ((VayuStr*)chunks->items[i])->len;
+    VayuStr* out = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)total + 1);
+    out->len = total;
+    int64_t op = 0;
+    for (int64_t i = 0; i < chunks->len; i++) {
+        VayuStr* c = (VayuStr*)chunks->items[i];
+        memcpy(out->data + op, c->data, (size_t)c->len);
+        op += c->len;
+    }
+    out->data[total] = 0;
+    return out;
+}
+
+VayuJsonValue* vayu_json_get(VayuJsonValue* v, VayuStr* key) {
+    if (!v || v->tag != 5) {
+        vayu_raise_str(vayu_mkstr_c("RuntimeError"),
+                       vayu_mkstr_c("json.get: value is not an object"));
+    }
+    VayuMapEntry* e = map_find((VayuMap*)v->data, key);
+    if (!e) vayu_raise_str(vayu_mkstr_c("KeyError"), key);
+    return (VayuJsonValue*)e->value;
+}
+
+VayuJsonValue* vayu_json_index(VayuJsonValue* v, int64_t i) {
+    if (!v || v->tag != 4) {
+        vayu_raise_str(vayu_mkstr_c("RuntimeError"),
+                       vayu_mkstr_c("json.index: value is not an array"));
+    }
+    VayuList* lst = (VayuList*)v->data;
+    if (i < 0) i += lst->len;
+    if (i < 0 || i >= lst->len) {
+        vayu_raise_str(vayu_mkstr_c("IndexError"),
+                       vayu_mkstr_c("json.index: index out of range"));
+    }
+    return (VayuJsonValue*)lst->items[i];
+}
+
+int64_t vayu_json_as_int(VayuJsonValue* v) {
+    if (!v || v->tag != 2) {
+        vayu_raise_str(vayu_mkstr_c("RuntimeError"),
+                       vayu_mkstr_c("json.as_int: value is not a number"));
+    }
+    return v->data;
+}
+
+VayuStr* vayu_json_as_str(VayuJsonValue* v) {
+    if (!v || v->tag != 3) {
+        vayu_raise_str(vayu_mkstr_c("RuntimeError"),
+                       vayu_mkstr_c("json.as_str: value is not a string"));
+    }
+    return (VayuStr*)v->data;
+}
+
+int64_t vayu_json_as_bool(VayuJsonValue* v) {
+    if (!v || v->tag != 1) {
+        vayu_raise_str(vayu_mkstr_c("RuntimeError"),
+                       vayu_mkstr_c("json.as_bool: value is not a boolean"));
+    }
+    return v->data;
+}
+
+int64_t vayu_json_len(VayuJsonValue* v) {
+    if (!v) return 0;
+    if (v->tag == 4) return ((VayuList*)v->data)->len;
+    if (v->tag == 5) return ((VayuMap*)v->data)->len;
+    return 0;
+}
+
+int64_t vayu_json_has(VayuJsonValue* v, VayuStr* key) {
+    if (!v || v->tag != 5) return 0;
+    return map_find((VayuMap*)v->data, key) != NULL ? 1 : 0;
+}
+
+VayuStr* vayu_json_type(VayuJsonValue* v) {
+    if (!v) return vayu_mkstr_c("null");
+    if (v->tag == 0) return vayu_mkstr_c("null");
+    if (v->tag == 1) return vayu_mkstr_c("bool");
+    if (v->tag == 2) return vayu_mkstr_c("int");
+    if (v->tag == 3) return vayu_mkstr_c("str");
+    if (v->tag == 4) return vayu_mkstr_c("list");
+    if (v->tag == 5) return vayu_mkstr_c("map");
+    return vayu_mkstr_c("?");
+}
+
+int64_t vayu_json_is_null(VayuJsonValue* v) { return (!v || v->tag == 0) ? 1 : 0; }
+int64_t vayu_json_is_int (VayuJsonValue* v) { return (v && v->tag == 2) ? 1 : 0; }
+int64_t vayu_json_is_str (VayuJsonValue* v) { return (v && v->tag == 3) ? 1 : 0; }
+int64_t vayu_json_is_bool(VayuJsonValue* v) { return (v && v->tag == 1) ? 1 : 0; }
+int64_t vayu_json_is_list(VayuJsonValue* v) { return (v && v->tag == 4) ? 1 : 0; }
+int64_t vayu_json_is_map (VayuJsonValue* v) { return (v && v->tag == 5) ? 1 : 0; }
+
+VayuList* vayu_json_keys(VayuJsonValue* v) {
+    if (!v || v->tag != 5) return vayu_list_new();
+    VayuMap* m = (VayuMap*)v->data;
+    VayuList* out = vayu_list_new();
+    for (int64_t i = 0; i < m->cap; i++) {
+        if (!m->entries[i].used) continue;
+        vayu_list_push(out, (int64_t)m->entries[i].key);
+    }
+    return out;
+}
+
+VayuJsonValue* vayu_json_make_null(void)          { return jp_new(0, 0); }
+VayuJsonValue* vayu_json_make_bool(int64_t b)     { return jp_new(1, b ? 1 : 0); }
+VayuJsonValue* vayu_json_make_int (int64_t n)     { return jp_new(2, n); }
+VayuJsonValue* vayu_json_make_str (VayuStr* s)    { return jp_new(3, (int64_t)s); }
+
+// ---- Phase 10.4: regex module ----
+// Backtracking matcher.  Supports:
+//   . * + ?  [...]  [^...]  ^  $  \d \D \w \W \s \S  \<literal>
+// Not supported in v1: capture groups, alternation, non-greedy.
+
+typedef struct {
+    const char* pat; int64_t plen;
+    const char* txt; int64_t tlen;
+} VayuRx;
+
+static int vayu_rx_match_one(VayuRx* r, int64_t pi, int64_t ti,
+                             int64_t* adv_pi, int64_t* adv_ti) {
+    if (pi >= r->plen) return 0;
+    if (ti >= r->tlen) return 0;
+    char pc = r->pat[pi];
+    char tc = r->txt[ti];
+
+    if (pc == '.') {
+        *adv_pi = pi + 1; *adv_ti = ti + 1;
+        return 1;
+    }
+    if (pc == '\\') {
+        if (pi + 1 >= r->plen) return 0;
+        char e = r->pat[pi + 1];
+        int ok = 0;
+        if (e == 'd') ok = (tc >= '0' && tc <= '9');
+        else if (e == 'D') ok = !(tc >= '0' && tc <= '9');
+        else if (e == 'w') ok = (tc >= 'a' && tc <= 'z') || (tc >= 'A' && tc <= 'Z')
+                              || (tc >= '0' && tc <= '9') || tc == '_';
+        else if (e == 'W') ok = !((tc >= 'a' && tc <= 'z') || (tc >= 'A' && tc <= 'Z')
+                              || (tc >= '0' && tc <= '9') || tc == '_');
+        else if (e == 's') ok = (tc == ' ' || tc == '\t' || tc == '\n' ||
+                                 tc == '\r' || tc == '\f' || tc == '\v');
+        else if (e == 'S') ok = !(tc == ' ' || tc == '\t' || tc == '\n' ||
+                                  tc == '\r' || tc == '\f' || tc == '\v');
+        else ok = (tc == e);
+        if (!ok) return 0;
+        *adv_pi = pi + 2; *adv_ti = ti + 1;
+        return 1;
+    }
+    if (pc == '[') {
+        int64_t i = pi + 1;
+        int neg = 0;
+        if (i < r->plen && r->pat[i] == '^') { neg = 1; i++; }
+        int found = 0;
+        while (i < r->plen && r->pat[i] != ']') {
+            if (r->pat[i] == '\\' && i + 1 < r->plen) {
+                char e = r->pat[i + 1];
+                int hit = 0;
+                if (e == 'd') hit = (tc >= '0' && tc <= '9');
+                else if (e == 'w') hit = (tc >= 'a' && tc <= 'z') || (tc >= 'A' && tc <= 'Z')
+                                      || (tc >= '0' && tc <= '9') || tc == '_';
+                else if (e == 's') hit = (tc == ' ' || tc == '\t' || tc == '\n' || tc == '\r');
+                else hit = (tc == e);
+                if (hit) found = 1;
+                i += 2;
+                continue;
+            }
+            if (i + 2 < r->plen && r->pat[i + 1] == '-' && r->pat[i + 2] != ']') {
+                char lo = r->pat[i];
+                char hi = r->pat[i + 2];
+                if (tc >= lo && tc <= hi) found = 1;
+                i += 3;
+                continue;
+            }
+            if (tc == r->pat[i]) found = 1;
+            i++;
+        }
+        if (i >= r->plen || r->pat[i] != ']') return 0;
+        if (neg) found = !found;
+        if (!found) return 0;
+        *adv_pi = i + 1; *adv_ti = ti + 1;
+        return 1;
+    }
+    if (tc != pc) return 0;
+    *adv_pi = pi + 1; *adv_ti = ti + 1;
+    return 1;
+}
+
+static int64_t vayu_rx_atom_end(VayuRx* r, int64_t pi) {
+    char c = r->pat[pi];
+    if (c == '\\') return pi + 2;
+    if (c == '[') {
+        int64_t i = pi + 1;
+        if (i < r->plen && r->pat[i] == '^') i++;
+        while (i < r->plen && r->pat[i] != ']') {
+            if (r->pat[i] == '\\') i += 2; else i++;
+        }
+        return i + 1;
+    }
+    return pi + 1;
+}
+
+static int vayu_rx_here(VayuRx* r, int64_t pi, int64_t ti, int64_t* out_end) {
+    if (pi >= r->plen) { *out_end = ti; return 1; }
+    char c = r->pat[pi];
+    if (c == '^') {
+        if (ti != 0) return 0;
+        return vayu_rx_here(r, pi + 1, ti, out_end);
+    }
+    if (c == '$') {
+        if (ti != r->tlen) return 0;
+        return vayu_rx_here(r, pi + 1, ti, out_end);
+    }
+    int64_t atom_end = vayu_rx_atom_end(r, pi);
+    char q = (atom_end < r->plen) ? r->pat[atom_end] : 0;
+
+    if (q == '*' || q == '+') {
+        int64_t cur_pi = atom_end + 1;
+        int64_t positions[2048];
+        // positions[i] = the text position after i successful matches.
+        // Seed with i=0 so '*' and '+' can fall back to zero / one match.
+        int count = 0;
+        positions[count++] = ti;
+        int64_t tp = ti;
+        while (count < 2048) {
+            int64_t np = 0, nt = 0;
+            if (!vayu_rx_match_one(r, pi, tp, &np, &nt)) break;
+            tp = nt;
+            positions[count++] = tp;
+        }
+        int min_matches = (q == '+') ? 1 : 0;
+        for (int k = count - 1; k >= min_matches; k--) {
+            if (vayu_rx_here(r, cur_pi, positions[k], out_end)) return 1;
+        }
+        return 0;
+    }
+    if (q == '?') {
+        int64_t cur_pi = atom_end + 1;
+        int64_t np = 0, nt = 0;
+        if (vayu_rx_match_one(r, pi, ti, &np, &nt)) {
+            if (vayu_rx_here(r, cur_pi, nt, out_end)) return 1;
+        }
+        return vayu_rx_here(r, cur_pi, ti, out_end);
+    }
+    int64_t np = 0, nt = 0;
+    if (!vayu_rx_match_one(r, pi, ti, &np, &nt)) return 0;
+    return vayu_rx_here(r, np, nt, out_end);
+}
+
+static int vayu_rx_find(VayuRx* r, int64_t from, int64_t* ms, int64_t* me) {
+    int64_t start = from;
+    while (start <= r->tlen) {
+        int64_t end = 0;
+        if (vayu_rx_here(r, 0, start, &end)) {
+            *ms = start; *me = end;
+            return 1;
+        }
+        start++;
+    }
+    return 0;
+}
+
+int64_t vayu_regex_match(VayuStr* pat, VayuStr* s) {
+    VayuRx r;
+    r.pat = pat->data; r.plen = pat->len;
+    r.txt = s->data;   r.tlen = s->len;
+    int64_t end = 0;
+    if (!vayu_rx_here(&r, 0, 0, &end)) return 0;
+    return end == s->len ? 1 : 0;
+}
+
+int64_t vayu_regex_search(VayuStr* pat, VayuStr* s) {
+    VayuRx r;
+    r.pat = pat->data; r.plen = pat->len;
+    r.txt = s->data;   r.tlen = s->len;
+    int64_t ms = 0, me = 0;
+    if (!vayu_rx_find(&r, 0, &ms, &me)) return -1;
+    return ms;
+}
+
+VayuList* vayu_regex_find_all(VayuStr* pat, VayuStr* s) {
+    VayuList* out = vayu_list_new();
+    VayuRx r;
+    r.pat = pat->data; r.plen = pat->len;
+    r.txt = s->data;   r.tlen = s->len;
+    int64_t from = 0;
+    while (from <= r.tlen) {
+        int64_t ms = 0, me = 0;
+        if (!vayu_rx_find(&r, from, &ms, &me)) break;
+        vayu_list_push(out, (int64_t)vayu_mkstr(s->data + ms, me - ms));
+        from = (me > ms) ? me : me + 1;
+    }
+    return out;
+}
+
+VayuStr* vayu_regex_replace(VayuStr* pat, VayuStr* s, VayuStr* repl) {
+    VayuRx r;
+    r.pat = pat->data; r.plen = pat->len;
+    r.txt = s->data;   r.tlen = s->len;
+    VayuList* chunks = vayu_list_new();
+    int64_t pos = 0;
+    int64_t from = 0;
+    while (from <= r.tlen) {
+        int64_t ms = 0, me = 0;
+        if (!vayu_rx_find(&r, from, &ms, &me)) break;
+        if (ms > pos)
+            vayu_list_push(chunks, (int64_t)vayu_mkstr(s->data + pos, ms - pos));
+        vayu_list_push(chunks, (int64_t)vayu_mkstr(repl->data, repl->len));
+        pos = me;
+        from = (me > ms) ? me : me + 1;
+    }
+    if (pos < s->len)
+        vayu_list_push(chunks, (int64_t)vayu_mkstr(s->data + pos, s->len - pos));
+    int64_t total = 0;
+    for (int64_t i = 0; i < chunks->len; i++)
+        total += ((VayuStr*)chunks->items[i])->len;
+    VayuStr* out = (VayuStr*)malloc(sizeof(VayuStr) + (size_t)total + 1);
+    out->len = total;
+    int64_t op = 0;
+    for (int64_t i = 0; i < chunks->len; i++) {
+        VayuStr* c = (VayuStr*)chunks->items[i];
+        memcpy(out->data + op, c->data, (size_t)c->len);
+        op += c->len;
+    }
+    out->data[total] = 0;
+    return out;
+}
+
+VayuList* vayu_regex_split(VayuStr* pat, VayuStr* s) {
+    VayuList* out = vayu_list_new();
+    VayuRx r;
+    r.pat = pat->data; r.plen = pat->len;
+    r.txt = s->data;   r.tlen = s->len;
+    int64_t pos = 0;
+    int64_t from = 0;
+    while (from <= r.tlen) {
+        int64_t ms = 0, me = 0;
+        if (!vayu_rx_find(&r, from, &ms, &me)) break;
+        vayu_list_push(out, (int64_t)vayu_mkstr(s->data + pos, ms - pos));
+        pos = me;
+        from = (me > ms) ? me : me + 1;
+    }
+    vayu_list_push(out, (int64_t)vayu_mkstr(s->data + pos, s->len - pos));
+    return out;
+}
+
+// ---- Phase 10.5: thread module ----
+typedef int64_t (*vayu_thread_fn_t)(int64_t);
+
+typedef struct {
+#ifdef _WIN32
+    HANDLE handle;
+#else
+    pthread_t tid;
+#endif
+    int64_t arg;
+    int64_t result;
+    vayu_thread_fn_t fn;
+} VayuThread;
+
+#ifdef _WIN32
+static DWORD WINAPI vayu_thread_win_proc(LPVOID p) {
+    VayuThread* t = (VayuThread*)p;
+    t->result = t->fn(t->arg);
+    return 0;
+}
+#else
+static void* vayu_thread_posix_proc(void* p) {
+    VayuThread* t = (VayuThread*)p;
+    t->result = t->fn(t->arg);
+    return NULL;
+}
+#endif
+
+int64_t vayu_thread_spawn(void* fn, int64_t arg) {
+    VayuThread* t = (VayuThread*)malloc(sizeof(VayuThread));
+    t->fn = (vayu_thread_fn_t)fn;
+    t->arg = arg;
+    t->result = 0;
+#ifdef _WIN32
+    t->handle = CreateThread(NULL, 0, vayu_thread_win_proc, t, 0, NULL);
+    if (!t->handle) { free(t); return 0; }
+#else
+    if (pthread_create(&t->tid, NULL, vayu_thread_posix_proc, t) != 0) {
+        free(t);
+        return 0;
+    }
+#endif
+    return (int64_t)t;
+}
+
+int64_t vayu_thread_join(int64_t handle) {
+    VayuThread* t = (VayuThread*)handle;
+    if (!t) return 0;
+#ifdef _WIN32
+    WaitForSingleObject(t->handle, INFINITE);
+    CloseHandle(t->handle);
+#else
+    pthread_join(t->tid, NULL);
+#endif
+    int64_t r = t->result;
+    free(t);
+    return r;
+}
+
+int64_t vayu_thread_id(void) {
+#ifdef _WIN32
+    return (int64_t)GetCurrentThreadId();
+#else
+    return (int64_t)(uintptr_t)pthread_self();
+#endif
+}
+
+typedef struct {
+#ifdef _WIN32
+    CRITICAL_SECTION cs;
+#else
+    pthread_mutex_t mtx;
+#endif
+} VayuMutex;
+
+int64_t vayu_mutex_new(void) {
+    VayuMutex* m = (VayuMutex*)malloc(sizeof(VayuMutex));
+#ifdef _WIN32
+    InitializeCriticalSection(&m->cs);
+#else
+    pthread_mutex_init(&m->mtx, NULL);
+#endif
+    return (int64_t)m;
+}
+
+void vayu_mutex_lock(int64_t h) {
+    VayuMutex* m = (VayuMutex*)h;
+#ifdef _WIN32
+    EnterCriticalSection(&m->cs);
+#else
+    pthread_mutex_lock(&m->mtx);
+#endif
+}
+
+void vayu_mutex_unlock(int64_t h) {
+    VayuMutex* m = (VayuMutex*)h;
+#ifdef _WIN32
+    LeaveCriticalSection(&m->cs);
+#else
+    pthread_mutex_unlock(&m->mtx);
+#endif
 }
 
 extern void vayu_main(void);
