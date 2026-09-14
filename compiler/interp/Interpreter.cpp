@@ -331,19 +331,49 @@ namespace vayu {
     // ===========================================================================
 
     bool Interpreter::findModuleFile(const std::string& name, std::string& pathOut) const {
+        auto tryPath = [&](const std::string& p) -> bool {
+            std::ifstream in(p, std::ios::binary);
+            if (in) { pathOut = p; return true; }
+            return false;
+            };
+
         // 1. source directory of the importing file
         if (!sourceDir_.empty()) {
             std::string p = sourceDir_;
             if (p.back() != '/' && p.back() != '\\') p += '/';
             p += name + ".vayu";
-            std::ifstream in(p, std::ios::binary);
-            if (in) { pathOut = p; return true; }
+            if (tryPath(p)) return true;
+            // also try .vyu (native compiler uses this extension)
+            std::string p2 = sourceDir_;
+            if (p2.back() != '/' && p2.back() != '\\') p2 += '/';
+            p2 += name + ".vyu";
+            if (tryPath(p2)) return true;
         }
         // 2. current working directory
-        {
-            std::string p = name + ".vayu";
-            std::ifstream in(p, std::ios::binary);
-            if (in) { pathOut = p; return true; }
+        if (tryPath(name + ".vayu")) return true;
+        if (tryPath(name + ".vyu"))  return true;
+
+        // 3. VAYU_MODULE_PATH
+        if (const char* mp = std::getenv("VAYU_MODULE_PATH")) {
+#ifdef _WIN32
+            const char sep = ';';
+#else
+            const char sep = ':';
+#endif
+            std::string s = mp;
+            size_t start = 0;
+            while (start <= s.size()) {
+                size_t end = s.find(sep, start);
+                if (end == std::string::npos) end = s.size();
+                std::string dir = s.substr(start, end - start);
+                if (!dir.empty()) {
+                    if (dir.back() != '/' && dir.back() != '\\') dir += '/';
+                    if (tryPath(dir + name + ".vayu")) return true;
+                    if (tryPath(dir + name + ".vyu"))  return true;
+                }
+                if (end == s.size()) break;
+                start = end + 1;
+            }
         }
         return false;
     }

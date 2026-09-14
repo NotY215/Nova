@@ -233,6 +233,7 @@ namespace vayu {
             }
 
             bool findModuleFile(const std::string& name, std::string& pathOut) const {
+                // 1. relative to the importing source file
                 if (!sourceDir_.empty()) {
                     std::string p = sourceDir_;
                     if (p.back() != '/' && p.back() != '\\') p += '/';
@@ -240,9 +241,35 @@ namespace vayu {
                     std::ifstream in(p, std::ios::binary);
                     if (in) { pathOut = p; return true; }
                 }
-                std::string p = name + ".vyu";
-                std::ifstream in(p, std::ios::binary);
-                if (in) { pathOut = p; return true; }
+                // 2. current working directory
+                {
+                    std::string p = name + ".vyu";
+                    std::ifstream in(p, std::ios::binary);
+                    if (in) { pathOut = p; return true; }
+                }
+                // 3. VAYU_MODULE_PATH (semicolon-separated on Windows, colon elsewhere)
+                if (const char* mp = std::getenv("VAYU_MODULE_PATH")) {
+#ifdef _WIN32
+                    const char sep = ';';
+#else
+                    const char sep = ':';
+#endif
+                    std::string s = mp;
+                    size_t start = 0;
+                    while (start <= s.size()) {
+                        size_t end = s.find(sep, start);
+                        if (end == std::string::npos) end = s.size();
+                        std::string dir = s.substr(start, end - start);
+                        if (!dir.empty()) {
+                            if (dir.back() != '/' && dir.back() != '\\') dir += '/';
+                            std::string p = dir + name + ".vyu";
+                            std::ifstream in(p, std::ios::binary);
+                            if (in) { pathOut = p; return true; }
+                        }
+                        if (end == s.size()) break;
+                        start = end + 1;
+                    }
+                }
                 return false;
             }
 
@@ -1477,6 +1504,16 @@ namespace vayu {
                     if (recvName == "strip") {
                         std::string t = newTemp();
                         line(t + " =l call $vayu_str_strip(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::Str; return true;
+                    }
+                    if (recvName == "lstrip") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_lstrip(l " + recv.ssa + ")");
+                        r.ssa = t; r.type = VType::Str; return true;
+                    }
+                    if (recvName == "rstrip") {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_str_rstrip(l " + recv.ssa + ")");
                         r.ssa = t; r.type = VType::Str; return true;
                     }
                     if (recvName == "is_digit") {
@@ -3026,6 +3063,18 @@ VayuStr* vayu_str_strip(VayuStr* s) {
                      s->data[b-1]=='\r'||s->data[b-1]=='\f'||s->data[b-1]=='\v')) --b;
     return vayu_mkstr(s->data + a, b - a);
 }
+VayuStr* vayu_str_lstrip(VayuStr* s) {
+    int64_t a = 0;
+    while (a < s->len && (s->data[a]==' '||s->data[a]=='\t'||s->data[a]=='\n'||
+                          s->data[a]=='\r'||s->data[a]=='\f'||s->data[a]=='\v')) ++a;
+    return vayu_mkstr(s->data + a, s->len - a);
+}
+VayuStr* vayu_str_rstrip(VayuStr* s) {
+    int64_t b = s->len;
+    while (b > 0 && (s->data[b-1]==' '||s->data[b-1]=='\t'||s->data[b-1]=='\n'||
+                     s->data[b-1]=='\r'||s->data[b-1]=='\f'||s->data[b-1]=='\v')) --b;
+    return vayu_mkstr(s->data, b);
+}
 int64_t vayu_str_is_digit(VayuStr* s) {
     if (s->len == 0) return 0;
     for (int64_t i = 0; i < s->len; ++i) {
@@ -3387,8 +3436,19 @@ int64_t vayu_run_command(VayuStr* cmd) {
     int64_t n = cmd->len < 8191 ? cmd->len : 8191;
     memcpy(buf, cmd->data, (size_t)n);
     buf[n] = 0;
-    int rc = system(buf);
-    return (int64_t)rc;
+#ifdef _WIN32
+    // cmd.exe strips the first and last quote from a `system()` command that
+    // starts with a quote and has more than two quotes.  Prefixing with `call`
+    // disables that quirk.  This lets Vayu programs pass quoted paths freely.
+    {
+        char wrapped[8256];
+        int wr = snprintf(wrapped, sizeof(wrapped), "call %s", buf);
+        if (wr > 0) {
+            return (int64_t)system(wrapped);
+        }
+    }
+#endif
+    return (int64_t)system(buf);
 }
 void vayu_exit(int64_t code) {
     exit((int)code);

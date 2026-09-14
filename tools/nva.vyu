@@ -1,0 +1,292 @@
+# nva.vyu — Vayu package manager, v1.
+#
+# Usage:
+#   nva new <name>
+#   nva init
+#   nva build
+#   nva run
+#   nva clean
+
+class Dep:
+    name: str
+    version: str
+    def __init__(self, name: str, version: str) -> None:
+        self.name = name
+        self.version = version
+
+class Manifest:
+    name: str
+    version: str
+    author: str
+    description: str
+    entry: str
+    deps: list<Dep>
+    root_dir: str
+    def __init__(self) -> None:
+        self.name = ""
+        self.version = "0.1.0"
+        self.author = ""
+        self.description = ""
+        self.entry = "src/main.vyu"
+        self.deps = []
+        self.root_dir = ""
+
+def trim(s: str) -> str:
+    return s.strip()
+
+def is_blank_or_comment(line: str) -> bool:
+    t = trim(line)
+    if len(t) == 0:
+        return true
+    if t.starts_with("#"):
+        return true
+    return false
+
+def parse_manifest(path: str) -> Manifest:
+    src = read_file(path)
+    lines = src.split("\n")
+    m = Manifest()
+    section = ""
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        line = trim(raw)
+        i = i + 1
+        if is_blank_or_comment(line):
+            continue
+        if line.starts_with("[") and line.ends_with("]"):
+            section = line.substr(1, len(line) - 1)
+            continue
+        eq = line.find("=")
+        if eq < 0:
+            continue
+        key = trim(line.substr(0, eq))
+        val = trim(line.substr(eq + 1, len(line)))
+        if val.starts_with("\"") and val.ends_with("\"") and len(val) >= 2:
+            val = val.substr(1, len(val) - 1)
+        if section == "package":
+            if key == "name":
+                m.name = val
+            if key == "version":
+                m.version = val
+            if key == "author":
+                m.author = val
+            if key == "description":
+                m.description = val
+            if key == "entry":
+                m.entry = val
+        if section == "dependencies":
+            m.deps.append(Dep(key, val))
+    return m
+
+def join_path(a: str, b: str) -> str:
+    if len(a) == 0:
+        return b
+    if a.ends_with("/") or a.ends_with("\\"):
+        return a + b
+    return a + "/" + b
+
+def dir_exists(p: str) -> bool:
+    cmd = "if exist \"" + p + "\\*\" exit 0"
+    rc = run_command(cmd)
+    if rc == 0:
+        return true
+    return false
+
+def mkdir(p: str) -> None:
+    run_command("mkdir \"" + p + "\" 2>nul")
+
+def find_up(rel_path: str) -> str:
+    if file_exists(rel_path):
+        return rel_path
+    p1 = "..\\" + rel_path
+    if file_exists(p1):
+        return p1
+    p2 = "..\\..\\" + rel_path
+    if file_exists(p2):
+        return p2
+    p3 = "..\\..\\..\\" + rel_path
+    if file_exists(p3):
+        return p3
+    p4 = "..\\..\\..\\..\\" + rel_path
+    if file_exists(p4):
+        return p4
+    p5 = "..\\..\\..\\..\\..\\" + rel_path
+    if file_exists(p5):
+        return p5
+    p6 = "..\\..\\..\\..\\..\\..\\" + rel_path
+    if file_exists(p6):
+        return p6
+    return ""
+
+def find_vayuc() -> str:
+    p = find_up("build\\x64-debug\\bin\\vayuc.exe")
+    if p == "":
+        return "vayuc.exe"
+    return p
+
+def find_qbe() -> str:
+    return find_up("tools\\qbe.exe")
+
+def find_dep_dir(name: str, root: str) -> str:
+    p1 = join_path(join_path(root, "nova_modules"), name)
+    if dir_exists(p1):
+        return p1
+    p2 = join_path(join_path(root, ".."), name)
+    if dir_exists(p2):
+        return p2
+    return ""
+
+def resolve_modules(m: Manifest) -> str:
+    parts: list<str> = []
+    i = 0
+    while i < len(m.deps):
+        d = m.deps[i]
+        ddir = find_dep_dir(d.name, m.root_dir)
+        if ddir == "":
+            print("nva: missing dependency '" + d.name + "'")
+            exit(1)
+        parts.append(ddir)
+        sub_toml = join_path(ddir, "nova.toml")
+        if file_exists(sub_toml):
+            sub = parse_manifest(sub_toml)
+            sub.root_dir = ddir
+            j = 0
+            while j < len(sub.deps):
+                sd = sub.deps[j]
+                sdir = find_dep_dir(sd.name, ddir)
+                if sdir != "":
+                    parts.append(sdir)
+                j = j + 1
+        i = i + 1
+    out = ""
+    k = 0
+    while k < len(parts):
+        if k > 0:
+            out = out + ";"
+        out = out + parts[k]
+        k = k + 1
+    return out
+
+def cmd_new(name: str) -> None:
+    root = name
+    mkdir(root)
+    mkdir(join_path(root, "src"))
+    toml = "[package]\n"
+    toml = toml + "name = \"" + name + "\"\n"
+    toml = toml + "version = \"0.1.0\"\n"
+    toml = toml + "author = \"\"\n"
+    toml = toml + "description = \"\"\n"
+    toml = toml + "entry = \"src/main.vyu\"\n"
+    toml = toml + "\n"
+    toml = toml + "[dependencies]\n"
+    write_file(join_path(root, "nova.toml"), toml)
+    main_src = "print(\"Hello from " + name + "!\")\n"
+    write_file(join_path(root, "src/main.vyu"), main_src)
+    print("nva: created project '" + name + "'")
+    print("     cd " + name)
+    print("     nva run")
+
+def cmd_init() -> None:
+    toml = "[package]\n"
+    toml = toml + "name = \"app\"\n"
+    toml = toml + "version = \"0.1.0\"\n"
+    toml = toml + "author = \"\"\n"
+    toml = toml + "description = \"\"\n"
+    toml = toml + "entry = \"src/main.vyu\"\n"
+    toml = toml + "\n"
+    toml = toml + "[dependencies]\n"
+    write_file("nova.toml", toml)
+    mkdir("src")
+    if not file_exists("src/main.vyu"):
+        write_file("src/main.vyu", "print(\"Hello, Vayu!\")\n")
+    print("nva: initialized nova.toml")
+
+def cmd_build() -> str:
+    if not file_exists("nova.toml"):
+        print("nva: no nova.toml in this directory")
+        exit(1)
+    m = parse_manifest("nova.toml")
+    m.root_dir = ""
+    if m.name == "":
+        print("nva: nova.toml has no package.name")
+        exit(1)
+    mod_path = resolve_modules(m)
+    mkdir("build")
+
+    # Windows paths must use backslashes; cmd.exe treats '/' as a switch.
+    # Also quote every path so spaces survive.
+    entry_win = m.entry.replace("/", "\\")
+    exe_win = "build\\" + m.name + ".exe"
+
+    compiler = find_vayuc()
+    if compiler == "vayuc.exe":
+        print("nva: warning: vayuc.exe not found in build/x64-debug/bin")
+        print("nva: falling back to PATH lookup")
+
+    qbe = find_qbe()
+    if qbe == "":
+        print("nva: warning: tools/qbe.exe not found by walking up")
+
+    prefix = ""
+    if len(mod_path) > 0:
+        mod_path_win = mod_path.replace("/", "\\")
+        prefix = prefix + "set \"VAYU_MODULE_PATH=" + mod_path_win + "\" && "
+    if len(qbe) > 0:
+        prefix = prefix + "set \"VAYU_QBE=" + qbe + "\" && "
+    run_part = "call \"" + compiler + "\" \"" + entry_win + "\" --native-out \"" + exe_win + "\""
+    cmd = prefix + run_part
+
+    print("nva: building " + m.name + " ...")
+    rc = run_command(cmd)
+    if rc != 0:
+        print("nva: build failed (exit " + str(rc) + ")")
+        exit(1)
+    print("nva: built " + exe_win)
+    return exe_win
+
+def cmd_run() -> None:
+    exe = cmd_build()
+    print("nva: running " + exe)
+    # Quote the path; call is not strictly needed for a single exe but
+    # consistent with the compiler invocation.
+    run_command("\"" + exe + "\"")
+
+def cmd_clean() -> None:
+    if dir_exists("build"):
+        run_command("rmdir /s /q build 2>nul")
+    print("nva: cleaned")
+
+def main() -> None:
+    a = args()
+    if len(a) < 1:
+        print("usage: nva <command> [args]")
+        print("       nva new <name>")
+        print("       nva init")
+        print("       nva build")
+        print("       nva run")
+        print("       nva clean")
+        exit(1)
+    cmd = a[0]
+    if cmd == "new":
+        if len(a) < 2:
+            print("nva: 'new' requires a project name")
+            exit(1)
+        cmd_new(a[1])
+        return
+    if cmd == "init":
+        cmd_init()
+        return
+    if cmd == "build":
+        cmd_build()
+        return
+    if cmd == "run":
+        cmd_run()
+        return
+    if cmd == "clean":
+        cmd_clean()
+        return
+    print("nva: unknown command '" + cmd + "'")
+    exit(1)
+
+main()

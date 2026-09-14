@@ -1,0 +1,8 @@
+[package]
+name = "hello_pkg"
+version = "0.1.0"
+author = "Vayu"
+description = "Sample nva project"
+entry = "src/main.vyu"
+
+[dependencies]
