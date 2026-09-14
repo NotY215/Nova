@@ -277,12 +277,12 @@ namespace vayu {
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Import) {
                         auto* n = static_cast<const ImportStmt*>(s.get());
-                        if (!modules_.count(n->moduleName))
+                        if (n->moduleName != "fs" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                     }
                     else if (s->kind == StmtKind::FromImport) {
                         auto* n = static_cast<const FromImportStmt*>(s.get());
-                        if (!modules_.count(n->moduleName))
+                        if (n->moduleName != "fs" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                         for (auto& item : n->items) {
                             const std::string& local = item.alias.empty() ? item.name : item.alias;
@@ -1546,6 +1546,117 @@ namespace vayu {
                 }
                 return false;
             }
+            Val emitFsCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+                auto a0 = [&]() { return emitExpr(n->args[0].value.get()); };
+                auto a1 = [&]() { return emitExpr(n->args[1].value.get()); };
+
+                if (m == "read_dir") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_read_dir(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::List; r.elemType = VType::Str;
+                    return r;
+                }
+                if (m == "mkdir") {
+                    Val p = a0();
+                    line("call $vayu_fs_mkdir(l " + p.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "rmdir") {
+                    Val p = a0();
+                    line("call $vayu_fs_rmdir(l " + p.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "remove") {
+                    Val p = a0();
+                    line("call $vayu_fs_remove(l " + p.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "rename") {
+                    Val a = a0();
+                    Val b = a1();
+                    line("call $vayu_fs_rename(l " + a.ssa + ", l " + b.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "exists") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_exists(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+                if (m == "is_file") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_is_file(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+                if (m == "is_dir") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_is_dir(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Bool;
+                    return r;
+                }
+                if (m == "size") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_size(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "cwd") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_cwd()");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "abs") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_abs(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "join") {
+                    Val a = a0();
+                    Val b = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_join(l " + a.ssa + ", l " + b.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "extension") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_extension(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "basename") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_basename(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "dirname") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_fs_dirname(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                throw std::runtime_error("native: fs has no method '" + m + "'");
+            }
+
 
             Val emitCall(const CallExpr* n) {
                 Val r;
@@ -1630,6 +1741,14 @@ namespace vayu {
                                 }
                                 return r;
                             }
+                        }
+                    }
+
+                    if (attr->target->kind == ExprKind::NameRef) {
+                        const auto* tn0 = static_cast<const NameRefExpr*>(
+                            attr->target.get());
+                        if (tn0->name == "fs") {
+                            return emitFsCall(n, attr);
                         }
                     }
 
@@ -2836,6 +2955,12 @@ namespace vayu {
 #include <stdint.h>
 #include <setjmp.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
+#ifdef _WIN32
+#  include <direct.h>
+#endif
 
 typedef struct { int64_t len; char data[]; } VayuStr;
 typedef struct { int64_t len; int64_t cap; int64_t* items; } VayuList;
@@ -3501,6 +3626,236 @@ void vayu_raise_str(VayuStr* typeName, VayuStr* msg) {
 void vayu_reraise(void) {
     if (g_trySp == 0) { fprintf(stderr, "vayu: uncaught\n"); exit(1); }
     longjmp(g_jmpBufs[g_trySp - 1], 1);
+}
+
+// ---- Phase 10.1: fs module ----
+static char* vayu_fs_cstr(VayuStr* s) {
+    char* buf = (char*)malloc((size_t)s->len + 1);
+    memcpy(buf, s->data, (size_t)s->len);
+    buf[s->len] = 0;
+    return buf;
+}
+
+static int64_t vayu_fs_stat_mode(const char* p) {
+#ifdef _WIN32
+    struct _stat64 st;
+    if (_stat64(p, &st) != 0) return -1;
+    return (int64_t)st.st_mode;
+#else
+    struct stat st;
+    if (stat(p, &st) != 0) return -1;
+    return (int64_t)st.st_mode;
+#endif
+}
+
+int64_t vayu_fs_exists(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+    int64_t mode = vayu_fs_stat_mode(p);
+    free(p);
+    return mode < 0 ? 0 : 1;
+}
+
+int64_t vayu_fs_is_file(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+    int64_t mode = vayu_fs_stat_mode(p);
+    free(p);
+    if (mode < 0) return 0;
+#ifdef _WIN32
+    return (mode & _S_IFREG) ? 1 : 0;
+#else
+    return S_ISREG(mode) ? 1 : 0;
+#endif
+}
+
+int64_t vayu_fs_is_dir(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+    int64_t mode = vayu_fs_stat_mode(p);
+    free(p);
+    if (mode < 0) return 0;
+#ifdef _WIN32
+    return (mode & _S_IFDIR) ? 1 : 0;
+#else
+    return S_ISDIR(mode) ? 1 : 0;
+#endif
+}
+
+int64_t vayu_fs_size(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+#ifdef _WIN32
+    struct _stat64 st;
+    if (_stat64(p, &st) != 0) { free(p); return 0; }
+#else
+    struct stat st;
+    if (stat(p, &st) != 0) { free(p); return 0; }
+#endif
+    int64_t sz = (int64_t)st.st_size;
+    free(p);
+    return sz;
+}
+
+VayuStr* vayu_fs_cwd(void) {
+    char buf[4096];
+#ifdef _WIN32
+    if (_getcwd(buf, sizeof(buf)) == NULL) return vayu_mkstr("", 0);
+#else
+    if (getcwd(buf, sizeof(buf)) == NULL) return vayu_mkstr("", 0);
+#endif
+    return vayu_mkstr_c(buf);
+}
+
+VayuStr* vayu_fs_abs(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+#ifdef _WIN32
+    char full[4096];
+    if (_fullpath(full, p, sizeof(full)) == NULL) {
+        free(p);
+        return vayu_mkstr("", 0);
+    }
+    free(p);
+    return vayu_mkstr_c(full);
+#else
+    if (p[0] == '/') {
+        VayuStr* r = vayu_mkstr_c(p);
+        free(p);
+        return r;
+    }
+    char* cwd_buf = getcwd(NULL, 0);
+    if (!cwd_buf) { free(p); return vayu_mkstr("", 0); }
+    size_t clen = strlen(cwd_buf);
+    size_t plen = strlen(p);
+    char* full = (char*)malloc(clen + 1 + plen + 1);
+    memcpy(full, cwd_buf, clen);
+    full[clen] = '/';
+    memcpy(full + clen + 1, p, plen);
+    full[clen + 1 + plen] = 0;
+    free(cwd_buf);
+    free(p);
+    VayuStr* r = vayu_mkstr_c(full);
+    free(full);
+    return r;
+#endif
+}
+
+VayuStr* vayu_fs_join(VayuStr* a, VayuStr* b) {
+    if (a->len == 0) return vayu_mkstr(b->data, b->len);
+    char last = a->data[a->len - 1];
+    if (last == '/' || last == '\\') {
+        return vayu_str_concat(a, b);
+    }
+#ifdef _WIN32
+    return vayu_str_concat(vayu_str_concat(a, vayu_mkstr_c("\\")), b);
+#else
+    return vayu_str_concat(vayu_str_concat(a, vayu_mkstr_c("/")), b);
+#endif
+}
+
+VayuStr* vayu_fs_extension(VayuStr* path) {
+    int64_t dot = -1;
+    int64_t i = path->len - 1;
+    while (i >= 0) {
+        char c = path->data[i];
+        if (c == '.') { dot = i; break; }
+        if (c == '/' || c == '\\') break;
+        i = i - 1;
+    }
+    if (dot < 0) return vayu_mkstr("", 0);
+    return vayu_mkstr(path->data + dot + 1, path->len - dot - 1);
+}
+
+VayuStr* vayu_fs_basename(VayuStr* path) {
+    int64_t slash = -1;
+    int64_t i = 0;
+    while (i < path->len) {
+        char c = path->data[i];
+        if (c == '/' || c == '\\') slash = i;
+        i = i + 1;
+    }
+    return vayu_mkstr(path->data + slash + 1, path->len - slash - 1);
+}
+
+VayuStr* vayu_fs_dirname(VayuStr* path) {
+    int64_t slash = -1;
+    int64_t i = 0;
+    while (i < path->len) {
+        char c = path->data[i];
+        if (c == '/' || c == '\\') slash = i;
+        i = i + 1;
+    }
+    if (slash < 0) return vayu_mkstr_c(".");
+    if (slash == 0) return vayu_mkstr(path->data, 1);
+    return vayu_mkstr(path->data, slash);
+}
+
+void vayu_fs_remove(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+    remove(p);
+    free(p);
+}
+
+void vayu_fs_rename(VayuStr* a, VayuStr* b) {
+    char* pa = vayu_fs_cstr(a);
+    char* pb = vayu_fs_cstr(b);
+    rename(pa, pb);
+    free(pa);
+    free(pb);
+}
+
+void vayu_fs_mkdir(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+    int64_t n = (int64_t)strlen(p);
+    int64_t i = 0;
+    while (i < n) {
+        if (p[i] == '/' || p[i] == '\\') {
+            char save = p[i];
+            p[i] = 0;
+            if (p[0] != 0) {
+#ifdef _WIN32
+                _mkdir(p);
+#else
+                mkdir(p, 0755);
+#endif
+            }
+            p[i] = save;
+        }
+        i = i + 1;
+    }
+#ifdef _WIN32
+    _mkdir(p);
+#else
+    mkdir(p, 0755);
+#endif
+    free(p);
+}
+
+void vayu_fs_rmdir(VayuStr* path) {
+    char* p = vayu_fs_cstr(path);
+    char cmd[8192];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "cmd /c rmdir /s /q \"%s\" 2>nul", p);
+#else
+    snprintf(cmd, sizeof(cmd), "rm -rf \"%s\" 2>/dev/null", p);
+#endif
+    system(cmd);
+    free(p);
+}
+
+VayuList* vayu_fs_read_dir(VayuStr* path) {
+    VayuList* lst = vayu_list_new();
+    char* p = vayu_fs_cstr(path);
+    DIR* d = opendir(p);
+    if (!d) {
+        free(p);
+        return lst;
+    }
+    struct dirent* ent;
+    while ((ent = readdir(d)) != NULL) {
+        const char* n = ent->d_name;
+        if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0) continue;
+        vayu_list_push(lst, (int64_t)vayu_mkstr_c(n));
+    }
+    closedir(d);
+    free(p);
+    return lst;
 }
 
 extern void vayu_main(void);

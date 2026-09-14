@@ -1,0 +1,29 @@
+import fs
+
+print("cwd is set")
+print(fs.is_dir("examples"))
+
+fs.mkdir("_fs_demo")
+print(fs.is_dir("_fs_demo"))
+
+write_file("_fs_demo/a.txt", "hello")
+print(fs.exists("_fs_demo/a.txt"))
+print(fs.is_file("_fs_demo/a.txt"))
+print(fs.size("_fs_demo/a.txt"))
+
+entries = fs.read_dir("_fs_demo")
+print(len(entries))
+
+print(fs.basename("a/b/c.txt"))
+print(fs.dirname("a/b/c.txt"))
+print(fs.extension("a/b/c.txt"))
+
+fs.rename("_fs_demo/a.txt", "_fs_demo/b.txt")
+print(fs.exists("_fs_demo/a.txt"))
+print(fs.exists("_fs_demo/b.txt"))
+
+fs.remove("_fs_demo/b.txt")
+print(fs.exists("_fs_demo/b.txt"))
+
+fs.rmdir("_fs_demo")
+print(fs.is_dir("_fs_demo"))
