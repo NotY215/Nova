@@ -1,10 +1,5 @@
 # vcode.vyu — Vayu source -> QBE IL.
-# 7E-4: typed lists/maps, method return inference, map literals,
-#        string indexing, `in`, read_file/args/exit, class self-reference.
 
-# =========================================================================
-# Type-string helpers
-# =========================================================================
 def type_kind_of(tstr: str) -> str:
     if tstr == "int":
         return "int"
@@ -88,10 +83,6 @@ def type_map_val_of(tstr: str) -> str:
         j = j + 1
     return result
 
-# =========================================================================
-# Lex / parse (same as 7E-3 except parse_type_name captures generics
-# and map literals are parsed)
-# =========================================================================
 class Token:
     kind: str
     lexeme: str
@@ -793,9 +784,6 @@ class Parser:
         self.ast.nodes[node].left = first
         return node
 
-# =========================================================================
-# Loop context and class info
-# =========================================================================
 class LoopContext:
     continue_label: str
     break_label: str
@@ -830,9 +818,6 @@ class ClassInfo:
         self.init_decl = 0
         self.total_size = 0
 
-# =========================================================================
-# Codegen
-# =========================================================================
 class Codegen:
     ast: Ast
     out: list<str>
@@ -1185,7 +1170,6 @@ class Codegen:
                             info.init_decl = p.init_decl
             i = i + 1
 
-    # ---------------- collect assigned ----------------
     def collect_assigned(self, idx: int) -> None:
         if idx == 0:
             return
@@ -1279,7 +1263,6 @@ class Codegen:
             self.collect_assigned(n.right)
             return
 
-    # ---------------- expressions ----------------
     def gen_expr(self, idx: int) -> str:
         if idx == 0:
             return "0"
@@ -1618,8 +1601,6 @@ class Codegen:
             if arg == 0:
                 print("vcode: len() requires 1 argument")
                 exit(1)
-            arg_kind = type_kind_of("")
-            saved = self.last_kind
             v = self.gen_expr(arg)
             arg_kind = self.last_kind
             kind_num = -1
@@ -1877,6 +1858,21 @@ class Codegen:
             self.last_kind = "int"
             self.last_class = ""
             return t
+        if method == "is_digit":
+            self.emit(t + " =l call $vayu_str_is_digit(l " + recv + ")")
+            self.last_kind = "bool"
+            self.last_class = ""
+            return t
+        if method == "is_alpha":
+            self.emit(t + " =l call $vayu_str_is_alpha(l " + recv + ")")
+            self.last_kind = "bool"
+            self.last_class = ""
+            return t
+        if method == "is_space":
+            self.emit(t + " =l call $vayu_str_is_space(l " + recv + ")")
+            self.last_kind = "bool"
+            self.last_class = ""
+            return t
         print("vcode: unsupported str method '" + method + "'")
         exit(1)
         return "0"
@@ -1930,7 +1926,6 @@ class Codegen:
         exit(1)
         return "0"
 
-    # ---------------- statements ----------------
     def gen_stmt(self, idx: int) -> None:
         if idx == 0:
             return
@@ -2161,7 +2156,6 @@ class Codegen:
 
         self.emit_raw(end_label)
 
-    # ---------------- functions / methods ----------------
     def param_names_of(self, params_idx: int) -> list<str>:
         names: list<str> = []
         cur = params_idx
@@ -2703,17 +2697,19 @@ def tokenize(source: str) -> list<Token>:
                     break
                 if source[pos] == "\\":
                     if pos + 1 < n:
-                        esc = source[pos + 1]
-                        if esc == "n":
+                        e = source[pos + 1]
+                        if e == "n":
                             text = text + "\n"
-                        elif esc == "t":
+                        elif e == "t":
                             text = text + "\t"
-                        elif esc == "\"":
+                        elif e == "r":
+                            text = text + "\r"
+                        elif e == "\"":
                             text = text + "\""
-                        elif esc == "\\":
+                        elif e == "\\":
                             text = text + "\\"
                         else:
-                            text = text + esc
+                            text = text + e
                         pos = pos + 2
                         col = col + 2
                         continue
