@@ -1877,21 +1877,6 @@ class Codegen:
             self.last_kind = "int"
             self.last_class = ""
             return t
-        if method == "is_digit":
-            self.emit(t + " =l call $vayu_str_is_digit(l " + recv + ")")
-            self.last_kind = "bool"
-            self.last_class = ""
-            return t
-        if method == "is_alpha":
-            self.emit(t + " =l call $vayu_str_is_alpha(l " + recv + ")")
-            self.last_kind = "bool"
-            self.last_class = ""
-            return t
-        if method == "is_space":
-            self.emit(t + " =l call $vayu_str_is_space(l " + recv + ")")
-            self.last_kind = "bool"
-            self.last_class = ""
-            return t
         print("vcode: unsupported str method '" + method + "'")
         exit(1)
         return "0"
