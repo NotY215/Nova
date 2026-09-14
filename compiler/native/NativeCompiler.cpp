@@ -277,12 +277,14 @@ namespace vayu {
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Import) {
                         auto* n = static_cast<const ImportStmt*>(s.get());
-                        if (n->moduleName != "fs" && !modules_.count(n->moduleName))
+                        if (n->moduleName != "fs" && n->moduleName != "time" &&
+                            !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                     }
                     else if (s->kind == StmtKind::FromImport) {
                         auto* n = static_cast<const FromImportStmt*>(s.get());
-                        if (n->moduleName != "fs" && !modules_.count(n->moduleName))
+                        if (n->moduleName != "fs" && n->moduleName != "time" &&
+                            !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                         for (auto& item : n->items) {
                             const std::string& local = item.alias.empty() ? item.name : item.alias;
@@ -1656,6 +1658,39 @@ namespace vayu {
                 }
                 throw std::runtime_error("native: fs has no method '" + m + "'");
             }
+            Val emitTimeCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+
+                if (m == "now") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_time_now()");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "now_ms") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_time_now_ms()");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "sleep") {
+                    Val ms = emitExpr(n->args[0].value.get());
+                    line("call $vayu_time_sleep(l " + ms.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "format") {
+                    Val u = emitExpr(n->args[0].value.get());
+                    Val f = emitExpr(n->args[1].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_time_format(l " + u.ssa +
+                        ", l " + f.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                throw std::runtime_error("native: time has no method '" + m + "'");
+            }
 
 
             Val emitCall(const CallExpr* n) {
@@ -1749,6 +1784,9 @@ namespace vayu {
                             attr->target.get());
                         if (tn0->name == "fs") {
                             return emitFsCall(n, attr);
+                        }
+                        if (tn0->name == "time") {
+                            return emitTimeCall(n, attr);
                         }
                     }
 
@@ -2955,11 +2993,13 @@ namespace vayu {
 #include <stdint.h>
 #include <setjmp.h>
 #include <ctype.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
 #ifdef _WIN32
 #  include <direct.h>
+#  include <windows.h>
 #endif
 
 typedef struct { int64_t len; char data[]; } VayuStr;
@@ -3856,6 +3896,57 @@ VayuList* vayu_fs_read_dir(VayuStr* path) {
     closedir(d);
     free(p);
     return lst;
+}
+// ---- Phase 10.2: time module ----
+int64_t vayu_time_now(void) {
+    return (int64_t)time(NULL);
+}
+
+int64_t vayu_time_now_ms(void) {
+#ifdef _WIN32
+    FILETIME ft;
+    ULARGE_INTEGER ui;
+    GetSystemTimeAsFileTime(&ft);
+    ui.LowPart = ft.dwLowDateTime;
+    ui.HighPart = ft.dwHighDateTime;
+    // 100ns ticks since 1601-01-01 → ms since 1970-01-01.
+    // 11644473600000 ms is the offset between the two epochs.
+    return (int64_t)((ui.QuadPart / 10000ULL) - 11644473600000LL);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+#endif
+}
+
+void vayu_time_sleep(int64_t ms) {
+    if (ms <= 0) return;
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000;
+    nanosleep(&ts, NULL);
+#endif
+}
+
+VayuStr* vayu_time_format(int64_t unix_secs, VayuStr* fmt) {
+    char fmtbuf[256];
+    int64_t n = fmt->len < 255 ? fmt->len : 255;
+    memcpy(fmtbuf, fmt->data, (size_t)n);
+    fmtbuf[n] = 0;
+
+    time_t t = (time_t)unix_secs;
+    struct tm tmv;
+#ifdef _WIN32
+    if (localtime_s(&tmv, &t) != 0) return vayu_mkstr("", 0);
+#else
+    if (localtime_r(&t, &tmv) == NULL) return vayu_mkstr("", 0);
+#endif
+    char out[512];
+    size_t len = strftime(out, sizeof(out), fmtbuf, &tmv);
+    return vayu_mkstr(out, (int64_t)len);
 }
 
 extern void vayu_main(void);

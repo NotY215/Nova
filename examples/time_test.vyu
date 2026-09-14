@@ -1,0 +1,18 @@
+import time
+
+t = time.now()
+print(t > 1000000000)
+
+tms = time.now_ms()
+print(tms > 1000000000000)
+
+t0 = time.now_ms()
+time.sleep(80)
+t1 = time.now_ms()
+print(t1 - t0 >= 60)
+
+print(time.format(1000000000, "%Y"))
+
+y = time.format(t, "%Y")
+print(len(y))
+print(y.starts_with("20"))

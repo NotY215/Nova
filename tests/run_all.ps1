@@ -34,7 +34,8 @@ $skip = @(
     "vm_lambdas.vyu",   # native backend does not yet support lambdas
     "stdlib.vyu",       # uses math module, unsupported in native
     "native_collections.vyu",  # prints whole maps; iteration order is impl-defined
-    "fs_test.vyu"              # native-only; interp/VM don't yet support the fs module
+    "fs_test.vyu",             # native-only; interp/VM don't yet support the fs module
+    "time_test.vyu"            # native-only; same reason
 )
 
 function Invoke-Backend {
