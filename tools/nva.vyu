@@ -3,6 +3,9 @@
 # Usage:
 #   nva new <name>
 #   nva init
+#   nva add <name> [version]
+#   nva remove <name>
+#   nva list
 #   nva build
 #   nva run
 #   nva clean
@@ -40,6 +43,26 @@ def is_blank_or_comment(line: str) -> bool:
         return true
     if t.starts_with("#"):
         return true
+    return false
+
+def join_lines(lines: list<str>) -> str:
+    out = ""
+    i = 0
+    while i < len(lines):
+        if i > 0:
+            out = out + "\n"
+        out = out + lines[i]
+        i = i + 1
+    return out
+
+# The runtime's list.contains() does raw pointer comparison; for strings
+# we need content equality.  native `==` on str emits $vayu_str_eq.
+def str_in_list(s: str, lst: list<str>) -> bool:
+    i = 0
+    while i < len(lst):
+        if lst[i] == s:
+            return true
+        i = i + 1
     return false
 
 def parse_manifest(path: str) -> Manifest:
@@ -87,8 +110,7 @@ def join_path(a: str, b: str) -> str:
     return a + "/" + b
 
 def dir_exists(p: str) -> bool:
-    cmd = "if exist \"" + p + "\\*\" exit 0"
-    rc = run_command(cmd)
+    rc = run_command("dir \"" + p + "\" /ad /b >nul 2>nul")
     if rc == 0:
         return true
     return false
@@ -168,6 +190,119 @@ def resolve_modules(m: Manifest) -> str:
         k = k + 1
     return out
 
+# ---------------------------------------------------------------------------
+# toml editing
+# ---------------------------------------------------------------------------
+
+def toml_add_dep(path: str, name: str, version: str) -> None:
+    src = read_file(path)
+    lines = src.split("\n")
+    dep_start = -1
+    dep_end = -1
+    i = 0
+    while i < len(lines):
+        t = trim(lines[i])
+        if t == "[dependencies]":
+            dep_start = i
+            j = i + 1
+            while j < len(lines):
+                u = trim(lines[j])
+                if u.starts_with("[") and u.ends_with("]"):
+                    break
+                if len(u) > 0:
+                    dep_end = j
+                j = j + 1
+            break
+        i = i + 1
+
+    new_line = name + " = \"" + version + "\""
+    new_lines: list<str> = []
+    if dep_start < 0:
+        # no [dependencies] section: append
+        k = 0
+        while k < len(lines):
+            new_lines.append(lines[k])
+            k = k + 1
+        new_lines.append("")
+        new_lines.append("[dependencies]")
+        new_lines.append(new_line)
+    elif dep_end < 0:
+        # section exists but empty: insert right after header
+        k = 0
+        while k < len(lines):
+            new_lines.append(lines[k])
+            if k == dep_start:
+                new_lines.append(new_line)
+            k = k + 1
+    else:
+        # insert after last existing dep line
+        k = 0
+        while k < len(lines):
+            new_lines.append(lines[k])
+            if k == dep_end:
+                new_lines.append(new_line)
+            k = k + 1
+    write_file(path, join_lines(new_lines))
+
+def toml_remove_dep(path: str, name: str) -> None:
+    src = read_file(path)
+    lines = src.split("\n")
+    in_deps = false
+    out_lines: list<str> = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        t = trim(line)
+        if t == "[dependencies]":
+            in_deps = true
+            out_lines.append(line)
+            i = i + 1
+            continue
+        if in_deps and t.starts_with("[") and t.ends_with("]"):
+            in_deps = false
+        if in_deps and len(t) > 0:
+            eq = t.find("=")
+            if eq >= 0:
+                key = trim(t.substr(0, eq))
+                if key == name:
+                    i = i + 1
+                    continue
+        out_lines.append(line)
+        i = i + 1
+    write_file(path, join_lines(out_lines))
+
+# ---------------------------------------------------------------------------
+# lock file
+# ---------------------------------------------------------------------------
+
+def collect_lock_entries(m: Manifest, out: list<str>, visited: list<str>) -> None:
+    i = 0
+    while i < len(m.deps):
+        d = m.deps[i]
+        if not str_in_list(d.name, visited):
+            visited.append(d.name)
+            ddir = find_dep_dir(d.name, m.root_dir)
+            out.append(d.name + " " + d.version + " " + ddir)
+            sub_toml = join_path(ddir, "nova.toml")
+            if file_exists(sub_toml):
+                sub = parse_manifest(sub_toml)
+                sub.root_dir = ddir
+                collect_lock_entries(sub, out, visited)
+        i = i + 1
+
+def write_lock(m: Manifest) -> None:
+    lines: list<str> = []
+    lines.append("# nva lock file, format v1")
+    lines.append("# do not edit by hand; regenerate with 'nva build'")
+    lines.append("# fields: name version path")
+    visited: list<str> = []
+    collect_lock_entries(m, lines, visited)
+    write_file("nova.lock", join_lines(lines) + "\n")
+
+# ---------------------------------------------------------------------------
+# commands
+# ---------------------------------------------------------------------------
+
 def cmd_new(name: str) -> None:
     root = name
     mkdir(root)
@@ -202,6 +337,79 @@ def cmd_init() -> None:
         write_file("src/main.vyu", "print(\"Hello, Vayu!\")\n")
     print("nva: initialized nova.toml")
 
+def cmd_add(name: str, version: str) -> None:
+    if not file_exists("nova.toml"):
+        print("nva: no nova.toml in this directory")
+        exit(1)
+    m = parse_manifest("nova.toml")
+    i = 0
+    while i < len(m.deps):
+        if m.deps[i].name == name:
+            print("nva: '" + name + "' is already a dependency")
+            exit(1)
+        i = i + 1
+    toml_add_dep("nova.toml", name, version)
+    print("nva: added " + name + " = \"" + version + "\"")
+
+def cmd_remove(name: str) -> None:
+    if not file_exists("nova.toml"):
+        print("nva: no nova.toml in this directory")
+        exit(1)
+    m = parse_manifest("nova.toml")
+    found = false
+    i = 0
+    while i < len(m.deps):
+        if m.deps[i].name == name:
+            found = true
+        i = i + 1
+    toml_remove_dep("nova.toml", name)
+    if found:
+        print("nva: removed " + name)
+    else:
+        print("nva: '" + name + "' was not a dependency")
+
+def print_dep_tree(m: Manifest, indent: int, visited: list<str>) -> None:
+    pad = ""
+    k = 0
+    while k < indent:
+        pad = pad + "  "
+        k = k + 1
+    i = 0
+    while i < len(m.deps):
+        d = m.deps[i]
+        if str_in_list(d.name, visited):
+            print(pad + d.name + " " + d.version + " (already shown)")
+            i = i + 1
+            continue
+        visited.append(d.name)
+        ddir = find_dep_dir(d.name, m.root_dir)
+        if ddir == "":
+            print(pad + d.name + " " + d.version + " (MISSING)")
+        else:
+            print(pad + d.name + " " + d.version + " -> " + ddir)
+            sub_toml = join_path(ddir, "nova.toml")
+            if file_exists(sub_toml):
+                sub = parse_manifest(sub_toml)
+                sub.root_dir = ddir
+                print_dep_tree(sub, indent + 1, visited)
+        i = i + 1
+
+def cmd_list() -> None:
+    if not file_exists("nova.toml"):
+        print("nva: no nova.toml in this directory")
+        exit(1)
+    m = parse_manifest("nova.toml")
+    m.root_dir = ""
+    if m.name == "":
+        print("nva: nova.toml has no package.name")
+        exit(1)
+    print(m.name + " " + m.version)
+    if len(m.deps) == 0:
+        print("  (no dependencies)")
+        return
+    visited: list<str> = []
+    print_dep_tree(m, 1, visited)
+
 def cmd_build() -> str:
     if not file_exists("nova.toml"):
         print("nva: no nova.toml in this directory")
@@ -215,7 +423,6 @@ def cmd_build() -> str:
     mkdir("build")
 
     # Windows paths must use backslashes; cmd.exe treats '/' as a switch.
-    # Also quote every path so spaces survive.
     entry_win = m.entry.replace("/", "\\")
     exe_win = "build\\" + m.name + ".exe"
 
@@ -242,19 +449,23 @@ def cmd_build() -> str:
     if rc != 0:
         print("nva: build failed (exit " + str(rc) + ")")
         exit(1)
+    write_lock(m)
     print("nva: built " + exe_win)
     return exe_win
 
 def cmd_run() -> None:
     exe = cmd_build()
     print("nva: running " + exe)
-    # Quote the path; call is not strictly needed for a single exe but
-    # consistent with the compiler invocation.
     run_command("\"" + exe + "\"")
 
 def cmd_clean() -> None:
     if dir_exists("build"):
         run_command("rmdir /s /q build 2>nul")
+    if file_exists("nova.lock"):
+        # The lock file is a build artifact only in this trivial sense: it
+        # describes the current dependency graph.  `nva build` regenerates it.
+        # Not deleting by default; users who want a fresh lock can delete it.
+        print("nva: kept nova.lock (regenerated on next build)")
     print("nva: cleaned")
 
 def main() -> None:
@@ -263,6 +474,9 @@ def main() -> None:
         print("usage: nva <command> [args]")
         print("       nva new <name>")
         print("       nva init")
+        print("       nva add <name> [version]")
+        print("       nva remove <name>")
+        print("       nva list")
         print("       nva build")
         print("       nva run")
         print("       nva clean")
@@ -276,6 +490,24 @@ def main() -> None:
         return
     if cmd == "init":
         cmd_init()
+        return
+    if cmd == "add":
+        if len(a) < 2:
+            print("nva: 'add' requires a package name")
+            exit(1)
+        ver = "0.1.0"
+        if len(a) >= 3:
+            ver = a[2]
+        cmd_add(a[1], ver)
+        return
+    if cmd == "remove":
+        if len(a) < 2:
+            print("nva: 'remove' requires a package name")
+            exit(1)
+        cmd_remove(a[1])
+        return
+    if cmd == "list":
+        cmd_list()
         return
     if cmd == "build":
         cmd_build()
