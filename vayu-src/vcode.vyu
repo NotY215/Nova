@@ -69,7 +69,7 @@ def type_list_elem_of(tstr: str) -> str:
 def type_map_val_of(tstr: str) -> str:
     if type_kind_of(tstr) != "map":
         return ""
-    inner = inner_of_generic(tstr)
+    inner: str = inner_of_generic(tstr)
     k = 0
     comma = -1
     while k < len(inner):
@@ -111,6 +111,7 @@ class Node:
     left: int
     right: int
     extra: int
+    extra2: int
 
     def __init__(self, kind: str) -> None:
         self.kind = kind
@@ -119,6 +120,7 @@ class Node:
         self.left = 0
         self.right = 0
         self.extra = 0
+        self.extra2 = 0
 
 class Ast:
     nodes: list<Node>
@@ -336,7 +338,7 @@ class Parser:
             enode = self.ast.add("If")
             self.ast.nodes[enode].left = econd
             self.ast.nodes[enode].right = ebody
-            self.ast.nodes[last].extra = enode
+            self.ast.nodes[last].extra2 = enode
             last = enode
         if self.check("Else"):
             self.advance()
@@ -344,7 +346,7 @@ class Parser:
             ebody = self.parse_block()
             enode = self.ast.add("Else")
             self.ast.nodes[enode].right = ebody
-            self.ast.nodes[last].extra = enode
+            self.ast.nodes[last].extra2 = enode
         return node
 
     def parse_while(self) -> int:
@@ -407,7 +409,7 @@ class Parser:
         self.ast.nodes[node].value = name.lexeme
         self.ast.nodes[node].left = params
         self.ast.nodes[node].right = body
-        self.ast.nodes[node].extra = ret_type
+        self.ast.nodes[node].extra2 = ret_type
         return node
 
     def parse_class(self) -> int:
@@ -1099,8 +1101,8 @@ class Codegen:
                     info.method_names.append(m.value)
                     info.method_decls.append(cur)
                     rt = ""
-                    if m.extra != 0:
-                        rt = self.ast.nodes[m.extra].value
+                    if m.extra2 != 0:
+                        rt = self.ast.nodes[m.extra2].value
                     info.method_return_type_strs.append(rt)
             cur = m.extra
         self.class_infos.append(info)
@@ -1217,8 +1219,8 @@ class Codegen:
         if n.kind == "If":
             self.collect_assigned(n.left)
             self.collect_assigned(n.right)
-            if n.extra != 0:
-                self.collect_assigned(n.extra)
+            if n.extra2 != 0:
+                self.collect_assigned(n.extra2)
             return
         if n.kind == "Else":
             self.collect_assigned(n.right)
@@ -1875,6 +1877,21 @@ class Codegen:
             self.last_kind = "int"
             self.last_class = ""
             return t
+        if method == "is_digit":
+            self.emit(t + " =l call $vayu_str_is_digit(l " + recv + ")")
+            self.last_kind = "bool"
+            self.last_class = ""
+            return t
+        if method == "is_alpha":
+            self.emit(t + " =l call $vayu_str_is_alpha(l " + recv + ")")
+            self.last_kind = "bool"
+            self.last_class = ""
+            return t
+        if method == "is_space":
+            self.emit(t + " =l call $vayu_str_is_space(l " + recv + ")")
+            self.last_kind = "bool"
+            self.last_class = ""
+            return t
         print("vcode: unsupported str method '" + method + "'")
         exit(1)
         return "0"
@@ -2068,11 +2085,11 @@ class Codegen:
         if not self.terminated:
             self.emit("jmp " + end_label)
         self.emit_raw(next_label)
-        if n.extra == 0:
+        if n.extra2 == 0:
             if not self.terminated:
                 self.emit("jmp " + end_label)
             return
-        nxt = self.ast.nodes[n.extra]
+        nxt = self.ast.nodes[n.extra2]
         if nxt.kind == "If":
             self.gen_if_chain(nxt, end_label)
         elif nxt.kind == "Else":

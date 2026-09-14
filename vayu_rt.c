@@ -108,6 +108,30 @@ int64_t vayu_str_to_int(VayuStr* s) {
     }
     return neg ? -n : n;
 }
+int64_t vayu_str_is_digit(VayuStr* s) {
+    if (s->len == 0) return 0;
+    for (int64_t i = 0; i < s->len; ++i) {
+        unsigned char c = (unsigned char)s->data[i];
+        if (c < '0' || c > '9') return 0;
+    }
+    return 1;
+}
+int64_t vayu_str_is_alpha(VayuStr* s) {
+    if (s->len == 0) return 0;
+    for (int64_t i = 0; i < s->len; ++i) {
+        unsigned char c = (unsigned char)s->data[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_')) return 0;
+    }
+    return 1;
+}
+int64_t vayu_str_is_space(VayuStr* s) {
+    if (s->len == 0) return 0;
+    for (int64_t i = 0; i < s->len; ++i) {
+        unsigned char c = (unsigned char)s->data[i];
+        if (!(c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v')) return 0;
+    }
+    return 1;
+}
 VayuStr* vayu_str_char_at(VayuStr* s, int64_t i) {
     if (i < 0) i += s->len;
     if (i < 0 || i >= s->len) { fprintf(stderr, "IndexError: string\n"); exit(1); }

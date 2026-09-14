@@ -1693,7 +1693,18 @@ namespace vayu {
                 }
                 std::string t = newTemp();
                 line(t + " =l call $vayu_fn_" + mangle(fnName) + "(" + argsStr + ")");
-                r.ssa = t; r.type = VType::Unknown;
+                r.ssa = t;
+                // Try to recover the declared return type from the callee.
+                const DefStmt* target = nullptr;
+                for (const auto& s : modules_[fi != fromImports_.end()
+                    ? fi->second : ""].stmts) {
+                    if (s->kind == StmtKind::Def) {
+                        auto* d = static_cast<const DefStmt*>(s.get());
+                        if (d->name == name) { target = d; break; }
+                    }
+                }
+                (void)target;
+                r.type = VType::Unknown;
                 return r;
             }
 
