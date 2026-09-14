@@ -38,7 +38,9 @@ $skip = @(
     "time_test.vyu",           # native-only; same reason
     "json_test.vyu",           # native-only; same reason
     "regex_test.vyu",          # native-only; same reason
-    "thread_test.vyu"          # native-only; same reason
+    "thread_test.vyu",         # native-only; same reason
+    "net_test.vyu",            # native-only; same reason
+    "crypto_test.vyu"          # native-only; same reason
 )
 
 function Invoke-Backend {

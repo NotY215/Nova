@@ -1,0 +1,20 @@
+import crypto
+
+print(crypto.sha256("abc"))
+
+h = crypto.sha256("")
+print(h)
+print(len(h))
+
+print(crypto.md5("abc"))
+
+b = crypto.base64_encode("hello")
+print(b)
+print(crypto.base64_decode(b))
+
+print(crypto.hmac_sha256("Jefe", "what do ya want for nothing?"))
+
+r = crypto.random_bytes(16)
+print(len(r))
+r2 = crypto.random_bytes(16)
+print(r != r2)

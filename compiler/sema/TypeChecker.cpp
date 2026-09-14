@@ -105,14 +105,16 @@ namespace vayu {
         B("print_raw", Types::Function({ Types::Str() }, Types::None()));
 
         // ---- Phase 10 builtin modules (name-only registration) ----
-        // The compiler's native backend handles fs / time / json / regex /
-        // thread directly.  The type checker just needs to know these names
-        // exist and be liberal about their members.
+        // The compiler's native backend handles these directly.  The type
+        // checker just needs to know the names exist and be liberal about
+        // their members.
         B("fs", Types::Any());
         B("time", Types::Any());
         B("json", Types::Any());
         B("regex", Types::Any());
         B("thread", Types::Any());
+        B("net", Types::Any());
+        B("crypto", Types::Any());
     }
 
     void TypeChecker::installBuiltinExceptions() {

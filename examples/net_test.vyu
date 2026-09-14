@@ -1,0 +1,23 @@
+import net
+
+srv = net.listen(0)
+port = net.server_port(srv)
+print(port > 0)
+
+conn = net.connect("127.0.0.1", port)
+peer = net.accept(srv)
+
+n = net.send_line(conn, "hello")
+print(n)
+
+line = net.recv_line(peer)
+print(line)
+
+net.send_line(peer, "goodbye")
+back = net.recv_line(conn)
+print(back)
+
+net.close(conn)
+net.close(peer)
+net.close(srv)
+print(true)

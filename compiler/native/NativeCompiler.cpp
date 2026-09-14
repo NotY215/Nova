@@ -279,14 +279,16 @@ namespace vayu {
                         auto* n = static_cast<const ImportStmt*>(s.get());
                         if (n->moduleName != "fs" && n->moduleName != "time" &&
                             n->moduleName != "json" && n->moduleName != "regex" &&
-                            n->moduleName != "thread" && !modules_.count(n->moduleName))
+                            n->moduleName != "thread" && n->moduleName != "net" &&
+                            n->moduleName != "crypto" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                     }
                     else if (s->kind == StmtKind::FromImport) {
                         auto* n = static_cast<const FromImportStmt*>(s.get());
                         if (n->moduleName != "fs" && n->moduleName != "time" &&
                             n->moduleName != "json" && n->moduleName != "regex" &&
-                            n->moduleName != "thread" && !modules_.count(n->moduleName))
+                            n->moduleName != "thread" && n->moduleName != "net" &&
+                            n->moduleName != "crypto" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                         for (auto& item : n->items) {
                             const std::string& local = item.alias.empty() ? item.name : item.alias;
@@ -1929,6 +1931,129 @@ namespace vayu {
                 throw std::runtime_error("native: thread has no method '" + m + "'");
             }
 
+            Val emitNetCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+                auto a0 = [&]() { return emitExpr(n->args[0].value.get()); };
+                auto a1 = [&]() { return emitExpr(n->args[1].value.get()); };
+
+                if (m == "listen") {
+                    Val p = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_listen(l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Server";
+                    return r;
+                }
+                if (m == "accept") {
+                    Val s = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_accept(l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Conn";
+                    return r;
+                }
+                if (m == "connect") {
+                    Val h = a0(); Val p = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_connect(l " + h.ssa + ", l " + p.ssa + ")");
+                    r.ssa = t; r.type = VType::Int; r.cls = "Conn";
+                    return r;
+                }
+                if (m == "send") {
+                    Val h = a0(); Val d = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_send(l " + h.ssa + ", l " + d.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "recv") {
+                    Val h = a0(); Val nn = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_recv(l " + h.ssa + ", l " + nn.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "send_line") {
+                    Val h = a0(); Val d = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_send_line(l " + h.ssa + ", l " + d.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "recv_line") {
+                    Val h = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_recv_line(l " + h.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "close") {
+                    Val h = a0();
+                    line("call $vayu_net_close(l " + h.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "server_port") {
+                    Val h = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_net_server_port(l " + h.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                throw std::runtime_error("native: net has no method '" + m + "'");
+            }
+            Val emitCryptoCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+                auto a0 = [&]() { return emitExpr(n->args[0].value.get()); };
+                auto a1 = [&]() { return emitExpr(n->args[1].value.get()); };
+
+                if (m == "sha256") {
+                    Val s = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_crypto_sha256(l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "md5") {
+                    Val s = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_crypto_md5(l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "hmac_sha256") {
+                    Val k = a0(); Val msg = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_crypto_hmac_sha256(l " + k.ssa +
+                        ", l " + msg.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "base64_encode") {
+                    Val s = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_crypto_base64_encode(l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "base64_decode") {
+                    Val s = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_crypto_base64_decode(l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "random_bytes") {
+                    Val nn = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_crypto_random_bytes(l " + nn.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                throw std::runtime_error("native: crypto has no method '" + m + "'");
+            }
+
+
             Val emitCall(const CallExpr* n) {
                 Val r;
 
@@ -2032,6 +2157,12 @@ namespace vayu {
                         }
                         if (tn0->name == "thread") {
                             return emitThreadCall(n, attr);
+                        }
+                        if (tn0->name == "net") {
+                            return emitNetCall(n, attr);
+                        }
+                        if (tn0->name == "crypto") {
+                            return emitCryptoCall(n, attr);
                         }
                     }
 
@@ -3244,11 +3375,18 @@ namespace vayu {
 #include <sys/types.h>
 #include <dirent.h>
 #ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
 #  include <direct.h>
 #  include <windows.h>
+#  include <bcrypt.h>
 #else
 #  include <pthread.h>
 #  include <unistd.h>
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <arpa/inet.h>
+#  include <netdb.h>
 #endif
 
 typedef struct { int64_t len; char data[]; } VayuStr;
@@ -4910,6 +5048,531 @@ void vayu_mutex_unlock(int64_t h) {
 #endif
 }
 
+// ---- Phase 10.6: net module ----
+#ifdef _WIN32
+typedef SOCKET vayu_socket_t;
+#  define VAYU_INVALID_SOCKET INVALID_SOCKET
+#  define VAYU_CLOSE_SOCKET   closesocket
+static int vayu_net_init_done = 0;
+static int vayu_net_init(void) {
+    if (vayu_net_init_done) return 0;
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
+    vayu_net_init_done = 1;
+    return 0;
+}
+#else
+typedef int vayu_socket_t;
+#  define VAYU_INVALID_SOCKET (-1)
+#  define VAYU_CLOSE_SOCKET   close
+static int vayu_net_init(void) { return 0; }
+#endif
+
+int64_t vayu_net_listen(int64_t port) {
+    if (vayu_net_init() != 0) return 0;
+    vayu_socket_t s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == VAYU_INVALID_SOCKET) return 0;
+    int opt = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons((unsigned short)port);
+    if (bind(s, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+        VAYU_CLOSE_SOCKET(s);
+        return 0;
+    }
+    if (listen(s, 16) != 0) {
+        VAYU_CLOSE_SOCKET(s);
+        return 0;
+    }
+    return (int64_t)s;
+}
+
+int64_t vayu_net_server_port(int64_t h) {
+    vayu_socket_t s = (vayu_socket_t)h;
+    struct sockaddr_in addr;
+#ifdef _WIN32
+    int alen = sizeof(addr);
+#else
+    socklen_t alen = sizeof(addr);
+#endif
+    if (getsockname(s, (struct sockaddr*)&addr, &alen) != 0) return 0;
+    return (int64_t)ntohs(addr.sin_port);
+}
+
+int64_t vayu_net_accept(int64_t srv) {
+    vayu_socket_t s = (vayu_socket_t)srv;
+    vayu_socket_t c = accept(s, NULL, NULL);
+    if (c == VAYU_INVALID_SOCKET) return 0;
+    return (int64_t)c;
+}
+
+int64_t vayu_net_connect(VayuStr* host, int64_t port) {
+    if (vayu_net_init() != 0) return 0;
+    vayu_socket_t s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == VAYU_INVALID_SOCKET) return 0;
+    char hostbuf[256];
+    int64_t n = host->len < 255 ? host->len : 255;
+    memcpy(hostbuf, host->data, (size_t)n);
+    hostbuf[n] = 0;
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((unsigned short)port);
+    if (inet_pton(AF_INET, hostbuf, &addr.sin_addr) != 1) {
+        struct addrinfo hints, *res = NULL;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(hostbuf, NULL, &hints, &res) != 0 || !res) {
+            VAYU_CLOSE_SOCKET(s);
+            return 0;
+        }
+        addr.sin_addr = ((struct sockaddr_in*)res->ai_addr)->sin_addr;
+        freeaddrinfo(res);
+    }
+    if (connect(s, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+        VAYU_CLOSE_SOCKET(s);
+        return 0;
+    }
+    return (int64_t)s;
+}
+
+int64_t vayu_net_send(int64_t h, VayuStr* s) {
+    vayu_socket_t sock = (vayu_socket_t)h;
+    int64_t sent = 0;
+    while (sent < s->len) {
+        int n = send(sock, s->data + sent, (int)(s->len - sent), 0);
+        if (n <= 0) return sent;
+        sent += n;
+    }
+    return sent;
+}
+
+VayuStr* vayu_net_recv(int64_t h, int64_t maxlen) {
+    vayu_socket_t sock = (vayu_socket_t)h;
+    if (maxlen <= 0) maxlen = 4096;
+    if (maxlen > 65536) maxlen = 65536;
+    char* buf = (char*)malloc((size_t)maxlen);
+    int n = recv(sock, buf, (int)maxlen, 0);
+    if (n <= 0) {
+        free(buf);
+        return vayu_mkstr("", 0);
+    }
+    VayuStr* r = vayu_mkstr(buf, n);
+    free(buf);
+    return r;
+}
+
+int64_t vayu_net_send_line(int64_t h, VayuStr* s) {
+    int64_t r = vayu_net_send(h, s);
+    vayu_socket_t sock = (vayu_socket_t)h;
+    send(sock, "\n", 1, 0);
+    return r;
+}
+
+VayuStr* vayu_net_recv_line(int64_t h) {
+    vayu_socket_t sock = (vayu_socket_t)h;
+    size_t cap = 128, len = 0;
+    char* buf = (char*)malloc(cap);
+    char c;
+    while (1) {
+        int n = recv(sock, &c, 1, 0);
+        if (n <= 0) break;
+        if (c == '\n') break;
+        if (c == '\r') continue;
+        if (len + 1 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }
+        buf[len++] = c;
+    }
+    VayuStr* r = vayu_mkstr(buf, (int64_t)len);
+    free(buf);
+    return r;
+}
+
+void vayu_net_close(int64_t h) {
+    if (!h) return;
+    vayu_socket_t s = (vayu_socket_t)h;
+    VAYU_CLOSE_SOCKET(s);
+}
+
+// ---- Phase 10.7: crypto module ----
+
+static VayuStr* vayu_hex(const uint8_t* b, int64_t n) {
+    static const char hx[] = "0123456789abcdef";
+    char* buf = (char*)malloc((size_t)n * 2);
+    for (int64_t i = 0; i < n; ++i) {
+        buf[i*2]   = hx[(b[i] >> 4) & 0xf];
+        buf[i*2+1] = hx[b[i] & 0xf];
+    }
+    VayuStr* r = vayu_mkstr(buf, n * 2);
+    free(buf);
+    return r;
+}
+
+// --- SHA-256 ---
+typedef struct {
+    uint32_t state[8];
+    uint64_t bitlen;
+    uint8_t  data[64];
+    uint32_t datalen;
+} VayuSHA256Ctx;
+
+static const uint32_t vayu_sha256_k[64] = {
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,
+    0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,
+    0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,
+    0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,
+    0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,
+    0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,
+    0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,
+    0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,
+    0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+};
+
+#define VAYU_ROTR32(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+
+static void vayu_sha256_transform(VayuSHA256Ctx* ctx, const uint8_t data[64]) {
+    uint32_t a, b, c, d, e, f, g, h, t1, t2, m[64];
+    int i, j;
+    for (i = 0, j = 0; i < 16; ++i, j += 4)
+        m[i] = ((uint32_t)data[j] << 24) | ((uint32_t)data[j+1] << 16) |
+               ((uint32_t)data[j+2] << 8) | (uint32_t)data[j+3];
+    for (; i < 64; ++i) {
+        uint32_t s0 = VAYU_ROTR32(m[i-15], 7) ^ VAYU_ROTR32(m[i-15], 18) ^ (m[i-15] >> 3);
+        uint32_t s1 = VAYU_ROTR32(m[i-2], 17) ^ VAYU_ROTR32(m[i-2], 19) ^ (m[i-2] >> 10);
+        m[i] = m[i-16] + s0 + m[i-7] + s1;
+    }
+    a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
+    e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
+    for (i = 0; i < 64; ++i) {
+        uint32_t S1 = VAYU_ROTR32(e, 6) ^ VAYU_ROTR32(e, 11) ^ VAYU_ROTR32(e, 25);
+        uint32_t ch = (e & f) ^ ((~e) & g);
+        t1 = h + S1 + ch + vayu_sha256_k[i] + m[i];
+        uint32_t S0 = VAYU_ROTR32(a, 2) ^ VAYU_ROTR32(a, 13) ^ VAYU_ROTR32(a, 22);
+        uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+        t2 = S0 + maj;
+        h = g; g = f; f = e; e = d + t1;
+        d = c; c = b; b = a; a = t1 + t2;
+    }
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+}
+
+static void vayu_sha256_init(VayuSHA256Ctx* ctx) {
+    ctx->datalen = 0; ctx->bitlen = 0;
+    ctx->state[0] = 0x6a09e667; ctx->state[1] = 0xbb67ae85;
+    ctx->state[2] = 0x3c6ef372; ctx->state[3] = 0xa54ff53a;
+    ctx->state[4] = 0x510e527f; ctx->state[5] = 0x9b05688c;
+    ctx->state[6] = 0x1f83d9ab; ctx->state[7] = 0x5be0cd19;
+}
+
+static void vayu_sha256_update(VayuSHA256Ctx* ctx, const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        ctx->data[ctx->datalen++] = data[i];
+        if (ctx->datalen == 64) {
+            vayu_sha256_transform(ctx, ctx->data);
+            ctx->bitlen += 512;
+            ctx->datalen = 0;
+        }
+    }
+}
+
+static void vayu_sha256_final(VayuSHA256Ctx* ctx, uint8_t hash[32]) {
+    uint32_t i = ctx->datalen;
+    if (ctx->datalen < 56) {
+        ctx->data[i++] = 0x80;
+        while (i < 56) ctx->data[i++] = 0;
+    } else {
+        ctx->data[i++] = 0x80;
+        while (i < 64) ctx->data[i++] = 0;
+        vayu_sha256_transform(ctx, ctx->data);
+        memset(ctx->data, 0, 56);
+    }
+    ctx->bitlen += ctx->datalen * 8;
+    ctx->data[63] = (uint8_t)(ctx->bitlen);
+    ctx->data[62] = (uint8_t)(ctx->bitlen >> 8);
+    ctx->data[61] = (uint8_t)(ctx->bitlen >> 16);
+    ctx->data[60] = (uint8_t)(ctx->bitlen >> 24);
+    ctx->data[59] = (uint8_t)(ctx->bitlen >> 32);
+    ctx->data[58] = (uint8_t)(ctx->bitlen >> 40);
+    ctx->data[57] = (uint8_t)(ctx->bitlen >> 48);
+    ctx->data[56] = (uint8_t)(ctx->bitlen >> 56);
+    vayu_sha256_transform(ctx, ctx->data);
+    for (i = 0; i < 4; ++i) {
+        hash[i]      = (uint8_t)((ctx->state[0] >> (24 - i * 8)) & 0xff);
+        hash[i + 4]  = (uint8_t)((ctx->state[1] >> (24 - i * 8)) & 0xff);
+        hash[i + 8]  = (uint8_t)((ctx->state[2] >> (24 - i * 8)) & 0xff);
+        hash[i + 12] = (uint8_t)((ctx->state[3] >> (24 - i * 8)) & 0xff);
+        hash[i + 16] = (uint8_t)((ctx->state[4] >> (24 - i * 8)) & 0xff);
+        hash[i + 20] = (uint8_t)((ctx->state[5] >> (24 - i * 8)) & 0xff);
+        hash[i + 24] = (uint8_t)((ctx->state[6] >> (24 - i * 8)) & 0xff);
+        hash[i + 28] = (uint8_t)((ctx->state[7] >> (24 - i * 8)) & 0xff);
+    }
+}
+
+// --- MD5 ---
+typedef struct {
+    uint32_t state[4];
+    uint64_t bitlen;
+    uint8_t  data[64];
+    uint32_t datalen;
+} VayuMD5Ctx;
+
+static const uint32_t vayu_md5_k[64] = {
+    0xd76aa478,0xe8c7b756,0x242070db,0xc1bdceee,
+    0xf57c0faf,0x4787c62a,0xa8304613,0xfd469501,
+    0x698098d8,0x8b44f7af,0xffff5bb1,0x895cd7be,
+    0x6b901122,0xfd987193,0xa679438e,0x49b40821,
+    0xf61e2562,0xc040b340,0x265e5a51,0xe9b6c7aa,
+    0xd62f105d,0x02441453,0xd8a1e681,0xe7d3fbc8,
+    0x21e1cde6,0xc33707d6,0xf4d50d87,0x455a14ed,
+    0xa9e3e905,0xfcefa3f8,0x676f02d9,0x8d2a4c8a,
+    0xfffa3942,0x8771f681,0x6d9d6122,0xfde5380c,
+    0xa4beea44,0x4bdecfa9,0xf6bb4b60,0xbebfbc70,
+    0x289b7ec6,0xeaa127fa,0xd4ef3085,0x04881d05,
+    0xd9d4d039,0xe6db99e5,0x1fa27cf8,0xc4ac5665,
+    0xf4292244,0x432aff97,0xab9423a7,0xfc93a039,
+    0x655b59c3,0x8f0ccc92,0xffeff47d,0x85845dd1,
+    0x6fa87e4f,0xfe2ce6e0,0xa3014314,0x4e0811a1,
+    0xf7537e82,0xbd3af235,0x2ad7d2bb,0xeb86d391
+};
+
+static const uint32_t vayu_md5_s[64] = {
+    7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
+    5, 9,14,20,5, 9,14,20,5, 9,14,20,5, 9,14,20,
+    4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
+    6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21
+};
+
+#define VAYU_ROTL32(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
+
+static void vayu_md5_transform(VayuMD5Ctx* ctx, const uint8_t data[64]) {
+    uint32_t m[16];
+    for (int i = 0; i < 16; ++i)
+        m[i] = (uint32_t)data[i*4] | ((uint32_t)data[i*4+1] << 8) |
+               ((uint32_t)data[i*4+2] << 16) | ((uint32_t)data[i*4+3] << 24);
+    uint32_t a = ctx->state[0], b = ctx->state[1], c = ctx->state[2], d = ctx->state[3];
+    for (int i = 0; i < 64; ++i) {
+        uint32_t f, g;
+        if (i < 16) { f = (b & c) | ((~b) & d); g = i; }
+        else if (i < 32) { f = (d & b) | ((~d) & c); g = (5*i + 1) % 16; }
+        else if (i < 48) { f = b ^ c ^ d; g = (3*i + 5) % 16; }
+        else { f = c ^ (b | (~d)); g = (7*i) % 16; }
+        uint32_t tmp = d;
+        d = c;
+        c = b;
+        b = b + VAYU_ROTL32(a + f + vayu_md5_k[i] + m[g], vayu_md5_s[i]);
+        a = tmp;
+    }
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+}
+
+static void vayu_md5_init(VayuMD5Ctx* ctx) {
+    ctx->datalen = 0; ctx->bitlen = 0;
+    ctx->state[0] = 0x67452301;
+    ctx->state[1] = 0xefcdab89;
+    ctx->state[2] = 0x98badcfe;
+    ctx->state[3] = 0x10325476;
+}
+
+static void vayu_md5_update(VayuMD5Ctx* ctx, const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        ctx->data[ctx->datalen++] = data[i];
+        if (ctx->datalen == 64) {
+            vayu_md5_transform(ctx, ctx->data);
+            ctx->bitlen += 512;
+            ctx->datalen = 0;
+        }
+    }
+}
+
+static void vayu_md5_final(VayuMD5Ctx* ctx, uint8_t hash[16]) {
+    uint32_t i = ctx->datalen;
+    if (ctx->datalen < 56) {
+        ctx->data[i++] = 0x80;
+        while (i < 56) ctx->data[i++] = 0;
+    } else {
+        ctx->data[i++] = 0x80;
+        while (i < 64) ctx->data[i++] = 0;
+        vayu_md5_transform(ctx, ctx->data);
+        memset(ctx->data, 0, 56);
+    }
+    ctx->bitlen += ctx->datalen * 8;
+    ctx->data[56] = (uint8_t)(ctx->bitlen);
+    ctx->data[57] = (uint8_t)(ctx->bitlen >> 8);
+    ctx->data[58] = (uint8_t)(ctx->bitlen >> 16);
+    ctx->data[59] = (uint8_t)(ctx->bitlen >> 24);
+    ctx->data[60] = (uint8_t)(ctx->bitlen >> 32);
+    ctx->data[61] = (uint8_t)(ctx->bitlen >> 40);
+    ctx->data[62] = (uint8_t)(ctx->bitlen >> 48);
+    ctx->data[63] = (uint8_t)(ctx->bitlen >> 56);
+    vayu_md5_transform(ctx, ctx->data);
+    for (i = 0; i < 4; ++i) {
+        hash[i]      = (uint8_t)((ctx->state[0] >> (i * 8)) & 0xff);
+        hash[i + 4]  = (uint8_t)((ctx->state[1] >> (i * 8)) & 0xff);
+        hash[i + 8]  = (uint8_t)((ctx->state[2] >> (i * 8)) & 0xff);
+        hash[i + 12] = (uint8_t)((ctx->state[3] >> (i * 8)) & 0xff);
+    }
+}
+
+VayuStr* vayu_crypto_sha256(VayuStr* s) {
+    VayuSHA256Ctx ctx;
+    vayu_sha256_init(&ctx);
+    vayu_sha256_update(&ctx, (const uint8_t*)s->data, (size_t)s->len);
+    uint8_t h[32];
+    vayu_sha256_final(&ctx, h);
+    return vayu_hex(h, 32);
+}
+
+VayuStr* vayu_crypto_md5(VayuStr* s) {
+    VayuMD5Ctx ctx;
+    vayu_md5_init(&ctx);
+    vayu_md5_update(&ctx, (const uint8_t*)s->data, (size_t)s->len);
+    uint8_t h[16];
+    vayu_md5_final(&ctx, h);
+    return vayu_hex(h, 16);
+}
+
+VayuStr* vayu_crypto_hmac_sha256(VayuStr* key, VayuStr* msg) {
+    uint8_t k[64];
+    memset(k, 0, 64);
+    if (key->len > 64) {
+        VayuSHA256Ctx kctx;
+        vayu_sha256_init(&kctx);
+        vayu_sha256_update(&kctx, (const uint8_t*)key->data, (size_t)key->len);
+        vayu_sha256_final(&kctx, k);
+    } else {
+        memcpy(k, key->data, (size_t)key->len);
+    }
+    uint8_t ipad[64], opad[64];
+    for (int i = 0; i < 64; ++i) {
+        ipad[i] = k[i] ^ 0x36;
+        opad[i] = k[i] ^ 0x5c;
+    }
+    VayuSHA256Ctx c;
+    uint8_t inner[32], out[32];
+    vayu_sha256_init(&c);
+    vayu_sha256_update(&c, ipad, 64);
+    vayu_sha256_update(&c, (const uint8_t*)msg->data, (size_t)msg->len);
+    vayu_sha256_final(&c, inner);
+    vayu_sha256_init(&c);
+    vayu_sha256_update(&c, opad, 64);
+    vayu_sha256_update(&c, inner, 32);
+    vayu_sha256_final(&c, out);
+    return vayu_hex(out, 32);
+}
+
+static const char vayu_b64e[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+VayuStr* vayu_crypto_base64_encode(VayuStr* s) {
+    int64_t n = s->len;
+    int64_t outLen = ((n + 2) / 3) * 4;
+    char* out = (char*)malloc((size_t)outLen + 1);
+    int64_t i = 0, o = 0;
+    while (i + 2 < n) {
+        uint32_t v = ((uint8_t)s->data[i] << 16) |
+                     ((uint8_t)s->data[i+1] << 8) |
+                     ((uint8_t)s->data[i+2]);
+        out[o++] = vayu_b64e[(v >> 18) & 0x3F];
+        out[o++] = vayu_b64e[(v >> 12) & 0x3F];
+        out[o++] = vayu_b64e[(v >> 6) & 0x3F];
+        out[o++] = vayu_b64e[v & 0x3F];
+        i += 3;
+    }
+    if (i < n) {
+        uint32_t v = ((uint8_t)s->data[i]) << 16;
+        if (i + 1 < n) v |= ((uint8_t)s->data[i+1]) << 8;
+        out[o++] = vayu_b64e[(v >> 18) & 0x3F];
+        out[o++] = vayu_b64e[(v >> 12) & 0x3F];
+        out[o++] = (i + 1 < n) ? vayu_b64e[(v >> 6) & 0x3F] : '=';
+        out[o++] = '=';
+    }
+    out[o] = 0;
+    VayuStr* r = vayu_mkstr(out, o);
+    free(out);
+    return r;
+}
+
+static int vayu_b64_dec_char(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return 26 + (c - 'a');
+    if (c >= '0' && c <= '9') return 52 + (c - '0');
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+VayuStr* vayu_crypto_base64_decode(VayuStr* s) {
+    int64_t n = s->len;
+    char* buf = (char*)malloc((size_t)n + 1);
+    size_t len = 0;
+    for (int64_t i = 0; i < n; ++i) {
+        char c = s->data[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') continue;
+        buf[len++] = c;
+    }
+    buf[len] = 0;
+    size_t outCap = (len / 4) * 3 + 3;
+    char* out = (char*)malloc(outCap);
+    size_t oi = 0;
+    size_t i = 0;
+    while (i + 3 < len) {
+        int v0 = vayu_b64_dec_char(buf[i]);
+        int v1 = vayu_b64_dec_char(buf[i+1]);
+        int v2 = (buf[i+2] == '=') ? -2 : vayu_b64_dec_char(buf[i+2]);
+        int v3 = (buf[i+3] == '=') ? -2 : vayu_b64_dec_char(buf[i+3]);
+        if (v0 < 0 || v1 < 0) break;
+        uint32_t v = ((uint32_t)v0 << 18) | ((uint32_t)v1 << 12);
+        if (v2 >= 0) v |= ((uint32_t)v2 << 6);
+        if (v3 >= 0) v |= (uint32_t)v3;
+        out[oi++] = (char)((v >> 16) & 0xff);
+        if (v2 >= 0) out[oi++] = (char)((v >> 8) & 0xff);
+        if (v3 >= 0) out[oi++] = (char)(v & 0xff);
+        i += 4;
+    }
+    VayuStr* r = vayu_mkstr(out, oi);
+    free(out);
+    free(buf);
+    return r;
+}
+
+VayuStr* vayu_crypto_random_bytes(int64_t n) {
+    if (n <= 0) return vayu_mkstr("", 0);
+    char* buf = (char*)malloc((size_t)n);
+#ifdef _WIN32
+    if (BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)n,
+                        BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+        for (int64_t i = 0; i < n; ++i) buf[i] = (char)(rand() & 0xff);
+    }
+#else
+    {
+        FILE* f = fopen("/dev/urandom", "rb");
+        if (f) {
+            size_t got = fread(buf, 1, (size_t)n, f);
+            if (got < (size_t)n) {
+                for (int64_t i = (int64_t)got; i < n; ++i) buf[i] = (char)(rand() & 0xff);
+            }
+            fclose(f);
+        } else {
+            for (int64_t i = 0; i < n; ++i) buf[i] = (char)(rand() & 0xff);
+        }
+    }
+#endif
+    VayuStr* r = vayu_mkstr(buf, n);
+    free(buf);
+    return r;
+}
+
 extern void vayu_main(void);
 
 int main(int argc, char** argv) {
@@ -5022,8 +5685,12 @@ int main(int argc, char** argv) {
         }
 
         {
+            std::string linkLibs;
+#ifdef _WIN32
+            linkLibs = " -lws2_32 -lbcrypt";
+#endif
             std::string cmd = ccPath_ + " -O2 \"" + objPath + "\" \"" + rtPath +
-                "\" -o \"" + exePath + "\"";
+                "\" -o \"" + exePath + "\"" + linkLibs;
             int rc = std::system(cmd.c_str());
             if (rc != 0) {
                 lastError_ = "linker failed";
