@@ -59,6 +59,7 @@ namespace vayu {
         for (auto& s : program.stmts) {
             if (s->kind == StmtKind::Struct) registerStruct(static_cast<const StructStmt*>(s.get()));
             if (s->kind == StmtKind::Class)  registerClass(static_cast<const ClassStmt*>(s.get()));
+            if (s->kind == StmtKind::Enum)   registerEnum(static_cast<const EnumStmt*>(s.get()));
         }
         execBlock(program);
     }
@@ -79,7 +80,21 @@ namespace vayu {
                 registerStruct(static_cast<const StructStmt*>(s.get()));
             if (s->kind == StmtKind::Class)
                 registerClass(static_cast<const ClassStmt*>(s.get()));
+            if (s->kind == StmtKind::Enum)
+                registerEnum(static_cast<const EnumStmt*>(s.get()));
         }
+    }
+
+    void Interpreter::registerEnum(const EnumStmt* d) {
+        auto mod = std::make_shared<ModuleValue>();
+        mod->name = d->name;
+        for (auto& it : d->items) {
+            long long v = 0;
+            if (it.value && it.value->kind == ExprKind::IntLit)
+                v = static_cast<const IntLitExpr*>(it.value.get())->value;
+            mod->members[it.name] = Value(v);
+        }
+        globals_->define(d->name, Value(mod));
     }
 
     Value Interpreter::vmGetAttr(const Value& base, const std::string& name,
@@ -307,7 +322,13 @@ namespace vayu {
             throw sig;
         }
         case StmtKind::Struct:
-        case StmtKind::Class: return;
+        case StmtKind::Class:
+        case StmtKind::Enum: return;
+        case StmtKind::Const: {
+            auto* n = static_cast<const ConstStmt*>(s);
+            env_->define(n->name, eval(n->value.get()));
+            return;
+        }
         case StmtKind::Pass:     return;
         case StmtKind::Break:    throw BreakSignal{};
         case StmtKind::Continue: throw ContinueSignal{};

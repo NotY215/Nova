@@ -36,6 +36,8 @@ namespace vayu {
 
         Chunk* chunk_ = nullptr;
         std::unordered_map<std::string, ClassInfo> classInfo_;
+        std::unordered_map<std::string,
+            std::unordered_map<std::string, long long>> enums_;
         std::vector<LoopContext>                   loopStack_;
 
         // declaration pre-pass

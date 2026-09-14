@@ -22,6 +22,11 @@ namespace vayu {
         IntKw, FloatKw, BoolKw, StrKw, CharKw, BytesKw,
         Ptr, Ref, Unique, Shared, Weak,
 
+        // --- Phase 11: language feature completion ---
+        Match, Case,
+        Defer, Namespace, Const, Static,
+        Public, Private, Protected,
+
         // --- Operators / punctuation ---
         Plus, Minus, Star, Slash, Percent, StarStar, SlashSlash,
         Assign, Eq, NotEq, Lt, Gt, LtEq, GtEq,

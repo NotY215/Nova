@@ -79,6 +79,8 @@ namespace vayu {
         if (check(TokenType::Raise))  return parseRaise();
         if (check(TokenType::Import)) return parseImport();
         if (check(TokenType::From))   return parseFromImport();
+        if (check(TokenType::Const))  return parseConst();
+        if (check(TokenType::Enum))   return parseEnum();
 
         if (check(TokenType::Pass)) { Token t = advance(); return std::make_unique<PassStmt>(t.location); }
         if (check(TokenType::Break)) { Token t = advance(); return std::make_unique<BreakStmt>(t.location); }
@@ -113,6 +115,78 @@ namespace vayu {
             value = parseExpression();
         return std::make_unique<ReturnStmt>(std::move(value), t.location);
     }
+    StmtPtr Parser::parseConst() {
+        Token cTok = advance();   // 'const'
+        Token name = expect(TokenType::Identifier, "constant name");
+        ExprPtr type = nullptr;
+        if (match(TokenType::Colon)) type = parseTypeExpr();
+        expect(TokenType::Assign, "'=' in const declaration");
+        ExprPtr value = parseExpression();
+        return std::make_unique<ConstStmt>(name.lexeme, std::move(type),
+            std::move(value), cTok.location);
+    }
+
+    StmtPtr Parser::parseEnum() {
+        Token eTok = advance();   // 'enum'
+        Token name = expect(TokenType::Identifier, "enum name");
+        expect(TokenType::Colon, "':' after enum name");
+        expect(TokenType::Newline, "newline after ':'");
+        expect(TokenType::Indent, "indented enum body");
+
+        auto stmt = std::make_unique<EnumStmt>(name.lexeme, eTok.location);
+        long long nextVal = 0;
+        bool autoIncrementOK = true;
+
+        for (;;) {
+            skipNewlines();
+            if (isAtEnd() || check(TokenType::Dedent)) break;
+
+            Token item = expect(TokenType::Identifier, "enum item name");
+            EnumItem it;
+            it.name = item.lexeme;
+            it.value = nullptr;
+
+            if (match(TokenType::Assign)) {
+                it.value = parseExpression();
+                if (it.value->kind == ExprKind::IntLit) {
+                    nextVal = static_cast<const IntLitExpr*>(it.value.get())->value + 1;
+                    autoIncrementOK = true;
+                }
+                else {
+                    // Non-literal value: subsequent items must be explicit.
+                    autoIncrementOK = false;
+                }
+            }
+            else {
+                if (!autoIncrementOK)
+                    throw ParseError(
+                        "enum item '" + it.name +
+                        "' must have an explicit value after a non-literal item",
+                        item.location);
+                it.value = std::make_unique<IntLitExpr>(
+                    nextVal, std::to_string(nextVal), item.location);
+                nextVal++;
+            }
+
+            stmt->items.push_back(std::move(it));
+        }
+        match(TokenType::Dedent);
+
+        if (stmt->items.empty())
+            throw ParseError("enum '" + name.lexeme + "' has no items",
+                eTok.location);
+
+        // Reject duplicate names.
+        for (size_t i = 0; i < stmt->items.size(); ++i)
+            for (size_t j = i + 1; j < stmt->items.size(); ++j)
+                if (stmt->items[i].name == stmt->items[j].name)
+                    throw ParseError("enum '" + name.lexeme +
+                        "' declares '" + stmt->items[i].name + "' twice",
+                        eTok.location);
+
+        return stmt;
+    }
+
     StmtPtr Parser::parseRaise() {
         Token t = advance();
         ExprPtr exc = nullptr;

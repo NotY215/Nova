@@ -63,6 +63,17 @@ namespace vayu {
         case TokenType::Shared:    return "Shared";
         case TokenType::Weak:      return "Weak";
 
+            // Phase 11
+        case TokenType::Match:     return "Match";
+        case TokenType::Case:      return "Case";
+        case TokenType::Defer:     return "Defer";
+        case TokenType::Namespace: return "Namespace";
+        case TokenType::Const:     return "Const";
+        case TokenType::Static:    return "Static";
+        case TokenType::Public:    return "Public";
+        case TokenType::Private:   return "Private";
+        case TokenType::Protected: return "Protected";
+
         case TokenType::Plus:        return "Plus";
         case TokenType::Minus:       return "Minus";
         case TokenType::Star:        return "Star";

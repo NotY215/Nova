@@ -5,6 +5,12 @@ namespace vayu {
 
     // NOTE: "self" is intentionally NOT a keyword. The class parser enforces
     // the naming convention; the lexer treats it as a plain identifier.
+    //
+    // Phase 11: only `const` and `enum` are hard keywords for now.  Words
+    // that are commonly used as identifiers or method names (match, case,
+    // defer, namespace, static, public, private, protected) will be handled
+    // as soft keywords by the parser when each feature lands — the lexer
+    // leaves them as Identifier.
     const std::unordered_map<std::string, TokenType>& Lexer::keywords() {
         static const std::unordered_map<std::string, TokenType> kw = {
             {"def", TokenType::Def}, {"return", TokenType::Return},
@@ -32,6 +38,9 @@ namespace vayu {
             {"ptr", TokenType::Ptr}, {"ref", TokenType::Ref},
             {"unique", TokenType::Unique}, {"shared", TokenType::Shared},
             {"weak", TokenType::Weak},
+
+            // ---- Phase 11.1b / 11.1d: hard keywords ----
+            {"const", TokenType::Const},
         };
         return kw;
     }

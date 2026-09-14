@@ -85,7 +85,7 @@ namespace vayu {
         CallFrame* frame = &frames_.back();
         Chunk* chunk = frame->chunk.get();
         const uint8_t* code = chunk->code.data();
-        const size_t    codeSize = chunk->code.size();
+        size_t          codeSize = chunk->code.size();
         const Value* constants = chunk->constants.data();
         size_t          ip = frame->ip;
 
@@ -93,6 +93,7 @@ namespace vayu {
             frame = &frames_.back();
             chunk = frame->chunk.get();
             code = chunk->code.data();
+            codeSize = chunk->code.size();
             constants = chunk->constants.data();
             ip = frame->ip;
             };

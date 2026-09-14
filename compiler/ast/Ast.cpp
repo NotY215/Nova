@@ -347,6 +347,26 @@ namespace vayu {
             }
             break;
         }
+        case StmtKind::Const: {
+            auto* n = static_cast<const ConstStmt*>(s);
+            std::string lbl = "Const " + n->name;
+            if (n->type && n->type->kind == ExprKind::NameRef)
+                lbl += ": " + static_cast<const NameRefExpr*>(n->type.get())->name;
+            putLabel(prefix, isLast, lbl);
+            prExpr(n->value.get(), childPrefix(prefix, isLast), true);
+            break;
+        }
+        case StmtKind::Enum: {
+            auto* n = static_cast<const EnumStmt*>(s);
+            putLabel(prefix, isLast, "Enum " + n->name);
+            std::string cp = childPrefix(prefix, isLast);
+            for (size_t i = 0; i < n->items.size(); ++i) {
+                bool last = (i + 1 == n->items.size());
+                putLabel(cp, last, n->items[i].name);
+                prExpr(n->items[i].value.get(), childPrefix(cp, last), true);
+            }
+            break;
+        }
         case StmtKind::Pass:     putLabel(prefix, isLast, "Pass"); break;
         case StmtKind::Break:    putLabel(prefix, isLast, "Break"); break;
         case StmtKind::Continue: putLabel(prefix, isLast, "Continue"); break;

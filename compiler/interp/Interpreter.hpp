@@ -113,6 +113,7 @@ namespace vayu {
 
         void registerStruct(const StructStmt* d);
         void registerClass(const ClassStmt* d);
+        void registerEnum(const EnumStmt* d);
 
         Value constructInstance(const std::shared_ptr<ClassObject>& cls,
             const std::vector<std::pair<std::string, Value>>& args,

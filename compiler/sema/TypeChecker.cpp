@@ -220,6 +220,23 @@ namespace vayu {
                 }
             }
         }
+        // ---- enums (Phase 11.1d) ----
+        for (auto& s : program.stmts) {
+            if (s->kind != StmtKind::Enum) continue;
+            auto* d = static_cast<const EnumStmt*>(s.get());
+            if (enums_.count(d->name) || structs_.count(d->name))
+                error(d->loc, "'" + d->name + "' already defined");
+            std::unordered_map<std::string, long long> items;
+            for (auto& it : d->items) {
+                // Values were filled in by the parser.  Require IntLit.
+                if (!it.value || it.value->kind != ExprKind::IntLit)
+                    error(d->loc, "internal: enum item '" + it.name +
+                        "' missing int value (parser bug)");
+                long long v = static_cast<const IntLitExpr*>(it.value.get())->value;
+                items[it.name] = v;
+            }
+            enums_[d->name] = std::move(items);
+        }
 
         // ---- functions ----
         collectDefs(program, /*isTopLevel=*/true);
@@ -506,6 +523,8 @@ namespace vayu {
                 const auto* nm =
                     static_cast<const NameRefExpr*>(n->target.get());
                 TypePtr ex = lookupUserVar(nm->name);
+                if (consts_.count(nm->name))
+                    error(n->loc, "cannot assign to const '" + nm->name + "'");
                 if (ex) {
                     if (!isAssignable(ex, v))
                         error(n->loc, "cannot assign " + v->toString() +
@@ -733,6 +752,24 @@ namespace vayu {
             }
             return;
         }
+        case StmtKind::Const: {
+            auto* n = static_cast<const ConstStmt*>(s);
+            if (consts_.count(n->name) || lookupUserVar(n->name) ||
+                structs_.count(n->name) || enums_.count(n->name))
+                error(n->loc, "'" + n->name + "' already defined");
+            TypePtr declared = n->type ? resolveTypeExpr(n->type.get()) : nullptr;
+            TypePtr v = checkExpr(n->value.get());
+            if (declared && !isAssignable(declared, v))
+                error(n->loc, "cannot initialize const '" + n->name + "' (" +
+                    declared->toString() + ") with value of type " + v->toString());
+            defineVar(n->name, declared ? declared : v);
+            consts_.insert(n->name);
+            return;
+        }
+
+        case StmtKind::Enum:
+            // Enum items are type-level; no runtime work here.
+            return;
 
         case StmtKind::Pass:
             return;
@@ -766,6 +803,10 @@ namespace vayu {
             if (TypePtr t = lookupVar(n->name)) return t;
             auto it = structs_.find(n->name);
             if (it != structs_.end()) return it->second;
+            if (enums_.count(n->name))
+                error(n->loc, "enum '" + n->name +
+                    "' cannot be used as a value; write '" + n->name +
+                    ".<item>' instead");
             error(n->loc, "name '" + n->name + "' is not defined");
         }
 
@@ -966,6 +1007,17 @@ namespace vayu {
 
         case ExprKind::Attr: {
             auto* n = static_cast<const AttrExpr*>(e);
+            // Enum item access: `Color.Red` -> int
+            if (n->target->kind == ExprKind::NameRef) {
+                const auto* tn = static_cast<const NameRefExpr*>(n->target.get());
+                auto eit = enums_.find(tn->name);
+                if (eit != enums_.end()) {
+                    if (!eit->second.count(n->name))
+                        error(n->loc, "enum '" + tn->name + "' has no item '" +
+                            n->name + "'");
+                    return Types::Int();
+                }
+            }
             TypePtr t = checkExpr(n->target.get());
             if (t->kind == TypeKind::Error) return t;
             if (t->kind == TypeKind::Any)   return Types::Any();

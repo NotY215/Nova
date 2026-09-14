@@ -43,10 +43,12 @@ namespace vayu {
         StmtPtr  parseClass();
         StmtPtr  parseTry();
         StmtPtr  parseRaise();
-        StmtPtr  parseImport();       // NEW
-        StmtPtr  parseFromImport();   // NEW
+        StmtPtr  parseImport();
+        StmtPtr  parseFromImport();
         StmtPtr  parseAnnotatedAssign();
         StmtPtr  parseExprOrAssign();
+        StmtPtr  parseConst();   // NEW
+        StmtPtr  parseEnum();    // NEW
         Param    parseParam();
         FieldDef parseFieldDef();
 

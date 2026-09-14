@@ -8,7 +8,7 @@
 namespace vayu {
 
     // ===========================================================================
-    // Expressions (unchanged from 3H)
+    // Expressions
     // ===========================================================================
 
     enum class ExprKind {
@@ -152,8 +152,10 @@ namespace vayu {
         If, While, Def, Return,
         Struct, Class, For,
         Try, Raise,
-        Import, FromImport,          // <-- NEW
+        Import, FromImport,
         Pass, Break, Continue,
+        Const,        // NEW (Phase 11.1b)
+        Enum,         // NEW (Phase 11.1d)
     };
 
     struct Stmt {
@@ -271,7 +273,7 @@ namespace vayu {
     // --- module imports ---
     struct ImportStmt : Stmt {
         std::string moduleName;
-        std::string alias;       // empty if none
+        std::string alias;
         ImportStmt(std::string m, std::string a, SourceLocation l)
             : Stmt(StmtKind::Import, l),
             moduleName(std::move(m)), alias(std::move(a)) {
@@ -294,6 +296,36 @@ namespace vayu {
     struct PassStmt : Stmt { PassStmt(SourceLocation l) : Stmt(StmtKind::Pass, l) {} };
     struct BreakStmt : Stmt { BreakStmt(SourceLocation l) : Stmt(StmtKind::Break, l) {} };
     struct ContinueStmt : Stmt { ContinueStmt(SourceLocation l) : Stmt(StmtKind::Continue, l) {} };
+
+    // ===========================================================================
+    // Phase 11.1b — `const NAME [: T] = expr`
+    // ===========================================================================
+    struct ConstStmt : Stmt {
+        std::string name;
+        ExprPtr     type;    // optional; may be null
+        ExprPtr     value;   // required (parser enforces)
+        ConstStmt(std::string n, ExprPtr t, ExprPtr v, SourceLocation l)
+            : Stmt(StmtKind::Const, l), name(std::move(n)),
+            type(std::move(t)), value(std::move(v)) {
+        }
+    };
+
+    // ===========================================================================
+    // Phase 11.1d — `enum Color:\n  Red\n  Green\n  Blue = 10\n`
+    // Values are ints.  Parser fills `value` for every item (auto-increment
+    // when the source omits `= N`).
+    // ===========================================================================
+    struct EnumItem {
+        std::string name;
+        ExprPtr     value;   // never null after parsing
+    };
+    struct EnumStmt : Stmt {
+        std::string           name;
+        std::vector<EnumItem> items;
+        EnumStmt(std::string n, SourceLocation l)
+            : Stmt(StmtKind::Enum, l), name(std::move(n)) {
+        }
+    };
 
     const char* binOpName(BinOp op);
     const char* unOpName(UnOp  op);

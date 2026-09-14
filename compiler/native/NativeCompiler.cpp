@@ -77,6 +77,7 @@ namespace vayu {
                 sourceDir_ = sourceDir;
                 loadImports(program);
 
+                collectEnums(program);
                 collectClasses(program);
                 for (auto& kv : modules_) collectClasses(kv.second);
 
@@ -115,16 +116,29 @@ namespace vayu {
                     line("storel 0, " + slot);
                 }
 
+                // Snapshot top-level slots/type info BEFORE emitting any
+                // function body.  emitFunction calls resetFunctionState which
+                // clears slots_/varInfo_; NameRef/Assign lookups inside a
+                // function fall back to these maps.
+                globalSlots_ = slots_;
+
                 for (auto& kv : modules_)
                     emitModuleTopLevel(kv.first, kv.second);
 
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Def) continue;
                     if (s->kind == StmtKind::Struct || s->kind == StmtKind::Class) continue;
+                    if (s->kind == StmtKind::Enum) continue;
                     if (s->kind == StmtKind::Import || s->kind == StmtKind::FromImport) continue;
                     emitStmt(s.get());
                     if (terminated_) break;
                 }
+
+                // Capture whatever refined VarInfo the top-level statements
+                // produced, so function bodies can recover e.g. `const PI = 3`
+                // is Int.
+                globalVarInfo_ = varInfo_;
+
                 if (!terminated_) line("ret");
                 raw("}");
                 raw("");
@@ -162,6 +176,12 @@ namespace vayu {
 
             std::unordered_map<std::string, std::string>    slots_;
             std::unordered_map<std::string, VarInfo>        varInfo_;
+
+            // Phase 11.1b: top-level bindings that must remain visible inside
+            // function bodies (currently: `const`; in future: `static`).
+            std::unordered_map<std::string, std::string>    globalSlots_;
+            std::unordered_map<std::string, VarInfo>        globalVarInfo_;
+
             std::string                                     currentClass_;
             std::vector<std::pair<std::string, std::string>> loopStack_;
 
@@ -169,6 +189,10 @@ namespace vayu {
             std::unordered_map<std::string, int>       fieldGlobals_;
             int                                        nextFieldOffset_ = 0;
             std::unordered_map<std::string, const DefStmt*> topFnDecls_;
+
+            // Phase 11.1d: enum name -> item name -> int value.
+            std::unordered_map<std::string,
+                std::unordered_map<std::string, long long>> enums_;
 
             // ---- Phase 8: escape analysis state (per function) ----
             std::unordered_map<std::string, std::string> nonEscapingClasses_;
@@ -233,7 +257,6 @@ namespace vayu {
             }
 
             bool findModuleFile(const std::string& name, std::string& pathOut) const {
-                // 1. relative to the importing source file
                 if (!sourceDir_.empty()) {
                     std::string p = sourceDir_;
                     if (p.back() != '/' && p.back() != '\\') p += '/';
@@ -241,13 +264,11 @@ namespace vayu {
                     std::ifstream in(p, std::ios::binary);
                     if (in) { pathOut = p; return true; }
                 }
-                // 2. current working directory
                 {
                     std::string p = name + ".vyu";
                     std::ifstream in(p, std::ios::binary);
                     if (in) { pathOut = p; return true; }
                 }
-                // 3. VAYU_MODULE_PATH (semicolon-separated on Windows, colon elsewhere)
                 if (const char* mp = std::getenv("VAYU_MODULE_PATH")) {
 #ifdef _WIN32
                     const char sep = ';';
@@ -346,6 +367,7 @@ namespace vayu {
                 for (auto& s : modBlock.stmts) {
                     if (s->kind == StmtKind::Def) continue;
                     if (s->kind == StmtKind::Struct || s->kind == StmtKind::Class) continue;
+                    if (s->kind == StmtKind::Enum) continue;
                     if (s->kind == StmtKind::Import || s->kind == StmtKind::FromImport) continue;
                     emitStmt(s.get());
                 }
@@ -394,6 +416,12 @@ namespace vayu {
                 }
                 case StmtKind::AnnotAssign: {
                     auto* n = static_cast<const AnnotAssignStmt*>(s);
+                    if (n->type)  collectStringLiteralsExpr(n->type.get());
+                    if (n->value) collectStringLiteralsExpr(n->value.get());
+                    break;
+                }
+                case StmtKind::Const: {
+                    auto* n = static_cast<const ConstStmt*>(s);
                     if (n->type)  collectStringLiteralsExpr(n->type.get());
                     if (n->value) collectStringLiteralsExpr(n->value.get());
                     break;
@@ -532,6 +560,22 @@ namespace vayu {
                         auto* d = static_cast<const DefStmt*>(s.get());
                         topFnDecls_[d->name] = d;
                     }
+                }
+            }
+
+            // ---- Phase 11.1d: register enums ----
+            void collectEnums(const Block& program) {
+                for (auto& s : program.stmts) {
+                    if (s->kind != StmtKind::Enum) continue;
+                    auto* d = static_cast<const EnumStmt*>(s.get());
+                    std::unordered_map<std::string, long long> items;
+                    for (auto& it : d->items) {
+                        long long v = 0;
+                        if (it.value && it.value->kind == ExprKind::IntLit)
+                            v = static_cast<const IntLitExpr*>(it.value.get())->value;
+                        items[it.name] = v;
+                    }
+                    enums_[d->name] = std::move(items);
                 }
             }
 
@@ -723,8 +767,6 @@ namespace vayu {
                 return static_cast<const NameRefExpr*>(target)->name == varName;
             }
 
-            // Walk expression tree.  Returns true if `varName` escapes somewhere
-            // inside `e` (bare name reference, call argument, list element, etc.).
             bool exprEscapes(const Expr* e, const std::string& varName) {
                 if (!e) return false;
                 switch (e->kind) {
@@ -739,19 +781,15 @@ namespace vayu {
 
                 case ExprKind::Call: {
                     auto* n = static_cast<const CallExpr*>(e);
-                    // Safe form: varName.method(args) where varName is not passed
-                    // through args or as callee itself.
                     if (n->callee->kind == ExprKind::Attr) {
                         auto* a = static_cast<const AttrExpr*>(n->callee.get());
                         if (isSafeAttrTarget(a->target.get(), varName)) {
-                            // Check args only
                             for (auto& arg : n->args) {
                                 if (exprEscapes(arg.value.get(), varName)) return true;
                             }
                             return false;
                         }
                     }
-                    // Any other form: varName as callee → escape; varName as arg → escape.
                     if (n->callee->kind == ExprKind::NameRef &&
                         static_cast<const NameRefExpr*>(n->callee.get())->name == varName) {
                         return true;
@@ -777,8 +815,6 @@ namespace vayu {
 
                 case ExprKind::Index: {
                     auto* n = static_cast<const IndexExpr*>(e);
-                    // varName[i] — varName used as container.  Unsupported for
-                    // user objects; treat as escape.
                     if (isSafeAttrTarget(n->target.get(), varName)) return true;
                     return exprEscapes(n->target.get(), varName) ||
                         exprEscapes(n->index.get(), varName);
@@ -819,19 +855,16 @@ namespace vayu {
 
                 case StmtKind::Assign: {
                     auto* n = static_cast<const AssignStmt*>(s);
-                    // Plain reassignment of varName → escape.
                     if (n->target->kind == ExprKind::NameRef &&
                         static_cast<const NameRefExpr*>(n->target.get())->name == varName) {
                         return true;
                     }
-                    // varName.field = expr → safe target, check RHS.
                     if (n->target->kind == ExprKind::Attr) {
                         auto* a = static_cast<const AttrExpr*>(n->target.get());
                         if (isSafeAttrTarget(a->target.get(), varName)) {
                             return exprEscapes(n->value.get(), varName);
                         }
                     }
-                    // varName[i] = expr → escape.
                     if (n->target->kind == ExprKind::Index) {
                         auto* ix = static_cast<const IndexExpr*>(n->target.get());
                         if (isSafeAttrTarget(ix->target.get(), varName)) return true;
@@ -842,6 +875,13 @@ namespace vayu {
 
                 case StmtKind::AnnotAssign: {
                     auto* n = static_cast<const AnnotAssignStmt*>(s);
+                    if (n->name == varName) return true;
+                    if (n->value) return exprEscapes(n->value.get(), varName);
+                    return false;
+                }
+
+                case StmtKind::Const: {
+                    auto* n = static_cast<const ConstStmt*>(s);
                     if (n->name == varName) return true;
                     if (n->value) return exprEscapes(n->value.get(), varName);
                     return false;
@@ -906,9 +946,6 @@ namespace vayu {
                 return false;
             }
 
-            // Find candidate variables: `x = Class(args)` where Class is a
-            // user class with __init__.  Records the class name and counts the
-            // number of assignments to each candidate.
             void findCandidates(const Block& b,
                 std::unordered_map<std::string, std::string>& out,
                 std::unordered_map<std::string, int>& counts) {
@@ -1038,22 +1075,50 @@ namespace vayu {
                         lookup = currentModulePrefix_ + name;
                     }
 
-                    auto sit = slots_.find(lookup);
-                    if (sit == slots_.end() && lookup != name) sit = slots_.find(name);
-                    if (sit == slots_.end())
+                    // Phase 11.1b fix: never reassign an iterator across two
+                    // different unordered_maps.  MSVC's debug STL asserts
+                    // "list iterators incompatible" when comparing iterators
+                    // from different containers.  Collect the slot string via
+                    // a pointer, then look up VarInfo the same way.
+                    const std::string* slotPtr = nullptr;
+                    {
+                        auto sit = slots_.find(lookup);
+                        if (sit != slots_.end()) slotPtr = &sit->second;
+                    }
+                    if (!slotPtr && lookup != name) {
+                        auto sit2 = slots_.find(name);
+                        if (sit2 != slots_.end()) slotPtr = &sit2->second;
+                    }
+                    if (!slotPtr) {
+                        auto git = globalSlots_.find(name);
+                        if (git != globalSlots_.end()) slotPtr = &git->second;
+                    }
+                    if (!slotPtr)
                         throw std::runtime_error(
                             "native: variable '" + name + "' not declared");
                     std::string t = newTemp();
-                    line(t + " =l loadl " + sit->second);
+                    line(t + " =l loadl " + *slotPtr);
                     r.ssa = t;
-                    auto vi = varInfo_.find(lookup);
-                    if (vi == varInfo_.end()) vi = varInfo_.find(name);
-                    if (vi != varInfo_.end()) {
-                        r.type = vi->second.type;
-                        r.cls = vi->second.clsName;
-                        r.elemType = vi->second.elemType;
-                        r.elemCls = vi->second.elemClsName;
-                        r.valType = vi->second.valType;
+
+                    const VarInfo* viPtr = nullptr;
+                    {
+                        auto vi = varInfo_.find(lookup);
+                        if (vi != varInfo_.end()) viPtr = &vi->second;
+                    }
+                    if (!viPtr) {
+                        auto vi2 = varInfo_.find(name);
+                        if (vi2 != varInfo_.end()) viPtr = &vi2->second;
+                    }
+                    if (!viPtr) {
+                        auto gvi = globalVarInfo_.find(name);
+                        if (gvi != globalVarInfo_.end()) viPtr = &gvi->second;
+                    }
+                    if (viPtr) {
+                        r.type = viPtr->type;
+                        r.cls = viPtr->clsName;
+                        r.elemType = viPtr->elemType;
+                        r.elemCls = viPtr->elemClsName;
+                        r.valType = viPtr->valType;
                     }
                     return r;
                 }
@@ -1236,6 +1301,22 @@ namespace vayu {
 
                 case ExprKind::Attr: {
                     auto* n = static_cast<const AttrExpr*>(e);
+
+                    // Phase 11.1d: enum item access -> immediate int.
+                    if (n->target->kind == ExprKind::NameRef) {
+                        const auto* tn = static_cast<const NameRefExpr*>(n->target.get());
+                        auto eit = enums_.find(tn->name);
+                        if (eit != enums_.end()) {
+                            auto iit = eit->second.find(n->name);
+                            if (iit == eit->second.end())
+                                throw std::runtime_error(
+                                    "native: enum '" + tn->name +
+                                    "' has no item '" + n->name + "'");
+                            r.ssa = std::to_string(iit->second);
+                            r.type = VType::Int;
+                            return r;
+                        }
+                    }
 
                     if (n->target->kind == ExprKind::NameRef) {
                         const auto* tn = static_cast<const NameRefExpr*>(n->target.get());
@@ -2644,10 +2725,6 @@ namespace vayu {
                 return r;
             }
 
-            // -----------------------------------------------------------------
-            // Phase 8: emit `x = Class(args)` with x stack-allocated.
-            // Returns true if the assignment was handled.
-            // -----------------------------------------------------------------
             bool emitStackAssignment(const AssignStmt* n) {
                 if (n->target->kind != ExprKind::NameRef) return false;
                 const std::string& lhs = static_cast<const NameRefExpr*>(
@@ -2750,6 +2827,10 @@ namespace vayu {
                         ? slots_[slotName] : "";
                     if (slot.empty())
                         slot = slots_.count(nm->name) ? slots_[nm->name] : "";
+                    if (slot.empty()) {
+                        auto git = globalSlots_.find(nm->name);
+                        if (git != globalSlots_.end()) slot = git->second;
+                    }
                     if (slot.empty())
                         throw std::runtime_error(
                             "native: variable '" + nm->name + "' not declared");
@@ -2798,6 +2879,28 @@ namespace vayu {
                     return;
                 }
 
+                case StmtKind::Const: {
+                    auto* n = static_cast<const ConstStmt*>(s);
+                    std::string slotName = n->name;
+                    if (!currentModulePrefix_.empty())
+                        slotName = currentModulePrefix_ + n->name;
+                    std::string slot = slots_.count(slotName)
+                        ? slots_[slotName] : "";
+                    if (slot.empty())
+                        slot = slots_.count(n->name) ? slots_[n->name] : "";
+                    if (slot.empty())
+                        throw std::runtime_error(
+                            "native: const '" + n->name + "' not declared");
+                    Val v = emitExpr(n->value.get());
+                    line("storel " + v.ssa + ", " + slot);
+                    VarInfo vi;
+                    vi.type = v.type; vi.clsName = v.cls;
+                    vi.elemType = v.elemType; vi.elemClsName = v.elemCls;
+                    vi.valType = v.valType;
+                    varInfo_[slotName] = vi;
+                    return;
+                }
+
                 case StmtKind::If:     emitIf(static_cast<const IfStmt*>(s));       return;
                 case StmtKind::While:  emitWhile(static_cast<const WhileStmt*>(s)); return;
                 case StmtKind::For:    emitFor(static_cast<const ForStmt*>(s));     return;
@@ -2819,6 +2922,7 @@ namespace vayu {
                 case StmtKind::Pass:   return;
                 case StmtKind::Struct:
                 case StmtKind::Class:  return;
+                case StmtKind::Enum:   return;
                 case StmtKind::Import:
                 case StmtKind::FromImport:
                     return;
@@ -3432,6 +3536,11 @@ namespace vayu {
             }
             case StmtKind::AnnotAssign: {
                 auto* n = static_cast<const AnnotAssignStmt*>(s);
+                out.insert(n->name);
+                break;
+            }
+            case StmtKind::Const: {
+                auto* n = static_cast<const ConstStmt*>(s);
                 out.insert(n->name);
                 break;
             }
@@ -4099,9 +4208,6 @@ int64_t vayu_run_command(VayuStr* cmd) {
     memcpy(buf, cmd->data, (size_t)n);
     buf[n] = 0;
 #ifdef _WIN32
-    // cmd.exe strips the first and last quote from a `system()` command that
-    // starts with a quote and has more than two quotes.  Prefixing with `call`
-    // disables that quirk.  This lets Vayu programs pass quoted paths freely.
     {
         char wrapped[8256];
         int wr = snprintf(wrapped, sizeof(wrapped), "call %s", buf);
@@ -4406,8 +4512,6 @@ int64_t vayu_time_now_ms(void) {
     GetSystemTimeAsFileTime(&ft);
     ui.LowPart = ft.dwLowDateTime;
     ui.HighPart = ft.dwHighDateTime;
-    // 100ns ticks since 1601-01-01 → ms since 1970-01-01.
-    // 11644473600000 ms is the offset between the two epochs.
     return (int64_t)((ui.QuadPart / 10000ULL) - 11644473600000LL);
 #else
     struct timespec ts;
@@ -4447,9 +4551,6 @@ VayuStr* vayu_time_format(int64_t unix_secs, VayuStr* fmt) {
 }
 
 // ---- Phase 10.3: json module ----
-// A JSON value is a tagged box.  Tags:
-//   0 null   1 bool   2 int   3 str   4 array   5 object
-// For 3/4/5, `data` is a pointer to the corresponding Vayu runtime object.
 
 typedef struct VayuJsonValue {
     int32_t tag;
@@ -4819,9 +4920,6 @@ VayuJsonValue* vayu_json_make_int (int64_t n)     { return jp_new(2, n); }
 VayuJsonValue* vayu_json_make_str (VayuStr* s)    { return jp_new(3, (int64_t)s); }
 
 // ---- Phase 10.4: regex module ----
-// Backtracking matcher.  Supports:
-//   . * + ?  [...]  [^...]  ^  $  \d \D \w \W \s \S  \<literal>
-// Not supported in v1: capture groups, alternation, non-greedy.
 
 typedef struct {
     const char* pat; int64_t plen;
@@ -4928,8 +5026,6 @@ static int vayu_rx_here(VayuRx* r, int64_t pi, int64_t ti, int64_t* out_end) {
     if (q == '*' || q == '+') {
         int64_t cur_pi = atom_end + 1;
         int64_t positions[2048];
-        // positions[i] = the text position after i successful matches.
-        // Seed with i=0 so '*' and '+' can fall back to zero / one match.
         int count = 0;
         positions[count++] = ti;
         int64_t tp = ti;
@@ -5321,7 +5417,6 @@ static VayuStr* vayu_hex(const uint8_t* b, int64_t n) {
     return r;
 }
 
-// --- SHA-256 ---
 typedef struct {
     uint32_t state[8];
     uint64_t bitlen;
@@ -5429,7 +5524,6 @@ static void vayu_sha256_final(VayuSHA256Ctx* ctx, uint8_t hash[32]) {
     }
 }
 
-// --- MD5 ---
 typedef struct {
     uint32_t state[4];
     uint64_t bitlen;

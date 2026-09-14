@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace vayu {
@@ -27,6 +28,13 @@ namespace vayu {
         std::unordered_map<std::string, TypePtr> structs_;
         std::unordered_map<std::string, TypePtr> builtins_;
 
+        // Phase 11.1b — names declared via `const`.
+        std::unordered_set<std::string>          consts_;
+
+        // Phase 11.1d — enum name -> (item name -> value).
+        std::unordered_map<std::string,
+            std::unordered_map<std::string, long long>> enums_;
+
         TypePtr currentReturnType_;
         TypePtr currentClass_;
         int     loopDepth_ = 0;
@@ -42,12 +50,7 @@ namespace vayu {
         void    popScope();
         void    defineVar(const std::string& name, TypePtr t);
 
-        /// Look up a name in user scopes only (no builtins fallback).
-        /// Used by assignment, so that `sum = 0` shadows the builtin `sum`.
         TypePtr lookupUserVar(const std::string& name);
-
-        /// Look up a name in user scopes, then in builtins.
-        /// Used when evaluating a name reference.
         TypePtr lookupVar(const std::string& name);
 
         TypePtr resolveTypeExpr(const Expr* e);
@@ -63,6 +66,11 @@ namespace vayu {
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
         void installBuiltins();
         void installBuiltinExceptions();
+
+        // Phase 11.1d — is `name` a registered enum?
+        bool isEnumName(const std::string& name) const {
+            return enums_.count(name) > 0;
+        }
     };
 
 } // namespace vayu

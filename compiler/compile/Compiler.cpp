@@ -71,6 +71,19 @@ namespace vayu {
             }
             if (!changed) break;
         }
+        // ---- Phase 11.1d: enums ----
+        for (auto& s : program.stmts) {
+            if (s->kind != StmtKind::Enum) continue;
+            auto* d = static_cast<const EnumStmt*>(s.get());
+            std::unordered_map<std::string, long long> items;
+            for (auto& it : d->items) {
+                long long v = 0;
+                if (it.value && it.value->kind == ExprKind::IntLit)
+                    v = static_cast<const IntLitExpr*>(it.value.get())->value;
+                items[it.name] = v;
+            }
+            enums_[d->name] = std::move(items);
+        }
     }
 
     // ===========================================================================
@@ -227,6 +240,16 @@ namespace vayu {
                 error(s->loc, "'continue' outside loop");
             emitJumpTo(loopStack_.back().continueTarget, line);
             return;
+
+        case StmtKind::Const: {
+            auto* n = static_cast<const ConstStmt*>(s);
+            compileExpr(n->value.get());
+            emitNameU16(OpCode::DEFINE, n->name, line);
+            return;
+        }
+
+        case StmtKind::Enum:
+            return;   // type-level; no bytecode
 
         case StmtKind::Pass: return;
 
@@ -673,9 +696,26 @@ namespace vayu {
             compileCall(static_cast<const CallExpr*>(e), line);
             return;
 
-        case ExprKind::Attr:
-            compileAttrGet(static_cast<const AttrExpr*>(e), line);
+        case ExprKind::Attr: {
+            auto* a = static_cast<const AttrExpr*>(e);
+            if (a->target->kind == ExprKind::NameRef) {
+                const auto* tn = static_cast<const NameRefExpr*>(a->target.get());
+                auto eit = enums_.find(tn->name);
+                if (eit != enums_.end()) {
+                    auto iit = eit->second.find(a->name);
+                    if (iit == eit->second.end())
+                        error(a->loc, "enum '" + tn->name + "' has no item '" +
+                            a->name + "'");
+                    int idx = chunk_->addConstant(Value(iit->second));
+                    chunk_->emitOp(OpCode::CONST, line);
+                    chunk_->emit((uint8_t)((idx >> 8) & 0xFF), line);
+                    chunk_->emit((uint8_t)(idx & 0xFF), line);
+                    return;
+                }
+            }
+            compileAttrGet(a, line);
             return;
+        }
 
         case ExprKind::Index: {
             auto* n = static_cast<const IndexExpr*>(e);
