@@ -115,6 +115,8 @@ namespace vayu {
         B("thread", Types::Any());
         B("net", Types::Any());
         B("crypto", Types::Any());
+        B("random", Types::Any());
+        B("os", Types::Any());
     }
 
     void TypeChecker::installBuiltinExceptions() {

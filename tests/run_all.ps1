@@ -40,7 +40,10 @@ $skip = @(
     "regex_test.vyu",          # native-only; same reason
     "thread_test.vyu",         # native-only; same reason
     "net_test.vyu",            # native-only; same reason
-    "crypto_test.vyu"          # native-only; same reason
+    "crypto_test.vyu",         # native-only; same reason
+    "random_test.vyu",         # native-only; same reason
+    "os_test.vyu",             # native-only; same reason
+    "math_test.vyu"            # tree/VM only; native backend has no float type yet
 )
 
 function Invoke-Backend {

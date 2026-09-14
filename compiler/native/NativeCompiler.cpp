@@ -280,7 +280,8 @@ namespace vayu {
                         if (n->moduleName != "fs" && n->moduleName != "time" &&
                             n->moduleName != "json" && n->moduleName != "regex" &&
                             n->moduleName != "thread" && n->moduleName != "net" &&
-                            n->moduleName != "crypto" && !modules_.count(n->moduleName))
+                            n->moduleName != "crypto" && n->moduleName != "random" &&
+                            n->moduleName != "os" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                     }
                     else if (s->kind == StmtKind::FromImport) {
@@ -288,7 +289,8 @@ namespace vayu {
                         if (n->moduleName != "fs" && n->moduleName != "time" &&
                             n->moduleName != "json" && n->moduleName != "regex" &&
                             n->moduleName != "thread" && n->moduleName != "net" &&
-                            n->moduleName != "crypto" && !modules_.count(n->moduleName))
+                            n->moduleName != "crypto" && n->moduleName != "random" &&
+                            n->moduleName != "os" && !modules_.count(n->moduleName))
                             loadModule(n->moduleName, s->loc);
                         for (auto& item : n->items) {
                             const std::string& local = item.alias.empty() ? item.name : item.alias;
@@ -2053,6 +2055,108 @@ namespace vayu {
                 throw std::runtime_error("native: crypto has no method '" + m + "'");
             }
 
+            Val emitRandomCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+                auto a0 = [&]() { return emitExpr(n->args[0].value.get()); };
+                auto a1 = [&]() { return emitExpr(n->args[1].value.get()); };
+
+                if (m == "seed") {
+                    Val s = a0();
+                    line("call $vayu_random_seed(l " + s.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "randint") {
+                    Val lo = a0(); Val hi = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_random_randint(l " + lo.ssa +
+                        ", l " + hi.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "randrange") {
+                    Val lo = a0(); Val hi = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_random_randrange(l " + lo.ssa +
+                        ", l " + hi.ssa + ")");
+                    r.ssa = t; r.type = VType::Int;
+                    return r;
+                }
+                if (m == "choice") {
+                    Val l = a0();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_random_choice(l " + l.ssa + ")");
+                    r.ssa = t; r.type = VType::Unknown;
+                    return r;
+                }
+                if (m == "shuffle") {
+                    Val l = a0();
+                    line("call $vayu_random_shuffle(l " + l.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "sample") {
+                    Val l = a0(); Val k = a1();
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_random_sample(l " + l.ssa +
+                        ", l " + k.ssa + ")");
+                    r.ssa = t; r.type = VType::List; r.elemType = VType::Unknown;
+                    return r;
+                }
+                throw std::runtime_error("native: random has no method '" + m + "'");
+            }
+
+            Val emitOsCall(const CallExpr* n, const AttrExpr* attr) {
+                Val r;
+                const std::string& m = attr->name;
+
+                if (m == "getenv") {
+                    Val s = emitExpr(n->args[0].value.get());
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_os_getenv(l " + s.ssa + ")");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "setenv") {
+                    Val k = emitExpr(n->args[0].value.get());
+                    Val v = emitExpr(n->args[1].value.get());
+                    line("call $vayu_os_setenv(l " + k.ssa + ", l " + v.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "platform") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_os_platform()");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "hostname") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_os_hostname()");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "cwd") {
+                    std::string t = newTemp();
+                    line(t + " =l call $vayu_os_cwd()");
+                    r.ssa = t; r.type = VType::Str;
+                    return r;
+                }
+                if (m == "chdir") {
+                    Val p = emitExpr(n->args[0].value.get());
+                    line("call $vayu_os_chdir(l " + p.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                if (m == "exit") {
+                    Val c = emitExpr(n->args[0].value.get());
+                    line("call $vayu_os_exit(l " + c.ssa + ")");
+                    r.ssa = "0"; r.type = VType::Void;
+                    return r;
+                }
+                throw std::runtime_error("native: os has no method '" + m + "'");
+            }
 
             Val emitCall(const CallExpr* n) {
                 Val r;
@@ -2163,6 +2267,12 @@ namespace vayu {
                         }
                         if (tn0->name == "crypto") {
                             return emitCryptoCall(n, attr);
+                        }
+                        if (tn0->name == "random") {
+                            return emitRandomCall(n, attr);
+                        }
+                        if (tn0->name == "os") {
+                            return emitOsCall(n, attr);
                         }
                     }
 
@@ -5572,6 +5682,139 @@ VayuStr* vayu_crypto_random_bytes(int64_t n) {
     free(buf);
     return r;
 }
+
+// ---- Phase 10.8: random module ----
+static int vayu_rand_seeded = 0;
+
+void vayu_random_seed(int64_t s) {
+    srand((unsigned)s);
+    vayu_rand_seeded = 1;
+}
+
+static void vayu_random_ensure_seed(void) {
+    if (!vayu_rand_seeded) {
+        srand((unsigned)time(NULL));
+        vayu_rand_seeded = 1;
+    }
+}
+
+int64_t vayu_random_randint(int64_t lo, int64_t hi) {
+    if (hi < lo) { int64_t t = lo; lo = hi; hi = t; }
+    vayu_random_ensure_seed();
+    int64_t span = hi - lo + 1;
+    if (span <= 0) return lo;
+    return lo + (int64_t)(rand() % span);
+}
+
+int64_t vayu_random_randrange(int64_t lo, int64_t hi) {
+    if (hi <= lo) return lo;
+    vayu_random_ensure_seed();
+    return lo + (int64_t)(rand() % (hi - lo));
+}
+
+int64_t vayu_random_choice(VayuList* lst) {
+    if (!lst || lst->len == 0) {
+        vayu_raise_str(vayu_mkstr_c("IndexError"),
+                       vayu_mkstr_c("random.choice: empty list"));
+    }
+    vayu_random_ensure_seed();
+    return lst->items[rand() % lst->len];
+}
+
+void vayu_random_shuffle(VayuList* lst) {
+    if (!lst || lst->len <= 1) return;
+    vayu_random_ensure_seed();
+    for (int64_t i = lst->len - 1; i > 0; --i) {
+        int64_t j = rand() % (i + 1);
+        int64_t t = lst->items[i];
+        lst->items[i] = lst->items[j];
+        lst->items[j] = t;
+    }
+}
+
+VayuList* vayu_random_sample(VayuList* lst, int64_t k) {
+    if (!lst || lst->len == 0 || k <= 0) return vayu_list_new();
+    if (k > lst->len) k = lst->len;
+    vayu_random_ensure_seed();
+    int64_t* idx = (int64_t*)malloc(sizeof(int64_t) * (size_t)lst->len);
+    for (int64_t i = 0; i < lst->len; ++i) idx[i] = i;
+    for (int64_t i = lst->len - 1; i > 0; --i) {
+        int64_t j = rand() % (i + 1);
+        int64_t t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+    }
+    VayuList* out = vayu_list_new();
+    for (int64_t i = 0; i < k; ++i)
+        vayu_list_push(out, lst->items[idx[i]]);
+    free(idx);
+    return out;
+}
+
+// ---- Phase 10.9: os module ----
+VayuStr* vayu_os_getenv(VayuStr* name) {
+    char namebuf[256];
+    int64_t n = name->len < 255 ? name->len : 255;
+    memcpy(namebuf, name->data, (size_t)n);
+    namebuf[n] = 0;
+    const char* v = getenv(namebuf);
+    if (!v) return vayu_mkstr("", 0);
+    return vayu_mkstr_c(v);
+}
+
+void vayu_os_setenv(VayuStr* name, VayuStr* val) {
+    char namebuf[256], valbuf[4096];
+    int64_t n = name->len < 255 ? name->len : 255;
+    int64_t m = val->len < 4095 ? val->len : 4095;
+    memcpy(namebuf, name->data, (size_t)n); namebuf[n] = 0;
+    memcpy(valbuf, val->data, (size_t)m);  valbuf[m] = 0;
+#ifdef _WIN32
+    _putenv_s(namebuf, valbuf);
+#else
+    setenv(namebuf, valbuf, 1);
+#endif
+}
+
+VayuStr* vayu_os_platform(void) {
+#ifdef _WIN32
+    return vayu_mkstr_c("windows");
+#elif defined(__APPLE__)
+    return vayu_mkstr_c("macos");
+#elif defined(__linux__)
+    return vayu_mkstr_c("linux");
+#else
+    return vayu_mkstr_c("unknown");
+#endif
+}
+
+VayuStr* vayu_os_hostname(void) {
+    char buf[256];
+    if (gethostname(buf, sizeof(buf)) != 0) return vayu_mkstr("", 0);
+    buf[sizeof(buf) - 1] = 0;
+    return vayu_mkstr_c(buf);
+}
+
+VayuStr* vayu_os_cwd(void) {
+    char buf[4096];
+#ifdef _WIN32
+    if (_getcwd(buf, sizeof(buf)) == NULL) return vayu_mkstr("", 0);
+#else
+    if (getcwd(buf, sizeof(buf)) == NULL) return vayu_mkstr("", 0);
+#endif
+    return vayu_mkstr_c(buf);
+}
+
+void vayu_os_chdir(VayuStr* path) {
+    char buf[4096];
+    int64_t n = path->len < 4095 ? path->len : 4095;
+    memcpy(buf, path->data, (size_t)n);
+    buf[n] = 0;
+#ifdef _WIN32
+    _chdir(buf);
+#else
+    chdir(buf);
+#endif
+}
+
+void vayu_os_exit(int64_t code) { exit((int)code); }
 
 extern void vayu_main(void);
 

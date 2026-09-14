@@ -1,0 +1,17 @@
+import os
+
+plat = os.platform()
+print(len(plat) > 0)
+print(plat == "windows")
+
+os.setenv("VAYU_TEST_VAR", "hello")
+v = os.getenv("VAYU_TEST_VAR")
+print(v)
+
+print(os.getenv("DEFINITELY_NOT_SET_XYZ_123") == "")
+
+h = os.hostname()
+print(len(h) > 0)
+
+c = os.cwd()
+print(len(c) > 0)

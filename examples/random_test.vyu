@@ -1,0 +1,37 @@
+import random
+
+random.seed(42)
+a = random.randint(1, 100)
+random.seed(42)
+b = random.randint(1, 100)
+print(a == b)
+
+random.seed(1)
+i = 0
+ok = true
+while i < 100:
+    v = random.randint(10, 20)
+    if v < 10:
+        ok = false
+    if v > 20:
+        ok = false
+    i = i + 1
+print(ok)
+
+random.seed(7)
+r = random.randrange(5, 15)
+print(r >= 5)
+print(r < 15)
+
+random.seed(99)
+c = random.choice([100, 200, 300, 400])
+print(c >= 100)
+
+lst = [1, 2, 3, 4, 5]
+random.seed(123)
+random.shuffle(lst)
+print(len(lst))
+
+random.seed(456)
+sample = random.sample([10, 20, 30, 40, 50], 3)
+print(len(sample))

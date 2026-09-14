@@ -1649,6 +1649,47 @@ namespace vayu {
             if (a.size() != 2) throw std::runtime_error("math.pow takes 2 arguments");
             return Value(std::pow(a[0].asDouble(), a[1].asDouble()));
         }
+        Value m_asin(const std::vector<Value>& a) { return Value(std::asin(a.at(0).asDouble())); }
+        Value m_acos(const std::vector<Value>& a) { return Value(std::acos(a.at(0).asDouble())); }
+        Value m_atan(const std::vector<Value>& a) { return Value(std::atan(a.at(0).asDouble())); }
+        Value m_atan2(const std::vector<Value>& a) {
+            if (a.size() != 2) throw std::runtime_error("math.atan2 takes 2 arguments");
+            return Value(std::atan2(a[0].asDouble(), a[1].asDouble()));
+        }
+        Value m_sinh(const std::vector<Value>& a) { return Value(std::sinh(a.at(0).asDouble())); }
+        Value m_cosh(const std::vector<Value>& a) { return Value(std::cosh(a.at(0).asDouble())); }
+        Value m_tanh(const std::vector<Value>& a) { return Value(std::tanh(a.at(0).asDouble())); }
+        Value m_asinh(const std::vector<Value>& a) { return Value(std::asinh(a.at(0).asDouble())); }
+        Value m_acosh(const std::vector<Value>& a) { return Value(std::acosh(a.at(0).asDouble())); }
+        Value m_atanh(const std::vector<Value>& a) { return Value(std::atanh(a.at(0).asDouble())); }
+        Value m_degrees(const std::vector<Value>& a) {
+            return Value(a.at(0).asDouble() * 180.0 / 3.14159265358979323846);
+        }
+        Value m_radians(const std::vector<Value>& a) {
+            return Value(a.at(0).asDouble() * 3.14159265358979323846 / 180.0);
+        }
+        Value m_hypot(const std::vector<Value>& a) {
+            if (a.size() != 2) throw std::runtime_error("math.hypot takes 2 arguments");
+            return Value(std::hypot(a[0].asDouble(), a[1].asDouble()));
+        }
+        Value m_fmod(const std::vector<Value>& a) {
+            if (a.size() != 2) throw std::runtime_error("math.fmod takes 2 arguments");
+            return Value(std::fmod(a[0].asDouble(), a[1].asDouble()));
+        }
+        Value m_trunc(const std::vector<Value>& a) {
+            if (a.at(0).isInt()) return a[0];
+            return Value((long long)std::trunc(a[0].asDouble()));
+        }
+        Value m_isnan(const std::vector<Value>& a) {
+            return Value(a.at(0).isFloat() && std::isnan(a[0].asFloat()));
+        }
+        Value m_isinf(const std::vector<Value>& a) {
+            return Value(a.at(0).isFloat() && std::isinf(a[0].asFloat()));
+        }
+        Value m_isfinite(const std::vector<Value>& a) {
+            if (a.at(0).isInt()) return Value(true);
+            return Value(a.at(0).isFloat() && std::isfinite(a[0].asFloat()));
+        }
     } // namespace
 
     void Interpreter::installBuiltins() {
@@ -1696,6 +1737,14 @@ namespace vayu {
         addFn("tan", m_tan);    addFn("log", m_log);   addFn("log2", m_log2);
         addFn("log10", m_log10);  addFn("exp", m_exp);   addFn("floor", m_floor);
         addFn("ceil", m_ceil);   addFn("pow", m_pow);
+        addFn("asin", m_asin);   addFn("acos", m_acos);  addFn("atan", m_atan);
+        addFn("atan2", m_atan2); addFn("sinh", m_sinh);  addFn("cosh", m_cosh);
+        addFn("tanh", m_tanh);   addFn("asinh", m_asinh); addFn("acosh", m_acosh);
+        addFn("atanh", m_atanh); addFn("degrees", m_degrees);
+        addFn("radians", m_radians); addFn("hypot", m_hypot);
+        addFn("fmod", m_fmod);   addFn("trunc", m_trunc);
+        addFn("is_nan", m_isnan); addFn("is_inf", m_isinf);
+        addFn("is_finite", m_isfinite);
         mod->members["pi"] = Value(3.14159265358979323846);
         mod->members["e"] = Value(2.71828182845904523536);
         globals_->define("math", Value(mod));
