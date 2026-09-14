@@ -170,6 +170,9 @@ namespace vayu {
             int                                        nextFieldOffset_ = 0;
             std::unordered_map<std::string, const DefStmt*> topFnDecls_;
 
+            // ---- Phase 8: escape analysis state (per function) ----
+            std::unordered_map<std::string, std::string> nonEscapingClasses_;
+
             std::string                                  strLitData_;
             std::unordered_map<std::string, std::string> strLitLabels_;
             int                                          nextStrLitId_ = 0;
@@ -187,6 +190,7 @@ namespace vayu {
                 varInfo_.clear();
                 currentClass_.clear();
                 loopStack_.clear();
+                nonEscapingClasses_.clear();
             }
 
             std::string newTemp() { return "%t" + std::to_string(nextTemp_++); }
@@ -670,6 +674,291 @@ namespace vayu {
                             v.valType = vv.type;
                         }
                         return;
+                    }
+                }
+            }
+
+            // =====================================================================
+            // Phase 8: escape analysis
+            // =====================================================================
+
+            static bool isSafeAttrTarget(const Expr* target, const std::string& varName) {
+                if (!target) return false;
+                if (target->kind != ExprKind::NameRef) return false;
+                return static_cast<const NameRefExpr*>(target)->name == varName;
+            }
+
+            // Walk expression tree.  Returns true if `varName` escapes somewhere
+            // inside `e` (bare name reference, call argument, list element, etc.).
+            bool exprEscapes(const Expr* e, const std::string& varName) {
+                if (!e) return false;
+                switch (e->kind) {
+                case ExprKind::NameRef:
+                    return static_cast<const NameRefExpr*>(e)->name == varName;
+
+                case ExprKind::Attr: {
+                    auto* n = static_cast<const AttrExpr*>(e);
+                    if (isSafeAttrTarget(n->target.get(), varName)) return false;
+                    return exprEscapes(n->target.get(), varName);
+                }
+
+                case ExprKind::Call: {
+                    auto* n = static_cast<const CallExpr*>(e);
+                    // Safe form: varName.method(args) where varName is not passed
+                    // through args or as callee itself.
+                    if (n->callee->kind == ExprKind::Attr) {
+                        auto* a = static_cast<const AttrExpr*>(n->callee.get());
+                        if (isSafeAttrTarget(a->target.get(), varName)) {
+                            // Check args only
+                            for (auto& arg : n->args) {
+                                if (exprEscapes(arg.value.get(), varName)) return true;
+                            }
+                            return false;
+                        }
+                    }
+                    // Any other form: varName as callee → escape; varName as arg → escape.
+                    if (n->callee->kind == ExprKind::NameRef &&
+                        static_cast<const NameRefExpr*>(n->callee.get())->name == varName) {
+                        return true;
+                    }
+                    if (exprEscapes(n->callee.get(), varName)) return true;
+                    for (auto& arg : n->args) {
+                        if (exprEscapes(arg.value.get(), varName)) return true;
+                    }
+                    return false;
+                }
+
+                case ExprKind::Binary: {
+                    auto* n = static_cast<const BinaryExpr*>(e);
+                    return exprEscapes(n->lhs.get(), varName) ||
+                        exprEscapes(n->rhs.get(), varName);
+                }
+
+                case ExprKind::Unary:
+                    return exprEscapes(static_cast<const UnaryExpr*>(e)->operand.get(), varName);
+
+                case ExprKind::Grouping:
+                    return exprEscapes(static_cast<const GroupingExpr*>(e)->inner.get(), varName);
+
+                case ExprKind::Index: {
+                    auto* n = static_cast<const IndexExpr*>(e);
+                    // varName[i] — varName used as container.  Unsupported for
+                    // user objects; treat as escape.
+                    if (isSafeAttrTarget(n->target.get(), varName)) return true;
+                    return exprEscapes(n->target.get(), varName) ||
+                        exprEscapes(n->index.get(), varName);
+                }
+
+                case ExprKind::ListLit: {
+                    auto* n = static_cast<const ListLitExpr*>(e);
+                    for (auto& el : n->elements) {
+                        if (exprEscapes(el.get(), varName)) return true;
+                    }
+                    return false;
+                }
+
+                case ExprKind::MapLit: {
+                    auto* n = static_cast<const MapLitExpr*>(e);
+                    for (auto& en : n->entries) {
+                        if (exprEscapes(en.key.get(), varName)) return true;
+                        if (exprEscapes(en.value.get(), varName)) return true;
+                    }
+                    return false;
+                }
+
+                case ExprKind::Lambda: {
+                    auto* n = static_cast<const LambdaExpr*>(e);
+                    return exprEscapes(n->body.get(), varName);
+                }
+
+                default:
+                    return false;
+                }
+            }
+
+            bool stmtEscapes(const Stmt* s, const std::string& varName) {
+                if (!s) return false;
+                switch (s->kind) {
+                case StmtKind::Expr:
+                    return exprEscapes(static_cast<const ExprStmt*>(s)->expr.get(), varName);
+
+                case StmtKind::Assign: {
+                    auto* n = static_cast<const AssignStmt*>(s);
+                    // Plain reassignment of varName → escape.
+                    if (n->target->kind == ExprKind::NameRef &&
+                        static_cast<const NameRefExpr*>(n->target.get())->name == varName) {
+                        return true;
+                    }
+                    // varName.field = expr → safe target, check RHS.
+                    if (n->target->kind == ExprKind::Attr) {
+                        auto* a = static_cast<const AttrExpr*>(n->target.get());
+                        if (isSafeAttrTarget(a->target.get(), varName)) {
+                            return exprEscapes(n->value.get(), varName);
+                        }
+                    }
+                    // varName[i] = expr → escape.
+                    if (n->target->kind == ExprKind::Index) {
+                        auto* ix = static_cast<const IndexExpr*>(n->target.get());
+                        if (isSafeAttrTarget(ix->target.get(), varName)) return true;
+                    }
+                    if (exprEscapes(n->target.get(), varName)) return true;
+                    return exprEscapes(n->value.get(), varName);
+                }
+
+                case StmtKind::AnnotAssign: {
+                    auto* n = static_cast<const AnnotAssignStmt*>(s);
+                    if (n->name == varName) return true;
+                    if (n->value) return exprEscapes(n->value.get(), varName);
+                    return false;
+                }
+
+                case StmtKind::If: {
+                    auto* n = static_cast<const IfStmt*>(s);
+                    if (exprEscapes(n->cond.get(), varName)) return true;
+                    if (blockEscapes(n->thenBody, varName)) return true;
+                    for (auto& ec : n->elifs) {
+                        if (exprEscapes(ec.cond.get(), varName)) return true;
+                        if (blockEscapes(ec.body, varName)) return true;
+                    }
+                    if (n->elseBody && blockEscapes(*n->elseBody, varName)) return true;
+                    return false;
+                }
+
+                case StmtKind::While: {
+                    auto* n = static_cast<const WhileStmt*>(s);
+                    if (exprEscapes(n->cond.get(), varName)) return true;
+                    return blockEscapes(n->body, varName);
+                }
+
+                case StmtKind::For: {
+                    auto* n = static_cast<const ForStmt*>(s);
+                    if (n->targetName == varName) return true;
+                    if (exprEscapes(n->iterable.get(), varName)) return true;
+                    return blockEscapes(n->body, varName);
+                }
+
+                case StmtKind::Return: {
+                    auto* n = static_cast<const ReturnStmt*>(s);
+                    if (n->value) return exprEscapes(n->value.get(), varName);
+                    return false;
+                }
+
+                case StmtKind::Try: {
+                    auto* n = static_cast<const TryStmt*>(s);
+                    if (blockEscapes(n->tryBody, varName)) return true;
+                    for (auto& h : n->handlers) {
+                        if (blockEscapes(h.body, varName)) return true;
+                    }
+                    if (n->finallyBody && blockEscapes(*n->finallyBody, varName)) return true;
+                    return false;
+                }
+
+                case StmtKind::Raise: {
+                    auto* n = static_cast<const RaiseStmt*>(s);
+                    if (n->exception) return exprEscapes(n->exception.get(), varName);
+                    return false;
+                }
+
+                default:
+                    return false;
+                }
+            }
+
+            bool blockEscapes(const Block& b, const std::string& varName) {
+                for (auto& s : b.stmts) {
+                    if (stmtEscapes(s.get(), varName)) return true;
+                }
+                return false;
+            }
+
+            // Find candidate variables: `x = Class(args)` where Class is a
+            // user class with __init__.  Records the class name and counts the
+            // number of assignments to each candidate.
+            void findCandidates(const Block& b,
+                std::unordered_map<std::string, std::string>& out,
+                std::unordered_map<std::string, int>& counts) {
+                for (auto& s : b.stmts) findCandidatesStmt(s.get(), out, counts);
+            }
+
+            void findCandidatesStmt(const Stmt* s,
+                std::unordered_map<std::string, std::string>& out,
+                std::unordered_map<std::string, int>& counts) {
+                if (!s) return;
+                if (s->kind == StmtKind::Assign) {
+                    auto* n = static_cast<const AssignStmt*>(s);
+                    if (n->target->kind == ExprKind::NameRef &&
+                        n->value->kind == ExprKind::Call) {
+                        auto* c = static_cast<const CallExpr*>(n->value.get());
+                        if (c->callee->kind == ExprKind::NameRef) {
+                            const std::string& lhs = static_cast<const NameRefExpr*>(
+                                n->target.get())->name;
+                            const std::string& cname = static_cast<const NameRefExpr*>(
+                                c->callee.get())->name;
+                            counts[lhs]++;
+                            if (classes_.count(cname)) {
+                                const ClassInfo* ci = findClass(cname);
+                                if (ci && ci->hasInit) {
+                                    out[lhs] = cname;
+                                }
+                            }
+                        }
+                    }
+                }
+                switch (s->kind) {
+                case StmtKind::If: {
+                    auto* n = static_cast<const IfStmt*>(s);
+                    findCandidates(n->thenBody, out, counts);
+                    for (auto& ec : n->elifs) findCandidates(ec.body, out, counts);
+                    if (n->elseBody) findCandidates(*n->elseBody, out, counts);
+                    break;
+                }
+                case StmtKind::While:
+                    findCandidates(static_cast<const WhileStmt*>(s)->body, out, counts);
+                    break;
+                case StmtKind::For:
+                    findCandidates(static_cast<const ForStmt*>(s)->body, out, counts);
+                    break;
+                case StmtKind::Try: {
+                    auto* n = static_cast<const TryStmt*>(s);
+                    findCandidates(n->tryBody, out, counts);
+                    for (auto& h : n->handlers) findCandidates(h.body, out, counts);
+                    if (n->finallyBody) findCandidates(*n->finallyBody, out, counts);
+                    break;
+                }
+                default: break;
+                }
+            }
+
+            void analyzeEscapes(const Block& body) {
+                nonEscapingClasses_.clear();
+
+                std::unordered_map<std::string, std::string> candidateClass;
+                std::unordered_map<std::string, int>         assignCount;
+                findCandidates(body, candidateClass, assignCount);
+
+                for (auto& kv : candidateClass) {
+                    const std::string& varName = kv.first;
+                    const std::string& className = kv.second;
+                    if (assignCount[varName] != 1) continue;
+                    if (blockEscapes(body, varName)) continue;
+                    const ClassInfo* ci = findClass(className);
+                    if (!ci) continue;
+                    nonEscapingClasses_[varName] = className;
+                }
+            }
+
+            // =====================================================================
+
+            void inferTypeFromExpr(const Expr* e, Val& v) {
+                if (!e) return;
+                if (e->kind == ExprKind::NameRef) {
+                    auto it = varInfo_.find(static_cast<const NameRefExpr*>(e)->name);
+                    if (it != varInfo_.end()) {
+                        v.type = it->second.type;
+                        v.cls = it->second.clsName;
+                        v.elemType = it->second.elemType;
+                        v.elemCls = it->second.elemClsName;
+                        v.valType = it->second.valType;
                     }
                 }
             }
@@ -1675,6 +1964,44 @@ namespace vayu {
                 return r;
             }
 
+            // -----------------------------------------------------------------
+            // Phase 8: emit `x = Class(args)` with x stack-allocated.
+            // Returns true if the assignment was handled.
+            // -----------------------------------------------------------------
+            bool emitStackAssignment(const AssignStmt* n) {
+                if (n->target->kind != ExprKind::NameRef) return false;
+                const std::string& lhs = static_cast<const NameRefExpr*>(
+                    n->target.get())->name;
+                auto ne = nonEscapingClasses_.find(lhs);
+                if (ne == nonEscapingClasses_.end()) return false;
+                if (n->value->kind != ExprKind::Call) return false;
+                auto* c = static_cast<const CallExpr*>(n->value.get());
+                if (c->callee->kind != ExprKind::NameRef) return false;
+
+                const std::string& className = ne->second;
+                const ClassInfo* ci = findClass(className);
+                if (!ci) return false;
+
+                std::string inst = "%" + mangle(lhs) + "_inst";
+                std::vector<std::string> args;
+                args.push_back(inst);
+                for (auto& a : c->args) {
+                    if (!a.name.empty())
+                        throw std::runtime_error("native: kwargs not supported");
+                    args.push_back(emitExpr(a.value.get()).ssa);
+                }
+                std::string argsStr;
+                for (size_t i = 0; i < args.size(); ++i) {
+                    if (i) argsStr += ", ";
+                    argsStr += "l " + args[i];
+                }
+                const ClassInfo* owner = ci->initOwner ? ci->initOwner : ci;
+                std::string sym = "$vayu_mth_" + mangle(owner->name) + "_" +
+                    mangle("__init__");
+                line("call " + sym + "(" + argsStr + ")");
+                return true;
+            }
+
             void emitStmt(const Stmt* s) {
                 if (!s) return;
                 switch (s->kind) {
@@ -1685,6 +2012,8 @@ namespace vayu {
                 }
                 case StmtKind::Assign: {
                     auto* n = static_cast<const AssignStmt*>(s);
+
+                    if (emitStackAssignment(n)) return;
 
                     if (n->target->kind == ExprKind::Attr) {
                         auto* attr = static_cast<const AttrExpr*>(n->target.get());
@@ -2178,6 +2507,7 @@ namespace vayu {
                 auto savedVarInfo = varInfo_;
                 auto savedClass = currentClass_;
                 auto savedLoop = loopStack_;
+                auto savedNonEsc = nonEscapingClasses_;
                 int  savedTemp = nextTemp_;
                 int  savedLabel = nextLabel_;
                 bool savedTerm = terminated_;
@@ -2186,6 +2516,8 @@ namespace vayu {
                 resetFunctionState();
                 if (cls) currentClass_ = cls->name;
                 if (!prefix.empty()) currentModulePrefix_ = prefix;
+
+                analyzeEscapes(def->body);
 
                 for (size_t pi = 0; pi < def->params.size(); ++pi) {
                     auto& p = def->params[pi];
@@ -2215,10 +2547,29 @@ namespace vayu {
                 collectVarsBlock(def->body, names);
                 for (auto& n : names) {
                     if (slots_.count(n)) continue;
+                    if (nonEscapingClasses_.count(n)) continue;
                     std::string slot = "%" + mangle(n) + "_slot";
                     slots_[n] = slot;
                     line(slot + " =l alloc8 8");
                     line("storel 0, " + slot);
+                }
+
+                // Phase 8: allocate stack storage for non-escaping instances.
+                for (auto& kv : nonEscapingClasses_) {
+                    const std::string& varName = kv.first;
+                    const std::string& className = kv.second;
+                    const ClassInfo* ci = findClass(className);
+                    if (!ci) continue;
+                    std::string slot = "%" + mangle(varName) + "_slot";
+                    std::string inst = "%" + mangle(varName) + "_inst";
+                    slots_[varName] = slot;
+                    line(slot + " =l alloc8 8");
+                    line(inst + " =l alloc8 " + std::to_string(ci->totalSize));
+                    line("storel " + inst + ", " + slot);
+                    VarInfo vi;
+                    vi.type = VType::Obj;
+                    vi.clsName = className;
+                    varInfo_[varName] = vi;
                 }
 
                 emitBlock(def->body);
@@ -2229,6 +2580,7 @@ namespace vayu {
                 varInfo_ = std::move(savedVarInfo);
                 currentClass_ = std::move(savedClass);
                 loopStack_ = std::move(savedLoop);
+                nonEscapingClasses_ = std::move(savedNonEsc);
                 nextTemp_ = savedTemp;
                 nextLabel_ = savedLabel;
                 terminated_ = savedTerm;
@@ -2260,6 +2612,7 @@ namespace vayu {
                 auto savedVarInfo = varInfo_;
                 auto savedClass = currentClass_;
                 auto savedLoop = loopStack_;
+                auto savedNonEsc = nonEscapingClasses_;
                 int  savedTemp = nextTemp_;
                 int  savedLabel = nextLabel_;
                 bool savedTerm = terminated_;
@@ -2297,6 +2650,7 @@ namespace vayu {
                 varInfo_ = std::move(savedVarInfo);
                 currentClass_ = std::move(savedClass);
                 loopStack_ = std::move(savedLoop);
+                nonEscapingClasses_ = std::move(savedNonEsc);
                 nextTemp_ = savedTemp;
                 nextLabel_ = savedLabel;
                 terminated_ = savedTerm;
