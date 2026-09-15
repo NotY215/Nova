@@ -33,33 +33,22 @@ namespace vayu {
         Value callValue(const Value& callee, const std::vector<Value>& args,
             SourceLocation loc);
         std::shared_ptr<Environment> globals() const { return globals_; }
-        /// Register top-level struct / class declarations without executing
-        /// the program.  Called by the driver before running on the VM.
         void registerDeclarations(const Block& program);
         bool  vmIsInstanceOf(const Value& v, const std::string& className);
         Value vmMakeException(const std::string& typeName, const std::string& msg);
-        // ---- : hooks for the bytecode VM ----
-        // These mirror the logic of the tree-walking evaluator's attr lookup,
-        // instance construction, and method dispatch, but operate on
-        // pre-evaluated values.
+
         Value vmGetAttr(const Value& base, const std::string& name, SourceLocation loc);
         void  vmSetAttr(const Value& base, const std::string& name,
             const Value& v, SourceLocation loc);
         Value vmNewInst(const std::string& className,
             const std::vector<Value>& args, SourceLocation loc);
-        /// Return a ClassCtor callable for a class, or nullptr if not a class.
         std::shared_ptr<Callable> vmLookupClass(const std::string& name);
-
-        /// Load a module (used by the VM's IMPORT opcode).
         Value vmLoadModule(const std::string& name, SourceLocation loc);
 
-        // ---- Phase 4G: hook so builtins can invoke VMFunctions ----
         using VMFunctionRunner = std::function<Value(std::shared_ptr<Callable>,
             const std::vector<Value>&)>;
         void setVMFunctionRunner(VMFunctionRunner r) { vmRunner_ = std::move(r); }
 
-        /// Directory to search first when resolving module imports.
-        /// Should include a trailing separator.  Empty means "current directory".
         void setSourceDir(const std::string& dir) { sourceDir_ = dir; }
 
         static std::string exceptionTypeName(const Value& v);
@@ -74,8 +63,6 @@ namespace vayu {
         std::unordered_map<std::string, const ClassStmt*>             classDecls_;
 
         std::unordered_map<std::string, std::shared_ptr<ModuleValue>> moduleCache_;
-        // Persists module ASTs so that DefStmt / ClassStmt pointers held by
-        // Callables and classDecls_ stay valid for the interpreter's lifetime.
         std::vector<std::unique_ptr<Block>> moduleAsts_;
 
         std::vector<Value> activeExceptions_;

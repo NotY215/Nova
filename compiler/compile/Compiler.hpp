@@ -38,6 +38,9 @@ namespace vayu {
         std::unordered_map<std::string, ClassInfo> classInfo_;
         std::unordered_map<std::string,
             std::unordered_map<std::string, long long>> enums_;
+        // Phase 11.1c: class name -> { static member name -> true }
+        std::unordered_map<std::string,
+            std::unordered_map<std::string, bool>> statics_;
         std::vector<LoopContext>                   loopStack_;
 
         // declaration pre-pass
@@ -74,6 +77,10 @@ namespace vayu {
         void   emitNameU16(OpCode op, const std::string& name, int line);
         void   emitNameU16WithCount(OpCode op, const std::string& name,
             uint8_t count, int line);
+
+        static std::string staticName(const std::string& cls, const std::string& m) {
+            return "__static_" + cls + "__" + m;
+        }
 
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
     };

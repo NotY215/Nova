@@ -154,8 +154,8 @@ namespace vayu {
         Try, Raise,
         Import, FromImport,
         Pass, Break, Continue,
-        Const,        // NEW (Phase 11.1b)
-        Enum,         // NEW (Phase 11.1d)
+        Const,
+        Enum,
     };
 
     struct Stmt {
@@ -230,10 +230,19 @@ namespace vayu {
         }
     };
 
+    // Phase 11.1c — static class member declaration.
+    struct StaticFieldDef {
+        std::string    name;
+        ExprPtr        type;   // optional annotation
+        ExprPtr        init;   // optional initializer
+        SourceLocation loc;
+    };
+
     struct ClassStmt : Stmt {
         std::string                           name;
         std::string                           parentName;
         std::vector<FieldDef>                 fields;
+        std::vector<StaticFieldDef>           staticFields;   // NEW
         std::vector<std::unique_ptr<DefStmt>> methods;
         ClassStmt(std::string n, std::string p, SourceLocation l)
             : Stmt(StmtKind::Class, l), name(std::move(n)), parentName(std::move(p)) {
@@ -270,7 +279,6 @@ namespace vayu {
         }
     };
 
-    // --- module imports ---
     struct ImportStmt : Stmt {
         std::string moduleName;
         std::string alias;
@@ -297,27 +305,19 @@ namespace vayu {
     struct BreakStmt : Stmt { BreakStmt(SourceLocation l) : Stmt(StmtKind::Break, l) {} };
     struct ContinueStmt : Stmt { ContinueStmt(SourceLocation l) : Stmt(StmtKind::Continue, l) {} };
 
-    // ===========================================================================
-    // Phase 11.1b — `const NAME [: T] = expr`
-    // ===========================================================================
     struct ConstStmt : Stmt {
         std::string name;
-        ExprPtr     type;    // optional; may be null
-        ExprPtr     value;   // required (parser enforces)
+        ExprPtr     type;
+        ExprPtr     value;
         ConstStmt(std::string n, ExprPtr t, ExprPtr v, SourceLocation l)
             : Stmt(StmtKind::Const, l), name(std::move(n)),
             type(std::move(t)), value(std::move(v)) {
         }
     };
 
-    // ===========================================================================
-    // Phase 11.1d — `enum Color:\n  Red\n  Green\n  Blue = 10\n`
-    // Values are ints.  Parser fills `value` for every item (auto-increment
-    // when the source omits `= N`).
-    // ===========================================================================
     struct EnumItem {
         std::string name;
-        ExprPtr     value;   // never null after parsing
+        ExprPtr     value;
     };
     struct EnumStmt : Stmt {
         std::string           name;

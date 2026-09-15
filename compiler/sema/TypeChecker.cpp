@@ -200,6 +200,20 @@ namespace vayu {
                 }
                 ct->fields = std::move(fields);
 
+                                // Phase 11.1c: statics.
+                std::unordered_map<std::string, TypePtr> statics;
+                for (auto& sf : d->staticFields) {
+                    if (statics.count(sf.name))
+                        error(sf.loc, "duplicate static member '" + sf.name +
+                            "' in class '" + d->name + "'");
+                    if (ct->findField(sf.name))
+                        error(sf.loc, "static member '" + sf.name +
+                            "' clashes with an instance field");
+                    TypePtr st = sf.type ? resolveTypeExpr(sf.type.get()) : Types::Any();
+                    statics[sf.name] = st;
+                }
+                statics_[d->name] = std::move(statics);
+
                 for (auto& m : d->methods) {
                     if (ct->methods.count(m->name))
                         error(m->loc, "method '" + m->name + "' declared twice");
@@ -539,6 +553,22 @@ namespace vayu {
 
             if (n->target->kind == ExprKind::Attr) {
                 auto* a = static_cast<const AttrExpr*>(n->target.get());
+                if (a->target->kind == ExprKind::NameRef) {
+                    const auto* tn = static_cast<const NameRefExpr*>(a->target.get());
+                    auto sit = statics_.find(tn->name);
+                    if (sit != statics_.end()) {
+                        auto fit = sit->second.find(a->name);
+                        if (fit == sit->second.end())
+                            error(a->loc, "class '" + tn->name +
+                                "' has no static member '" + a->name + "'");
+                        TypePtr v = checkExpr(n->value.get());
+                        if (!isAssignable(fit->second, v))
+                            error(n->loc, "static member '" + a->name +
+                                "' expects " + fit->second->toString() +
+                                ", got " + v->toString());
+                        return;
+                    }
+                }
                 TypePtr t = checkExpr(a->target.get());
                 if (t->kind != TypeKind::Struct)
                     error(a->loc, "cannot set field '" + a->name +
@@ -1016,6 +1046,18 @@ namespace vayu {
                         error(n->loc, "enum '" + tn->name + "' has no item '" +
                             n->name + "'");
                     return Types::Int();
+                }
+            }
+            // Phase 11.1c: ClassName.staticName
+            if (n->target->kind == ExprKind::NameRef) {
+                const auto* tn = static_cast<const NameRefExpr*>(n->target.get());
+                auto sit = statics_.find(tn->name);
+                if (sit != statics_.end()) {
+                    auto fit = sit->second.find(n->name);
+                    if (fit == sit->second.end())
+                        error(n->loc, "class '" + tn->name +
+                            "' has no static member '" + n->name + "'");
+                    return fit->second;
                 }
             }
             TypePtr t = checkExpr(n->target.get());

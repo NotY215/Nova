@@ -78,6 +78,7 @@ namespace vayu {
                 loadImports(program);
 
                 collectEnums(program);
+                collectStatics(program);
                 collectClasses(program);
                 for (auto& kv : modules_) collectClasses(kv.second);
 
@@ -109,6 +110,16 @@ namespace vayu {
                     if (s->kind == StmtKind::Def) continue;
                     collectVarsStmt(s.get(), topVars);
                 }
+                // Phase 11.1c: static slots must exist in globalSlots_ so that
+                // method bodies emitted later can read/write them.
+                for (auto& s : program.stmts) {
+                    if (s->kind != StmtKind::Class) continue;
+                    auto* d = static_cast<const ClassStmt*>(s.get());
+                    auto sit = statics_.find(d->name);
+                    if (sit == statics_.end()) continue;
+                    for (auto& kv : sit->second) topVars.insert(kv.second);
+                }
+
                 for (auto& n : topVars) {
                     std::string slot = "%" + mangle(n) + "_slot";
                     slots_[n] = slot;
@@ -116,10 +127,7 @@ namespace vayu {
                     line("storel 0, " + slot);
                 }
 
-                // Snapshot top-level slots/type info BEFORE emitting any
-                // function body.  emitFunction calls resetFunctionState which
-                // clears slots_/varInfo_; NameRef/Assign lookups inside a
-                // function fall back to these maps.
+                // Snapshot BEFORE emitting any function bodies.
                 globalSlots_ = slots_;
 
                 for (auto& kv : modules_)
@@ -127,16 +135,13 @@ namespace vayu {
 
                 for (auto& s : program.stmts) {
                     if (s->kind == StmtKind::Def) continue;
-                    if (s->kind == StmtKind::Struct || s->kind == StmtKind::Class) continue;
+                    if (s->kind == StmtKind::Struct) continue;
                     if (s->kind == StmtKind::Enum) continue;
                     if (s->kind == StmtKind::Import || s->kind == StmtKind::FromImport) continue;
                     emitStmt(s.get());
                     if (terminated_) break;
                 }
 
-                // Capture whatever refined VarInfo the top-level statements
-                // produced, so function bodies can recover e.g. `const PI = 3`
-                // is Int.
                 globalVarInfo_ = varInfo_;
 
                 if (!terminated_) line("ret");
@@ -177,8 +182,7 @@ namespace vayu {
             std::unordered_map<std::string, std::string>    slots_;
             std::unordered_map<std::string, VarInfo>        varInfo_;
 
-            // Phase 11.1b: top-level bindings that must remain visible inside
-            // function bodies (currently: `const`; in future: `static`).
+            // Phase 11.1b: top-level bindings visible inside function bodies.
             std::unordered_map<std::string, std::string>    globalSlots_;
             std::unordered_map<std::string, VarInfo>        globalVarInfo_;
 
@@ -194,7 +198,11 @@ namespace vayu {
             std::unordered_map<std::string,
                 std::unordered_map<std::string, long long>> enums_;
 
-            // ---- Phase 8: escape analysis state (per function) ----
+            // Phase 11.1c: class name -> { static member name -> mangled slot id }.
+            std::unordered_map<std::string,
+                std::unordered_map<std::string, std::string>> statics_;
+
+            // ---- Phase 8: escape analysis state ----
             std::unordered_map<std::string, std::string> nonEscapingClasses_;
 
             std::string                                  strLitData_;
@@ -461,6 +469,9 @@ namespace vayu {
                 }
                 case StmtKind::Class: {
                     auto* n = static_cast<const ClassStmt*>(s);
+                    for (auto& sf : n->staticFields) {
+                        if (sf.init) collectStringLiteralsExpr(sf.init.get());
+                    }
                     for (auto& m : n->methods) collectStringLiterals(m->body);
                     break;
                 }
@@ -563,7 +574,6 @@ namespace vayu {
                 }
             }
 
-            // ---- Phase 11.1d: register enums ----
             void collectEnums(const Block& program) {
                 for (auto& s : program.stmts) {
                     if (s->kind != StmtKind::Enum) continue;
@@ -576,6 +586,18 @@ namespace vayu {
                         items[it.name] = v;
                     }
                     enums_[d->name] = std::move(items);
+                }
+            }
+
+            // Phase 11.1c
+            void collectStatics(const Block& program) {
+                for (auto& s : program.stmts) {
+                    if (s->kind != StmtKind::Class) continue;
+                    auto* d = static_cast<const ClassStmt*>(s.get());
+                    std::unordered_map<std::string, std::string> sm;
+                    for (auto& sf : d->staticFields)
+                        sm[sf.name] = "__static_" + d->name + "__" + sf.name;
+                    statics_[d->name] = std::move(sm);
                 }
             }
 
@@ -1075,11 +1097,8 @@ namespace vayu {
                         lookup = currentModulePrefix_ + name;
                     }
 
-                    // Phase 11.1b fix: never reassign an iterator across two
-                    // different unordered_maps.  MSVC's debug STL asserts
-                    // "list iterators incompatible" when comparing iterators
-                    // from different containers.  Collect the slot string via
-                    // a pointer, then look up VarInfo the same way.
+                    // Never reassign an iterator across two different maps.
+                    // MSVC's debug STL asserts on cross-container compares.
                     const std::string* slotPtr = nullptr;
                     {
                         auto sit = slots_.find(lookup);
@@ -1315,6 +1334,54 @@ namespace vayu {
                             r.ssa = std::to_string(iit->second);
                             r.type = VType::Int;
                             return r;
+                        }
+                    }
+
+                    // Phase 11.1c: ClassName.staticName -> load global slot.
+                    if (n->target->kind == ExprKind::NameRef) {
+                        const auto* tn = static_cast<const NameRefExpr*>(n->target.get());
+                        auto sit = statics_.find(tn->name);
+                        if (sit != statics_.end()) {
+                            auto mit = sit->second.find(n->name);
+                            if (mit != sit->second.end()) {
+                                const std::string& slotName = mit->second;
+                                const std::string* slotPtr = nullptr;
+                                {
+                                    auto git = slots_.find(slotName);
+                                    if (git != slots_.end()) slotPtr = &git->second;
+                                }
+                                if (!slotPtr) {
+                                    auto git2 = globalSlots_.find(slotName);
+                                    if (git2 != globalSlots_.end()) slotPtr = &git2->second;
+                                }
+                                if (!slotPtr)
+                                    throw std::runtime_error(
+                                        "native: static '" + tn->name + "." +
+                                        n->name + "' not initialized");
+                                std::string t = newTemp();
+                                line(t + " =l loadl " + *slotPtr);
+                                r.ssa = t;
+                                const VarInfo* viPtr = nullptr;
+                                {
+                                    auto vi = varInfo_.find(slotName);
+                                    if (vi != varInfo_.end()) viPtr = &vi->second;
+                                }
+                                if (!viPtr) {
+                                    auto gvi = globalVarInfo_.find(slotName);
+                                    if (gvi != globalVarInfo_.end()) viPtr = &gvi->second;
+                                }
+                                if (viPtr) {
+                                    r.type = viPtr->type;
+                                    r.cls = viPtr->clsName;
+                                    r.elemType = viPtr->elemType;
+                                    r.elemCls = viPtr->elemClsName;
+                                    r.valType = viPtr->valType;
+                                }
+                                else {
+                                    r.type = VType::Int;
+                                }
+                                return r;
+                            }
                         }
                     }
 
@@ -2774,6 +2841,41 @@ namespace vayu {
 
                     if (n->target->kind == ExprKind::Attr) {
                         auto* attr = static_cast<const AttrExpr*>(n->target.get());
+                        // Phase 11.1c: ClassName.staticName = value
+                        if (attr->target->kind == ExprKind::NameRef) {
+                            const auto* tn = static_cast<const NameRefExpr*>(
+                                attr->target.get());
+                            auto sit = statics_.find(tn->name);
+                            if (sit != statics_.end()) {
+                                auto mit = sit->second.find(attr->name);
+                                if (mit != sit->second.end()) {
+                                    const std::string& slotName = mit->second;
+                                    const std::string* slotPtr = nullptr;
+                                    {
+                                        auto git = slots_.find(slotName);
+                                        if (git != slots_.end()) slotPtr = &git->second;
+                                    }
+                                    if (!slotPtr) {
+                                        auto git2 = globalSlots_.find(slotName);
+                                        if (git2 != globalSlots_.end()) slotPtr = &git2->second;
+                                    }
+                                    if (!slotPtr)
+                                        throw std::runtime_error(
+                                            "native: static '" + tn->name + "." +
+                                            attr->name + "' not initialized");
+                                    Val v = emitExpr(n->value.get());
+                                    line("storel " + v.ssa + ", " + *slotPtr);
+                                    VarInfo vi;
+                                    vi.type = v.type; vi.clsName = v.cls;
+                                    vi.elemType = v.elemType;
+                                    vi.elemClsName = v.elemCls;
+                                    vi.valType = v.valType;
+                                    varInfo_[slotName] = vi;
+                                    return;
+                                }
+                            }
+                        }
+
                         Val recv = emitExpr(attr->target.get());
                         Val v = emitExpr(n->value.get());
                         if (recv.type != VType::Obj)
@@ -2823,18 +2925,23 @@ namespace vayu {
                         slotName = currentModulePrefix_ + nm->name;
 
                     Val v = emitExpr(n->value.get());
-                    std::string slot = slots_.count(slotName)
-                        ? slots_[slotName] : "";
-                    if (slot.empty())
-                        slot = slots_.count(nm->name) ? slots_[nm->name] : "";
-                    if (slot.empty()) {
-                        auto git = globalSlots_.find(nm->name);
-                        if (git != globalSlots_.end()) slot = git->second;
+                    const std::string* slotPtr = nullptr;
+                    {
+                        auto it = slots_.find(slotName);
+                        if (it != slots_.end()) slotPtr = &it->second;
                     }
-                    if (slot.empty())
+                    if (!slotPtr && nm->name != slotName) {
+                        auto it2 = slots_.find(nm->name);
+                        if (it2 != slots_.end()) slotPtr = &it2->second;
+                    }
+                    if (!slotPtr) {
+                        auto it3 = globalSlots_.find(nm->name);
+                        if (it3 != globalSlots_.end()) slotPtr = &it3->second;
+                    }
+                    if (!slotPtr)
                         throw std::runtime_error(
                             "native: variable '" + nm->name + "' not declared");
-                    line("storel " + v.ssa + ", " + slot);
+                    line("storel " + v.ssa + ", " + *slotPtr);
 
                     VarInfo vi;
                     vi.type = v.type;
@@ -2901,6 +3008,39 @@ namespace vayu {
                     return;
                 }
 
+                case StmtKind::Class: {
+                    auto* n = static_cast<const ClassStmt*>(s);
+                    auto sit = statics_.find(n->name);
+                    if (sit == statics_.end()) return;
+                    for (auto& sf : n->staticFields) {
+                        auto mit = sit->second.find(sf.name);
+                        if (mit == sit->second.end()) continue;
+                        const std::string& slotName = mit->second;
+                        const std::string* slotPtr = nullptr;
+                        {
+                            auto git = slots_.find(slotName);
+                            if (git != slots_.end()) slotPtr = &git->second;
+                        }
+                        if (!slotPtr) {
+                            auto git2 = globalSlots_.find(slotName);
+                            if (git2 != globalSlots_.end()) slotPtr = &git2->second;
+                        }
+                        if (!slotPtr)
+                            throw std::runtime_error(
+                                "native: static '" + n->name + "." + sf.name +
+                                "' has no slot (internal)");
+                        Val v; v.ssa = "0"; v.type = VType::Int;
+                        if (sf.init) v = emitExpr(sf.init.get());
+                        line("storel " + v.ssa + ", " + *slotPtr);
+                        VarInfo vi;
+                        vi.type = v.type; vi.clsName = v.cls;
+                        vi.elemType = v.elemType; vi.elemClsName = v.elemCls;
+                        vi.valType = v.valType;
+                        varInfo_[slotName] = vi;
+                    }
+                    return;
+                }
+
                 case StmtKind::If:     emitIf(static_cast<const IfStmt*>(s));       return;
                 case StmtKind::While:  emitWhile(static_cast<const WhileStmt*>(s)); return;
                 case StmtKind::For:    emitFor(static_cast<const ForStmt*>(s));     return;
@@ -2920,8 +3060,7 @@ namespace vayu {
                     return;
 
                 case StmtKind::Pass:   return;
-                case StmtKind::Struct:
-                case StmtKind::Class:  return;
+                case StmtKind::Struct: return;
                 case StmtKind::Enum:   return;
                 case StmtKind::Import:
                 case StmtKind::FromImport:
@@ -3338,7 +3477,6 @@ namespace vayu {
                     line("storel 0, " + slot);
                 }
 
-                // Phase 8: allocate stack storage for non-escaping instances.
                 for (auto& kv : nonEscapingClasses_) {
                     const std::string& varName = kv.first;
                     const std::string& className = kv.second;

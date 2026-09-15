@@ -287,11 +287,17 @@ namespace vayu {
             if (!n->parentName.empty()) lbl += "(" + n->parentName + ")";
             putLabel(prefix, isLast, lbl);
             std::string cp = childPrefix(prefix, isLast);
-            size_t total = n->fields.size() + n->methods.size(), idx = 0;
+            size_t total = n->fields.size() + n->staticFields.size() + n->methods.size();
+            size_t idx = 0;
             for (auto& f : n->fields) {
                 std::string ft = (f.type && f.type->kind == ExprKind::NameRef)
                     ? static_cast<const NameRefExpr*>(f.type.get())->name : "<type>";
                 putLabel(cp, ++idx == total, "field " + f.name + ": " + ft);
+            }
+            for (auto& sf : n->staticFields) {
+                std::string ft = (sf.type && sf.type->kind == ExprKind::NameRef)
+                    ? static_cast<const NameRefExpr*>(sf.type.get())->name : "<type>";
+                putLabel(cp, ++idx == total, "static " + sf.name + ": " + ft);
             }
             for (auto& m : n->methods)
                 putLabel(cp, ++idx == total, "method " + m->name);

@@ -63,6 +63,7 @@ namespace vayu {
         }
         execBlock(program);
     }
+
     bool Interpreter::vmIsInstanceOf(const Value& v, const std::string& className) {
         auto it = classes_.find(className);
         if (it == classes_.end()) return false;
@@ -85,18 +86,6 @@ namespace vayu {
         }
     }
 
-    void Interpreter::registerEnum(const EnumStmt* d) {
-        auto mod = std::make_shared<ModuleValue>();
-        mod->name = d->name;
-        for (auto& it : d->items) {
-            long long v = 0;
-            if (it.value && it.value->kind == ExprKind::IntLit)
-                v = static_cast<const IntLitExpr*>(it.value.get())->value;
-            mod->members[it.name] = Value(v);
-        }
-        globals_->define(d->name, Value(mod));
-    }
-
     Value Interpreter::vmGetAttr(const Value& base, const std::string& name,
         SourceLocation loc) {
         // super-proxy branch (mirrors evalAttr)
@@ -114,6 +103,15 @@ namespace vayu {
             bm->methodFn = m;
             bm->definingClass = dummy;
             return Value(bm);
+        }
+        // Phase 11.1c: ClassName.staticName (VM path)
+        if (base.isCallable() &&
+            base.asCallable()->kind == Callable::Kind::ClassCtor) {
+            auto cls = base.asCallable()->classObj;
+            if (cls) {
+                auto sit = cls->staticFields.find(name);
+                if (sit != cls->staticFields.end()) return sit->second;
+            }
         }
         if (base.isModule()) {
             auto mod = base.asModule();
@@ -207,6 +205,19 @@ namespace vayu {
         classDecls_[d->name] = d;
     }
 
+    // Phase 11.1d — enums become module-shaped values in globals_.
+    void Interpreter::registerEnum(const EnumStmt* d) {
+        auto mod = std::make_shared<ModuleValue>();
+        mod->name = d->name;
+        for (auto& it : d->items) {
+            long long v = 0;
+            if (it.value && it.value->kind == ExprKind::IntLit)
+                v = static_cast<const IntLitExpr*>(it.value.get())->value;
+            mod->members[it.name] = Value(v);
+        }
+        globals_->define(d->name, Value(mod));
+    }
+
     // ===========================================================================
     // Exceptions
     // ===========================================================================
@@ -282,6 +293,11 @@ namespace vayu {
             else          env_->define(n->name, Value());
             return;
         }
+        case StmtKind::Const: {
+            auto* n = static_cast<const ConstStmt*>(s);
+            env_->define(n->name, eval(n->value.get()));
+            return;
+        }
         case StmtKind::If: {
             auto* n = static_cast<const IfStmt*>(s);
             if (eval(n->cond.get()).truthy()) { execBlock(n->thenBody); return; }
@@ -321,14 +337,21 @@ namespace vayu {
             if (n->value) sig.value = eval(n->value.get());
             throw sig;
         }
-        case StmtKind::Struct:
-        case StmtKind::Class:
-        case StmtKind::Enum: return;
-        case StmtKind::Const: {
-            auto* n = static_cast<const ConstStmt*>(s);
-            env_->define(n->name, eval(n->value.get()));
+
+        case StmtKind::Class: {
+            // Phase 11.1c: run static initializers at class-statement time.
+            auto* n = static_cast<const ClassStmt*>(s);
+            auto it = classes_.find(n->name);
+            if (it == classes_.end()) return;
+            for (auto& sf : n->staticFields) {
+                Value v = sf.init ? eval(sf.init.get()) : Value();
+                it->second->staticFields[sf.name] = std::move(v);
+            }
             return;
         }
+
+        case StmtKind::Struct:
+        case StmtKind::Enum: return;
         case StmtKind::Pass:     return;
         case StmtKind::Break:    throw BreakSignal{};
         case StmtKind::Continue: throw ContinueSignal{};
@@ -358,23 +381,19 @@ namespace vayu {
             return false;
             };
 
-        // 1. source directory of the importing file
         if (!sourceDir_.empty()) {
             std::string p = sourceDir_;
             if (p.back() != '/' && p.back() != '\\') p += '/';
             p += name + ".vayu";
             if (tryPath(p)) return true;
-            // also try .vyu (native compiler uses this extension)
             std::string p2 = sourceDir_;
             if (p2.back() != '/' && p2.back() != '\\') p2 += '/';
             p2 += name + ".vyu";
             if (tryPath(p2)) return true;
         }
-        // 2. current working directory
         if (tryPath(name + ".vayu")) return true;
         if (tryPath(name + ".vyu"))  return true;
 
-        // 3. VAYU_MODULE_PATH
         if (const char* mp = std::getenv("VAYU_MODULE_PATH")) {
 #ifdef _WIN32
             const char sep = ';';
@@ -400,11 +419,9 @@ namespace vayu {
     }
 
     Value Interpreter::loadModule(const std::string& name, SourceLocation loc) {
-        // Already loaded?
         auto cached = moduleCache_.find(name);
         if (cached != moduleCache_.end()) return Value(cached->second);
 
-        // Builtin module already in globals?
         if (Value* existing = globals_->lookup(name)) {
             if (existing->isModule()) {
                 moduleCache_[name] = existing->asModule();
@@ -422,7 +439,6 @@ namespace vayu {
         std::stringstream ss; ss << in.rdbuf();
         std::string src = ss.str();
 
-        // Parse
         Block program;
         try {
             Lexer lexer(std::move(src));
@@ -435,17 +451,11 @@ namespace vayu {
                 std::to_string(e.loc.line) + ": " + e.what(), loc);
         }
 
-        // Move the AST into persistent storage.  DefStmt / ClassStmt pointers
-        // inside Callables and classDecls_ point into this Block, so it must
-        // outlive the interpreter run.
         moduleAsts_.push_back(std::make_unique<Block>(std::move(program)));
         Block& programRef = *moduleAsts_.back();
 
-        // Fresh module environment, parent = globals_ so builtins are visible
         auto modEnv = std::make_shared<Environment>(globals_);
 
-        // Swap sourceDir_ to the module's own directory so nested imports resolve
-        // relative to the module file.
         std::string moduleDir;
         {
             auto slash = path.find_last_of("/\\");
@@ -454,9 +464,6 @@ namespace vayu {
         std::string savedDir = sourceDir_;
         sourceDir_ = moduleDir;
 
-
-
-        // Swap env_ for the module's env
         auto savedEnv = env_;
         env_ = modEnv;
         try {
@@ -465,6 +472,8 @@ namespace vayu {
                     registerStruct(static_cast<const StructStmt*>(s2.get()));
                 if (s2->kind == StmtKind::Class)
                     registerClass(static_cast<const ClassStmt*>(s2.get()));
+                if (s2->kind == StmtKind::Enum)
+                    registerEnum(static_cast<const EnumStmt*>(s2.get()));
             }
             execBlock(programRef);
         }
@@ -476,7 +485,6 @@ namespace vayu {
         env_ = savedEnv;
         sourceDir_ = savedDir;
 
-        // Build module value
         auto mod = std::make_shared<ModuleValue>();
         mod->name = name;
         for (auto& [k, v] : modEnv->localVars()) {
@@ -569,6 +577,15 @@ namespace vayu {
         if (n->target->kind == ExprKind::Attr) {
             auto* a = static_cast<const AttrExpr*>(n->target.get());
             Value inst = eval(a->target.get());
+            // Phase 11.1c: ClassName.staticName = value
+            if (inst.isCallable() &&
+                inst.asCallable()->kind == Callable::Kind::ClassCtor) {
+                auto cls = inst.asCallable()->classObj;
+                if (cls) {
+                    cls->staticFields[a->name] = std::move(v);
+                    return;
+                }
+            }
             if (!inst.isInstance())
                 throw RuntimeError("cannot assign field on " + inst.typeName(), a->loc);
             inst.asInstance()->fields[a->name] = std::move(v);
@@ -761,6 +778,17 @@ namespace vayu {
 
     Value Interpreter::evalAttr(const AttrExpr* a) {
         Value base = eval(a->target.get());
+
+        // Phase 11.1c: ClassName.staticName — class reached via ClassCtor callable.
+        if (base.isCallable() &&
+            base.asCallable()->kind == Callable::Kind::ClassCtor) {
+            auto cls = base.asCallable()->classObj;
+            if (cls) {
+                auto sit = cls->staticFields.find(a->name);
+                if (sit != cls->staticFields.end()) return sit->second;
+            }
+        }
+
         if (base.isCallable() && base.asCallable()->kind == Callable::Kind::SuperMethod) {
             auto sp = base.asCallable();
             std::shared_ptr<ClassObject> dummy;
@@ -813,6 +841,7 @@ namespace vayu {
         throw RuntimeError("type '" + (si->cls ? si->cls->name : "?") +
             "' has no field or method '" + a->name + "'", a->loc);
     }
+
     std::shared_ptr<Callable> Interpreter::vmLookupClass(const std::string& name) {
         auto it = classes_.find(name);
         if (it == classes_.end()) return nullptr;

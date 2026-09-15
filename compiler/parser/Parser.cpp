@@ -82,9 +82,15 @@ namespace vayu {
         if (check(TokenType::Const))  return parseConst();
         if (check(TokenType::Enum))   return parseEnum();
 
-        if (check(TokenType::Pass)) { Token t = advance(); return std::make_unique<PassStmt>(t.location); }
-        if (check(TokenType::Break)) { Token t = advance(); return std::make_unique<BreakStmt>(t.location); }
-        if (check(TokenType::Continue)) { Token t = advance(); return std::make_unique<ContinueStmt>(t.location); }
+        if (check(TokenType::Pass)) {
+            Token t = advance(); return std::make_unique<PassStmt>(t.location);
+        }
+        if (check(TokenType::Break)) {
+            Token t = advance(); return std::make_unique<BreakStmt>(t.location);
+        }
+        if (check(TokenType::Continue)) {
+            Token t = advance(); return std::make_unique<ContinueStmt>(t.location);
+        }
 
         if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon)
             return parseAnnotatedAssign();
@@ -115,6 +121,15 @@ namespace vayu {
             value = parseExpression();
         return std::make_unique<ReturnStmt>(std::move(value), t.location);
     }
+    StmtPtr Parser::parseRaise() {
+        Token t = advance();
+        ExprPtr exc = nullptr;
+        if (!check(TokenType::Newline) && !check(TokenType::Dedent) && !isAtEnd())
+            exc = parseExpression();
+        return std::make_unique<RaiseStmt>(std::move(exc), t.location);
+    }
+
+    // Phase 11.1b — `const NAME [: T] = expr`
     StmtPtr Parser::parseConst() {
         Token cTok = advance();   // 'const'
         Token name = expect(TokenType::Identifier, "constant name");
@@ -126,6 +141,7 @@ namespace vayu {
             std::move(value), cTok.location);
     }
 
+    // Phase 11.1d — `enum Name:\n  Red\n  Green = 5\n`
     StmtPtr Parser::parseEnum() {
         Token eTok = advance();   // 'enum'
         Token name = expect(TokenType::Identifier, "enum name");
@@ -153,7 +169,6 @@ namespace vayu {
                     autoIncrementOK = true;
                 }
                 else {
-                    // Non-literal value: subsequent items must be explicit.
                     autoIncrementOK = false;
                 }
             }
@@ -176,7 +191,6 @@ namespace vayu {
             throw ParseError("enum '" + name.lexeme + "' has no items",
                 eTok.location);
 
-        // Reject duplicate names.
         for (size_t i = 0; i < stmt->items.size(); ++i)
             for (size_t j = i + 1; j < stmt->items.size(); ++j)
                 if (stmt->items[i].name == stmt->items[j].name)
@@ -187,13 +201,6 @@ namespace vayu {
         return stmt;
     }
 
-    StmtPtr Parser::parseRaise() {
-        Token t = advance();
-        ExprPtr exc = nullptr;
-        if (!check(TokenType::Newline) && !check(TokenType::Dedent) && !isAtEnd())
-            exc = parseExpression();
-        return std::make_unique<RaiseStmt>(std::move(exc), t.location);
-    }
     StmtPtr Parser::parseTry() {
         Token tryTok = advance();
         expect(TokenType::Colon, "':' after try");
@@ -360,10 +367,30 @@ namespace vayu {
         expect(TokenType::Colon, "':' after class name");
         expect(TokenType::Newline, "newline after ':'");
         expect(TokenType::Indent, "indented class body");
+
         auto cls = std::make_unique<ClassStmt>(name.lexeme, parentName, cTok.location);
+
         for (;;) {
             skipNewlines();
             if (isAtEnd() || check(TokenType::Dedent)) break;
+
+            // Phase 11.1c: `static name [: T] [= expr]` — soft keyword.
+            if (check(TokenType::Identifier) && peek().lexeme == "static" &&
+                peek(1).type == TokenType::Identifier) {
+                advance();   // consume 'static'
+                Token nm = expect(TokenType::Identifier, "static member name");
+                StaticFieldDef sf;
+                sf.name = nm.lexeme;
+                sf.loc = nm.location;
+                if (match(TokenType::Colon)) sf.type = parseTypeExpr();
+                if (match(TokenType::Assign)) sf.init = parseExpression();
+                if (!sf.type && !sf.init)
+                    throw ParseError("static member '" + sf.name +
+                        "' needs a type or an initializer", nm.location);
+                cls->staticFields.push_back(std::move(sf));
+                continue;
+            }
+
             if (check(TokenType::Def)) {
                 auto m = parseDef();
                 if (m->params.empty() || m->params[0].name != "self")
@@ -374,10 +401,14 @@ namespace vayu {
             else if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon) {
                 cls->fields.push_back(parseFieldDef());
             }
-            else throw ParseError("expected field or method in class body", peek().location);
+            else {
+                throw ParseError("expected field or method in class body",
+                    peek().location);
+            }
         }
         match(TokenType::Dedent);
-        if (cls->fields.empty() && cls->methods.empty())
+        if (cls->fields.empty() && cls->staticFields.empty() &&
+            cls->methods.empty())
             throw ParseError("class '" + name.lexeme + "' is empty", cTok.location);
         for (auto& f : cls->fields)
             for (auto& m : cls->methods)
@@ -425,7 +456,6 @@ namespace vayu {
         return node;
     }
 
-    // ---- expression parsing ----
     ExprPtr Parser::parseExpression() {
         if (check(TokenType::Lambda)) return parseLambda();
         return parseBinary(1);
@@ -490,9 +520,6 @@ namespace vayu {
         ExprPtr e = parsePrimary();
         for (;;) {
             if (match(TokenType::Dot)) {
-                // Accept any identifier-shaped token (including keywords) as
-                // the attribute name.  Keywords like `spawn`, `wait`, `new`,
-                // `ref`, `unique` are common method names.
                 Token name = peek();
                 if (name.lexeme.empty()) {
                     throw ParseError("expected attribute name after '.'",

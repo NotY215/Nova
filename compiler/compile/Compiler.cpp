@@ -51,12 +51,14 @@ namespace vayu {
                 }
             }
             classInfo_[d->name] = std::move(info);
+
+            // Phase 11.1c: register static member names.
+            std::unordered_map<std::string, bool> sm;
+            for (auto& sf : d->staticFields) sm[sf.name] = true;
+            statics_[d->name] = std::move(sm);
         }
 
         // ---- propagate inherited __init__ signatures ----
-        // If a class declares no `__init__` of its own, it inherits the parent's
-        // signature (including the parent's `hasInit` and `initParams`).
-        // Iterate to a fixed point to support multi-level inheritance chains.
         for (int pass = 0; pass < 8; ++pass) {
             bool changed = false;
             for (auto& [name, info] : classInfo_) {
@@ -71,6 +73,7 @@ namespace vayu {
             }
             if (!changed) break;
         }
+
         // ---- Phase 11.1d: enums ----
         for (auto& s : program.stmts) {
             if (s->kind != StmtKind::Enum) continue;
@@ -94,7 +97,7 @@ namespace vayu {
         const std::string& name, std::unordered_set<std::string>& visiting) {
         auto it = classInfo_.find(name);
         if (it == classInfo_.end()) return {};
-        if (visiting.count(name)) return {};   // cycle; type checker catches it
+        if (visiting.count(name)) return {};
         visiting.insert(name);
         std::vector<std::string> result;
         if (!it->second.parentName.empty())
@@ -190,8 +193,20 @@ namespace vayu {
                 return;
             }
             if (n->target->kind == ExprKind::Attr) {
-                compileAssignAttr(static_cast<const AttrExpr*>(n->target.get()),
-                    n->value.get(), line);
+                auto* a = static_cast<const AttrExpr*>(n->target.get());
+                // Phase 11.1c: ClassName.staticName = value
+                if (a->target->kind == ExprKind::NameRef) {
+                    const auto* tn =
+                        static_cast<const NameRefExpr*>(a->target.get());
+                    auto sit = statics_.find(tn->name);
+                    if (sit != statics_.end() && sit->second.count(a->name)) {
+                        compileExpr(n->value.get());
+                        emitNameU16(OpCode::DEFINE,
+                            staticName(tn->name, a->name), line);
+                        return;
+                    }
+                }
+                compileAssignAttr(a, n->value.get(), line);
                 return;
             }
             if (n->target->kind == ExprKind::Index) {
@@ -210,6 +225,27 @@ namespace vayu {
             if (n->value) compileExpr(n->value.get());
             else          chunk_->emitOp(OpCode::NONE, line);
             emitNameU16(OpCode::DEFINE, n->name, line);
+            return;
+        }
+
+        case StmtKind::Const: {
+            auto* n = static_cast<const ConstStmt*>(s);
+            compileExpr(n->value.get());
+            emitNameU16(OpCode::DEFINE, n->name, line);
+            return;
+        }
+
+        case StmtKind::Enum:
+            return;   // type-level; no bytecode
+
+        case StmtKind::Class: {
+            // Phase 11.1c: emit static initializers at class-statement time.
+            auto* n = static_cast<const ClassStmt*>(s);
+            for (auto& sf : n->staticFields) {
+                if (sf.init) compileExpr(sf.init.get());
+                else         chunk_->emitOp(OpCode::NONE, line);
+                emitNameU16(OpCode::DEFINE, staticName(n->name, sf.name), line);
+            }
             return;
         }
 
@@ -241,20 +277,9 @@ namespace vayu {
             emitJumpTo(loopStack_.back().continueTarget, line);
             return;
 
-        case StmtKind::Const: {
-            auto* n = static_cast<const ConstStmt*>(s);
-            compileExpr(n->value.get());
-            emitNameU16(OpCode::DEFINE, n->name, line);
-            return;
-        }
-
-        case StmtKind::Enum:
-            return;   // type-level; no bytecode
-
         case StmtKind::Pass: return;
 
         case StmtKind::Struct:
-        case StmtKind::Class:
             return;   // registered at compile time
         }
     }
@@ -402,7 +427,6 @@ namespace vayu {
         for (size_t j : loopStack_.back().breakJumps) patchJump(j, exit);
         loopStack_.pop_back();
 
-        // Clean up [iterable, idx] — both the normal exit and `break` land here.
         chunk_->emitOp(OpCode::POP, line);
         chunk_->emitOp(OpCode::POP, line);
     }
@@ -483,7 +507,6 @@ namespace vayu {
     }
 
     void Compiler::compileCall(const CallExpr* c, int line) {
-        // super()
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             if (nm->name == "super") {
@@ -494,7 +517,6 @@ namespace vayu {
             }
         }
 
-        // struct / class construction
         if (c->callee->kind == ExprKind::NameRef) {
             const auto* nm = static_cast<const NameRefExpr*>(c->callee.get());
             auto ci = classInfo_.find(nm->name);
@@ -517,7 +539,6 @@ namespace vayu {
                     return;
                 }
 
-                // Field-matched construction: reorder args to declaration order.
                 std::vector<int> argForField(info.allFields.size(), -1);
                 size_t positional = 0;
                 for (size_t i = 0; i < c->args.size(); ++i) {
@@ -554,7 +575,6 @@ namespace vayu {
             }
         }
 
-        // method call: obj.method(args)
         if (c->callee->kind == ExprKind::Attr) {
             auto* attr = static_cast<const AttrExpr*>(c->callee.get());
             compileExpr(attr->target.get());
@@ -569,7 +589,6 @@ namespace vayu {
             return;
         }
 
-        // plain-name call
         if (c->callee->kind == ExprKind::NameRef) {
             compileExpr(c->callee.get());
             for (auto& a : c->args) {
@@ -698,8 +717,11 @@ namespace vayu {
 
         case ExprKind::Attr: {
             auto* a = static_cast<const AttrExpr*>(e);
+
             if (a->target->kind == ExprKind::NameRef) {
                 const auto* tn = static_cast<const NameRefExpr*>(a->target.get());
+
+                // Phase 11.1d: enum item access -> integer constant.
                 auto eit = enums_.find(tn->name);
                 if (eit != enums_.end()) {
                     auto iit = eit->second.find(a->name);
@@ -712,7 +734,15 @@ namespace vayu {
                     chunk_->emit((uint8_t)(idx & 0xFF), line);
                     return;
                 }
+
+                // Phase 11.1c: ClassName.staticName -> LOAD mangled global.
+                auto sit = statics_.find(tn->name);
+                if (sit != statics_.end() && sit->second.count(a->name)) {
+                    emitNameU16(OpCode::LOAD, staticName(tn->name, a->name), line);
+                    return;
+                }
             }
+
             compileAttrGet(a, line);
             return;
         }

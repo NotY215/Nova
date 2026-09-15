@@ -146,6 +146,10 @@ namespace vayu {
         std::string                  name;
         std::vector<std::string>     fieldOrder;
         std::shared_ptr<ClassObject> parent;
+
+        // Phase 11.1c: class-level (shared) storage, populated when the
+        // `class` statement executes.  Accessed as `ClassName.name`.
+        std::unordered_map<std::string, Value> staticFields;
     };
 
     // ===========================================================================

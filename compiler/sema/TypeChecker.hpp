@@ -28,12 +28,14 @@ namespace vayu {
         std::unordered_map<std::string, TypePtr> structs_;
         std::unordered_map<std::string, TypePtr> builtins_;
 
-        // Phase 11.1b — names declared via `const`.
         std::unordered_set<std::string>          consts_;
 
-        // Phase 11.1d — enum name -> (item name -> value).
         std::unordered_map<std::string,
             std::unordered_map<std::string, long long>> enums_;
+
+        // Phase 11.1c: class name -> static member name -> declared type.
+        std::unordered_map<std::string,
+            std::unordered_map<std::string, TypePtr>> statics_;
 
         TypePtr currentReturnType_;
         TypePtr currentClass_;
@@ -66,11 +68,6 @@ namespace vayu {
         [[noreturn]] void error(SourceLocation loc, const std::string& msg);
         void installBuiltins();
         void installBuiltinExceptions();
-
-        // Phase 11.1d — is `name` a registered enum?
-        bool isEnumName(const std::string& name) const {
-            return enums_.count(name) > 0;
-        }
     };
 
 } // namespace vayu
