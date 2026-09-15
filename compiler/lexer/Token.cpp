@@ -62,17 +62,7 @@ namespace vayu {
         case TokenType::Unique:    return "Unique";
         case TokenType::Shared:    return "Shared";
         case TokenType::Weak:      return "Weak";
-
-            // Phase 11
-        case TokenType::Match:     return "Match";
-        case TokenType::Case:      return "Case";
-        case TokenType::Defer:     return "Defer";
-        case TokenType::Namespace: return "Namespace";
         case TokenType::Const:     return "Const";
-        case TokenType::Static:    return "Static";
-        case TokenType::Public:    return "Public";
-        case TokenType::Private:   return "Private";
-        case TokenType::Protected: return "Protected";
 
         case TokenType::Plus:        return "Plus";
         case TokenType::Minus:       return "Minus";
@@ -92,6 +82,14 @@ namespace vayu {
         case TokenType::MinusAssign: return "MinusAssign";
         case TokenType::StarAssign:  return "StarAssign";
         case TokenType::SlashAssign: return "SlashAssign";
+        case TokenType::PercentAssign:     return "PercentAssign";
+        case TokenType::StarStarAssign:    return "StarStarAssign";
+        case TokenType::SlashSlashAssign:  return "SlashSlashAssign";
+        case TokenType::AmpAssign:         return "AmpAssign";
+        case TokenType::PipeAssign:        return "PipeAssign";
+        case TokenType::CaretAssign:       return "CaretAssign";
+        case TokenType::ShlAssign:         return "ShlAssign";
+        case TokenType::ShrAssign:         return "ShrAssign";
         case TokenType::Arrow:       return "Arrow";
         case TokenType::FatArrow:    return "FatArrow";
         case TokenType::Dot:         return "Dot";

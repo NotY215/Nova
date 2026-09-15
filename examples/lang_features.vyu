@@ -1,0 +1,50 @@
+namespace Math:
+    const PI = 3
+    def square(x: int) -> int:
+        return x * x
+
+class Resource:
+    name: str
+    def __init__(self, name: str) -> None:
+        self.name = name
+    def __enter__(self) -> int:
+        print("enter " + self.name)
+        return 42
+    def __exit__(self) -> None:
+        print("exit " + self.name)
+
+def describe(n: int) -> str:
+    match n:
+        case 0:
+            return "zero"
+        case 1:
+            return "one"
+        case x if x < 0:
+            return "negative"
+        case _:
+            return "many"
+
+def process(a: int, b: int) -> None:
+    defer print("defer-second")
+    defer print("defer-first")
+    print("processing " + str(a + b))
+
+def main() -> None:
+    print(Math.PI)
+    print(Math.square(5))
+
+    print(describe(0))
+    print(describe(1))
+    print(describe(-3))
+    print(describe(7))
+
+    with Resource("first") as v:
+        print("inside, v = " + str(v))
+
+    process(10, 20)
+
+    match (10, 20):
+        case (x, y):
+            print(x + y)
+
+main()

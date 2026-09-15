@@ -1,0 +1,75 @@
+class Base:
+    protected x: int
+    private secret: int
+    public y: int
+
+    def __init__(self) -> None:
+        self.x = 10
+        self.secret = 99
+        self.y = 20
+
+    public def get_x(self) -> int:
+        return self.x
+
+    public def get_secret(self) -> int:
+        return self.secret
+
+    private def _hidden(self) -> int:
+        return 42
+
+    public def call_hidden(self) -> int:
+        return self._hidden()
+
+class Child(Base):
+    def __init__(self) -> None:
+        self.x = 100
+        self.secret = 999
+        self.y = 200
+
+    public def peek_protected(self) -> int:
+        return self.x
+
+def main() -> None:
+    a = 0b1100
+    b = 0b1010
+    print(a & b)
+    print(a | b)
+    print(a ^ b)
+    print(a << 1)
+    print(a >> 1)
+    print(~a)
+
+    x = 5
+    x += 3
+    print(x)
+    x -= 2
+    print(x)
+    x *= 4
+    print(x)
+    x //= 2
+    print(x)
+    x %= 5
+    print(x)
+    x **= 2
+    print(x)
+    x |= 8
+    print(x)
+    x &= 12
+    print(x)
+    x ^= 5
+    print(x)
+    x <<= 2
+    print(x)
+    x >>= 1
+    print(x)
+
+    c = Base()
+    print(c.get_x())
+    print(c.get_secret())
+    print(c.call_hidden())
+    print(c.y)
+
+    d = Child()
+    print(d.peek_protected())
+
+main()

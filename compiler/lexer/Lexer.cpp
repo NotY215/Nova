@@ -39,7 +39,7 @@ namespace vayu {
             {"unique", TokenType::Unique}, {"shared", TokenType::Shared},
             {"weak", TokenType::Weak},
 
-            // ---- Phase 11.1b / 11.1d: hard keywords ----
+            // Phase 11.1b — hard keyword only.
             {"const", TokenType::Const},
         };
         return kw;
@@ -254,14 +254,22 @@ namespace vayu {
             if (match('>')) { addAt(TokenType::Arrow, start, "->"); return; }
             addAt(TokenType::Minus, start, "-"); return;
         case '*':
-            if (match('*')) { addAt(TokenType::StarStar, start, "**"); return; }
+            if (match('*')) {
+                if (match('=')) { addAt(TokenType::StarStarAssign, start, "**="); return; }
+                addAt(TokenType::StarStar, start, "**"); return;
+            }
             if (match('=')) { addAt(TokenType::StarAssign, start, "*="); return; }
             addAt(TokenType::Star, start, "*"); return;
         case '/':
-            if (match('/')) { addAt(TokenType::SlashSlash, start, "//"); return; }
+            if (match('/')) {
+                if (match('=')) { addAt(TokenType::SlashSlashAssign, start, "//="); return; }
+                addAt(TokenType::SlashSlash, start, "//"); return;
+            }
             if (match('=')) { addAt(TokenType::SlashAssign, start, "/="); return; }
             addAt(TokenType::Slash, start, "/"); return;
-        case '%': addAt(TokenType::Percent, start, "%"); return;
+        case '%':
+            if (match('=')) { addAt(TokenType::PercentAssign, start, "%="); return; }
+            addAt(TokenType::Percent, start, "%"); return;
         case '=':
             if (match('=')) { addAt(TokenType::Eq, start, "=="); return; }
             if (match('>')) { addAt(TokenType::FatArrow, start, "=>"); return; }
@@ -270,9 +278,17 @@ namespace vayu {
             if (match('=')) { addAt(TokenType::NotEq, start, "!="); return; }
             addAt(TokenType::Invalid, start, "unexpected '!'"); return;
         case '<':
+            if (match('<')) {
+                if (match('=')) { addAt(TokenType::ShlAssign, start, "<<="); return; }
+                addAt(TokenType::Shl, start, "<<"); return;
+            }
             if (match('=')) { addAt(TokenType::LtEq, start, "<="); return; }
             addAt(TokenType::Lt, start, "<"); return;
         case '>':
+            if (match('>')) {
+                if (match('=')) { addAt(TokenType::ShrAssign, start, ">>="); return; }
+                addAt(TokenType::Shr, start, ">>"); return;
+            }
             if (match('=')) { addAt(TokenType::GtEq, start, ">="); return; }
             addAt(TokenType::Gt, start, ">"); return;
         case '.':
@@ -287,9 +303,15 @@ namespace vayu {
         case ']': if (bracketDepth_ > 0) bracketDepth_--; addAt(TokenType::RBracket, start, "]"); return;
         case '{': bracketDepth_++; addAt(TokenType::LBrace, start, "{"); return;
         case '}': if (bracketDepth_ > 0) bracketDepth_--; addAt(TokenType::RBrace, start, "}"); return;
-        case '&': addAt(TokenType::Amp, start, "&"); return;
-        case '|': addAt(TokenType::Pipe, start, "|"); return;
-        case '^': addAt(TokenType::Caret, start, "^"); return;
+        case '&':
+            if (match('=')) { addAt(TokenType::AmpAssign, start, "&="); return; }
+            addAt(TokenType::Amp, start, "&"); return;
+        case '|':
+            if (match('=')) { addAt(TokenType::PipeAssign, start, "|="); return; }
+            addAt(TokenType::Pipe, start, "|"); return;
+        case '^':
+            if (match('=')) { addAt(TokenType::CaretAssign, start, "^="); return; }
+            addAt(TokenType::Caret, start, "^"); return;
         case '~': addAt(TokenType::Tilde, start, "~"); return;
         case '@': addAt(TokenType::At, start, "@"); return;
         default: {

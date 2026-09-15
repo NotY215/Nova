@@ -3,6 +3,7 @@
 #include "lexer/Token.hpp"
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace vayu {
@@ -22,6 +23,8 @@ namespace vayu {
     private:
         std::vector<Token> tokens_;
         size_t             pos_ = 0;
+        int                matchCounter_ = 0;
+        std::unordered_set<std::string> namespaceNames_;
 
         const Token& peek(int ahead = 0) const;
         const Token& previous() const;
@@ -31,9 +34,11 @@ namespace vayu {
         const Token& advance();
         const Token& expect(TokenType t, const char* what);
         void         skipNewlines();
+        bool         isNamespaceAhead() const;
 
         StmtPtr  parseStatement();
         Block    parseBlock();
+        Block    parseNamespaceBody();
         std::unique_ptr<DefStmt> parseDef();
         StmtPtr  parseIf();
         StmtPtr  parseWhile();
@@ -47,10 +52,19 @@ namespace vayu {
         StmtPtr  parseFromImport();
         StmtPtr  parseAnnotatedAssign();
         StmtPtr  parseExprOrAssign();
-        StmtPtr  parseConst();   // NEW
-        StmtPtr  parseEnum();    // NEW
+        StmtPtr  parseConst();
+        StmtPtr  parseEnum();
+        StmtPtr  parseMatch();
+        StmtPtr  parseWith();
+        StmtPtr  buildCompoundAssign(ExprPtr target, BinOp op,
+            ExprPtr rhs, SourceLocation loc);
         Param    parseParam();
         FieldDef parseFieldDef();
+
+        // Phase 11.1j: peek for a visibility modifier. Returns false if
+        // nothing matched, otherwise advances past the soft keyword and
+        // writes its value to `out`.
+        bool     consumeVisibility(Visibility& out);
 
         ExprPtr  parseExpression();
         ExprPtr  parseLambda();

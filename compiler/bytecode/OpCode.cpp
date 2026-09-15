@@ -23,6 +23,12 @@ namespace vayu {
         case OpCode::MOD:      return "MOD";
         case OpCode::POW:      return "POW";
         case OpCode::NEG:      return "NEG";
+        case OpCode::BAND:     return "BAND";
+        case OpCode::BOR:      return "BOR";
+        case OpCode::BXOR:     return "BXOR";
+        case OpCode::SHL:      return "SHL";
+        case OpCode::SHR:      return "SHR";
+        case OpCode::BNOT:     return "BNOT";
         case OpCode::EQ:       return "EQ";
         case OpCode::NEQ:      return "NEQ";
         case OpCode::LT:       return "LT";

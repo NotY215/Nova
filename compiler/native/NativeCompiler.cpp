@@ -91,6 +91,10 @@ namespace vayu {
                 emitCodeBody(program);
 
                 std::string result;
+                if (!globalData_.empty()) {
+                    result += globalData_;
+                    result += "\n";
+                }
                 if (!strLitData_.empty()) {
                     result += strLitData_;
                     result += "\n";
@@ -120,11 +124,11 @@ namespace vayu {
                     for (auto& kv : sit->second) topVars.insert(kv.second);
                 }
 
+                // Emit top-level bindings + statics as QBE globals.
                 for (auto& n : topVars) {
-                    std::string slot = "%" + mangle(n) + "_slot";
+                    std::string slot = "$" + mangle(n) + "_slot";
                     slots_[n] = slot;
-                    line(slot + " =l alloc8 8");
-                    line("storel 0, " + slot);
+                    globalData_ += "data " + slot + " = { l 0 }\n";
                 }
 
                 // Snapshot BEFORE emitting any function bodies.
@@ -208,6 +212,11 @@ namespace vayu {
             std::string                                  strLitData_;
             std::unordered_map<std::string, std::string> strLitLabels_;
             int                                          nextStrLitId_ = 0;
+
+            // Phase 11.1c: QBE `%name` temps are function-local; cross-function
+            // refs are illegal.  Top-level bindings and statics live in this
+            // block as `$name` QBE globals instead.
+            std::string                                  globalData_;
 
             std::string                                       sourceDir_;
             std::unordered_map<std::string, Block>            modules_;
@@ -1162,6 +1171,11 @@ namespace vayu {
                         line(ext + " =l extsw " + c);
                         r.ssa = ext; r.type = VType::Bool; return r;
                     }
+                    case UnOp::BNot: {
+                        std::string t = newTemp();
+                        line(t + " =l xor " + v.ssa + ", -1");
+                        r.ssa = t; r.type = VType::Int; return r;
+                    }
                     }
                     return v;
                 }
@@ -1249,6 +1263,31 @@ namespace vayu {
                         std::string ext = newTemp();
                         line(ext + " =l extsw " + c);
                         r.ssa = ext; r.type = VType::Bool; return r;
+                    }
+                    case BinOp::BAnd: {
+                        std::string t = newTemp();
+                        line(t + " =l and " + a.ssa + ", " + b.ssa);
+                        r.ssa = t; r.type = VType::Int; return r;
+                    }
+                    case BinOp::BOr: {
+                        std::string t = newTemp();
+                        line(t + " =l or " + a.ssa + ", " + b.ssa);
+                        r.ssa = t; r.type = VType::Int; return r;
+                    }
+                    case BinOp::BXor: {
+                        std::string t = newTemp();
+                        line(t + " =l xor " + a.ssa + ", " + b.ssa);
+                        r.ssa = t; r.type = VType::Int; return r;
+                    }
+                    case BinOp::Shl: {
+                        std::string t = newTemp();
+                        line(t + " =l shl " + a.ssa + ", " + b.ssa);
+                        r.ssa = t; r.type = VType::Int; return r;
+                    }
+                    case BinOp::Shr: {
+                        std::string t = newTemp();
+                        line(t + " =l shr " + a.ssa + ", " + b.ssa);
+                        r.ssa = t; r.type = VType::Int; return r;
                     }
 
                     case BinOp::In: {
@@ -3471,6 +3510,7 @@ namespace vayu {
                 for (auto& n : names) {
                     if (slots_.count(n)) continue;
                     if (nonEscapingClasses_.count(n)) continue;
+                    if (globalSlots_.count(n)) continue;   // don't shadow a global
                     std::string slot = "%" + mangle(n) + "_slot";
                     slots_[n] = slot;
                     line(slot + " =l alloc8 8");

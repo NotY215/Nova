@@ -20,7 +20,11 @@ namespace vayu {
     class Type;
     using TypePtr = std::shared_ptr<Type>;
 
-    struct StructFieldInfo { std::string name; TypePtr type; };
+    struct StructFieldInfo {
+        std::string name;
+        TypePtr     type;
+        int8_t      vis = 0;   // 0=public, 1=protected, 2=private
+    };
 
     class Type {
     public:
@@ -31,6 +35,7 @@ namespace vayu {
 
         std::vector<StructFieldInfo>             fields;
         std::unordered_map<std::string, TypePtr> methods;
+        std::unordered_map<std::string, int8_t>  methodVis;  // 0/1/2
         TypePtr                                  parent;
 
         explicit Type(TypeKind k) : kind(k) {}

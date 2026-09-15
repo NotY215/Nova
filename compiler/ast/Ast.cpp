@@ -15,12 +15,20 @@ namespace vayu {
         case BinOp::GtEq: return ">="; case BinOp::And: return "and";
         case BinOp::Or: return "or"; case BinOp::In: return "in";
         case BinOp::Is: return "is";
+        case BinOp::BAnd: return "&"; case BinOp::BOr: return "|";
+        case BinOp::BXor: return "^"; case BinOp::Shl: return "<<";
+        case BinOp::Shr: return ">>";
         }
         return "?";
     }
     const char* unOpName(UnOp op) {
-    switch (op) { case UnOp::Neg: return "-"; case UnOp::Pos: return "+"; case UnOp::Not: return "not"; }
-                                return "?";
+        switch (op) {
+        case UnOp::Neg: return "-";
+        case UnOp::Pos: return "+";
+        case UnOp::Not: return "not";
+        case UnOp::BNot: return "~";
+        }
+        return "?";
     }
 
     namespace {

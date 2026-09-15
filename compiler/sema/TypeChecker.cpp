@@ -196,7 +196,11 @@ namespace vayu {
                             "' in class '" + d->name + "'");
                     if (ct->findField(f.name))
                         error(f.loc, "field '" + f.name + "' re-declared in subclass");
-                    fields.push_back({ f.name, resolveTypeExpr(f.type.get()) });
+                    StructFieldInfo fi;
+                    fi.name = f.name;
+                    fi.type = resolveTypeExpr(f.type.get());
+                    fi.vis = (int8_t)visCode(f.vis);
+                    fields.push_back(std::move(fi));
                 }
                 ct->fields = std::move(fields);
 
@@ -231,6 +235,7 @@ namespace vayu {
                         ? resolveTypeExpr(m->returnType.get())
                         : Types::None();
                     ct->methods[m->name] = Types::Function(std::move(params), ret);
+                    ct->methodVis[m->name] = (int8_t)visCode(m->vis);
                 }
             }
         }
@@ -487,6 +492,11 @@ namespace vayu {
     // ===========================================================================
     // Method bodies
     // ===========================================================================
+    bool TypeChecker::isSubclassOf(TypePtr sub, TypePtr base) const {
+        for (auto c = sub; c; c = c->parent)
+            if (c->name == base->name) return true;
+        return false;
+    }
 
     void TypeChecker::checkMethodBody(const DefStmt* m, TypePtr cls) {
         auto sig = cls->methods.at(m->name);
@@ -1073,8 +1083,54 @@ namespace vayu {
             if (t->kind != TypeKind::Struct)
                 error(n->loc, "cannot read field or method '" + n->name +
                     "' on value of type " + t->toString());
-            if (const auto* f = t->findField(n->name)) return f->type;
+            if (const auto* f = t->findField(n->name)) {
+                // Phase 11.1j: enforce visibility.
+                if (f->vis != 0) {
+                    std::shared_ptr<Type> declaring;
+                    for (auto c = t; c; c = c->parent) {
+                        if (c->findField(n->name) == f) { declaring = c; break; }
+                    }
+                    if (declaring) {
+                        if (!currentClass_)
+                            error(n->loc, "member '" + n->name +
+                                "' is not accessible outside its class");
+                        bool ok = false;
+                        if (f->vis == 2 /*private*/)
+                            ok = (currentClass_->name == declaring->name);
+                        else /*protected*/
+                            ok = isSubclassOf(currentClass_, declaring);
+                        if (!ok)
+                            error(n->loc, "member '" + n->name +
+                                "' is not accessible from class '" +
+                                currentClass_->name + "'");
+                    }
+                }
+                return f->type;
+            }
             if (TypePtr m = t->findMethod(n->name)) {
+                // Visibility.
+                int8_t code = 0;
+                std::shared_ptr<Type> declaring;
+                for (auto c = t; c; c = c->parent) {
+                    auto it = c->methodVis.find(n->name);
+                    if (it != c->methodVis.end()) {
+                        code = it->second; declaring = c; break;
+                    }
+                }
+                if (code != 0 && declaring) {
+                    if (!currentClass_)
+                        error(n->loc, "method '" + n->name +
+                            "' is not accessible outside its class");
+                    bool ok = false;
+                    if (code == 2 /*private*/)
+                        ok = (currentClass_->name == declaring->name);
+                    else
+                        ok = isSubclassOf(currentClass_, declaring);
+                    if (!ok)
+                        error(n->loc, "method '" + n->name +
+                            "' is not accessible from class '" +
+                            currentClass_->name + "'");
+                }
                 std::vector<TypePtr> bound(m->params.begin() + 1,
                     m->params.end());
                 return Types::Function(std::move(bound), m->returnType);

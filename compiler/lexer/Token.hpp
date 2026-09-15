@@ -4,6 +4,9 @@
 
 namespace vayu {
 
+    // Phase 11.1j: member visibility.
+    enum class Visibility { Public, Protected, Private };
+
     enum class TokenType {
         // --- Literals ---
         Int, Float, String, Char,
@@ -21,16 +24,15 @@ namespace vayu {
         And, Or, Not, In, Is, Lambda, Yield,
         IntKw, FloatKw, BoolKw, StrKw, CharKw, BytesKw,
         Ptr, Ref, Unique, Shared, Weak,
-
-        // --- Phase 11: language feature completion ---
-        Match, Case,
-        Defer, Namespace, Const, Static,
-        Public, Private, Protected,
+        Const,          // Phase 11.1b — hard keyword
 
         // --- Operators / punctuation ---
         Plus, Minus, Star, Slash, Percent, StarStar, SlashSlash,
         Assign, Eq, NotEq, Lt, Gt, LtEq, GtEq,
         PlusAssign, MinusAssign, StarAssign, SlashAssign,
+        // Phase 11.1i — additional compound assigns
+        PercentAssign, StarStarAssign, SlashSlashAssign,
+        AmpAssign, PipeAssign, CaretAssign, ShlAssign, ShrAssign,
         Arrow, FatArrow,
         Dot, Comma, Colon, Semicolon,
         LParen, RParen, LBracket, RBracket, LBrace, RBrace,

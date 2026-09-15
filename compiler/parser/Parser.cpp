@@ -3,6 +3,17 @@
 
 namespace vayu {
 
+    // Python-style precedence (higher = binds tighter):
+    //   1  or
+    //   2  and
+    //   3  ==  !=  <  >  <=  >=  in  is
+    //   4  |
+    //   5  ^
+    //   6  &
+    //   7  <<  >>
+    //   8  +  -
+    //   9  *  /  //  %
+    //  11  **
     static int binPrec(TokenType t) {
         switch (t) {
         case TokenType::Or: return 1;
@@ -10,11 +21,15 @@ namespace vayu {
         case TokenType::Eq: case TokenType::NotEq:
         case TokenType::Lt: case TokenType::Gt:
         case TokenType::LtEq: case TokenType::GtEq:
-        case TokenType::In: case TokenType::Is: return 4;
-        case TokenType::Plus: case TokenType::Minus: return 5;
+        case TokenType::In: case TokenType::Is: return 3;
+        case TokenType::Pipe: return 4;
+        case TokenType::Caret: return 5;
+        case TokenType::Amp: return 6;
+        case TokenType::Shl: case TokenType::Shr: return 7;
+        case TokenType::Plus: case TokenType::Minus: return 8;
         case TokenType::Star: case TokenType::Slash:
-        case TokenType::SlashSlash: case TokenType::Percent: return 6;
-        case TokenType::StarStar: return 8;
+        case TokenType::SlashSlash: case TokenType::Percent: return 9;
+        case TokenType::StarStar: return 11;
         default: return -1;
         }
     }
@@ -28,7 +43,13 @@ namespace vayu {
         case TokenType::Gt: return BinOp::Gt; case TokenType::LtEq: return BinOp::LtEq;
         case TokenType::GtEq: return BinOp::GtEq; case TokenType::And: return BinOp::And;
         case TokenType::Or: return BinOp::Or; case TokenType::In: return BinOp::In;
-        case TokenType::Is: return BinOp::Is; default: return BinOp::Add;
+        case TokenType::Is: return BinOp::Is;
+        case TokenType::Amp: return BinOp::BAnd;
+        case TokenType::Pipe: return BinOp::BOr;
+        case TokenType::Caret: return BinOp::BXor;
+        case TokenType::Shl: return BinOp::Shl;
+        case TokenType::Shr: return BinOp::Shr;
+        default: return BinOp::Add;
         }
     }
 
@@ -49,21 +70,123 @@ namespace vayu {
     }
     void Parser::skipNewlines() { while (check(TokenType::Newline)) advance(); }
 
+    // ---------------------------------------------------------------------
+    // Phase 11.1h — namespace
+    // ---------------------------------------------------------------------
+    bool Parser::isNamespaceAhead() const {
+        return check(TokenType::Identifier) && peek().lexeme == "namespace" &&
+            peek(1).type == TokenType::Identifier;
+    }
+
+    Block Parser::parseNamespaceBody() {
+        advance();
+        Token nameTok = expect(TokenType::Identifier, "namespace name");
+        std::string nsName = nameTok.lexeme;
+
+        namespaceNames_.insert(nsName);
+
+        expect(TokenType::Colon, "':' after namespace name");
+        Block body = parseBlock();
+
+        for (auto& st : body.stmts) {
+            switch (st->kind) {
+            case StmtKind::Def:
+                static_cast<DefStmt*>(st.get())->name =
+                    nsName + "." + static_cast<DefStmt*>(st.get())->name;
+                break;
+            case StmtKind::Const:
+                static_cast<ConstStmt*>(st.get())->name =
+                    nsName + "." + static_cast<ConstStmt*>(st.get())->name;
+                break;
+            case StmtKind::Enum:
+                static_cast<EnumStmt*>(st.get())->name =
+                    nsName + "." + static_cast<EnumStmt*>(st.get())->name;
+                break;
+            case StmtKind::Class:
+                static_cast<ClassStmt*>(st.get())->name =
+                    nsName + "." + static_cast<ClassStmt*>(st.get())->name;
+                break;
+            default: break;
+            }
+        }
+        return body;
+    }
+
     Block Parser::parseProgram() {
         Block p;
-        for (;;) { skipNewlines(); if (isAtEnd()) break; p.stmts.push_back(parseStatement()); }
+        for (;;) {
+            skipNewlines();
+            if (isAtEnd()) break;
+            if (isNamespaceAhead()) {
+                Block nsBody = parseNamespaceBody();
+                for (auto& st : nsBody.stmts) p.stmts.push_back(std::move(st));
+                continue;
+            }
+            p.stmts.push_back(parseStatement());
+        }
         return p;
     }
+
     Block Parser::parseBlock() {
         expect(TokenType::Newline, "newline after ':'");
         expect(TokenType::Indent, "indented block");
+
         Block b;
+        std::vector<ExprPtr> defers;
+        bool sawNonDefer = false;
+
         for (;;) {
             skipNewlines();
             if (isAtEnd() || check(TokenType::Dedent)) break;
+
+            if (isNamespaceAhead()) {
+                Block nsBody = parseNamespaceBody();
+                for (auto& st : nsBody.stmts) {
+                    b.stmts.push_back(std::move(st));
+                    sawNonDefer = true;
+                }
+                continue;
+            }
+
+            // Phase 11.1g: `defer expr`
+            if (check(TokenType::Identifier) && peek().lexeme == "defer" &&
+                peek(1).type != TokenType::Assign &&
+                peek(1).type != TokenType::PlusAssign &&
+                peek(1).type != TokenType::MinusAssign &&
+                peek(1).type != TokenType::StarAssign &&
+                peek(1).type != TokenType::SlashAssign &&
+                peek(1).type != TokenType::Dot &&
+                peek(1).type != TokenType::LBracket &&
+                peek(1).type != TokenType::Colon) {
+                if (sawNonDefer)
+                    throw ParseError(
+                        "'defer' must appear at the top of a block",
+                        peek().location);
+                advance();
+                ExprPtr e = parseExpression();
+                defers.push_back(std::move(e));
+                continue;
+            }
+            sawNonDefer = true;
             b.stmts.push_back(parseStatement());
         }
         match(TokenType::Dedent);
+
+        if (!defers.empty()) {
+            Block result = std::move(b);
+            for (int i = (int)defers.size() - 1; i >= 0; --i) {
+                Block fin;
+                fin.stmts.push_back(std::make_unique<ExprStmt>(
+                    std::move(defers[(size_t)i]), SourceLocation{}));
+                auto ts = std::make_unique<TryStmt>(
+                    std::move(result), SourceLocation{});
+                ts->finallyBody = std::move(fin);
+                Block wrapper;
+                wrapper.stmts.push_back(std::move(ts));
+                result = std::move(wrapper);
+            }
+            return result;
+        }
         return b;
     }
 
@@ -81,6 +204,26 @@ namespace vayu {
         if (check(TokenType::From))   return parseFromImport();
         if (check(TokenType::Const))  return parseConst();
         if (check(TokenType::Enum))   return parseEnum();
+        if (check(TokenType::With))   return parseWith();
+
+        // Soft keyword `match`, with rollback if parse fails.
+        if (check(TokenType::Identifier) && peek().lexeme == "match" &&
+            peek(1).type != TokenType::Assign &&
+            peek(1).type != TokenType::PlusAssign &&
+            peek(1).type != TokenType::MinusAssign &&
+            peek(1).type != TokenType::StarAssign &&
+            peek(1).type != TokenType::SlashAssign &&
+            peek(1).type != TokenType::Dot) {
+            size_t saved = pos_;
+            int savedMatch = matchCounter_;
+            try {
+                return parseMatch();
+            }
+            catch (const ParseError&) {
+                pos_ = saved;
+                matchCounter_ = savedMatch;
+            }
+        }
 
         if (check(TokenType::Pass)) {
             Token t = advance(); return std::make_unique<PassStmt>(t.location);
@@ -97,15 +240,296 @@ namespace vayu {
         return parseExprOrAssign();
     }
 
+    // =========================================================================
+    // Phase 11.1e — match / case
+    // =========================================================================
+    StmtPtr Parser::parseMatch() {
+        Token mTok = advance();
+        ExprPtr subject = parseExpression();
+        expect(TokenType::Colon, "':' after match subject");
+        expect(TokenType::Newline, "newline after ':'");
+        expect(TokenType::Indent, "indented match body");
+
+        struct RawCase {
+            ExprPtr pattern;
+            std::string binder;
+            std::vector<std::string> tupleNames;
+            ExprPtr guard;
+            Block body;
+            SourceLocation loc;
+        };
+        std::vector<RawCase> cases;
+
+        for (;;) {
+            skipNewlines();
+            if (isAtEnd() || check(TokenType::Dedent)) break;
+
+            if (!(check(TokenType::Identifier) && peek().lexeme == "case"))
+                throw ParseError("expected 'case' in match body", peek().location);
+            Token cTok = advance();
+
+            RawCase rc;
+            rc.loc = cTok.location;
+
+            if (check(TokenType::Identifier) && peek().lexeme == "_" &&
+                (peek(1).type == TokenType::Colon ||
+                    peek(1).type == TokenType::If)) {
+                advance();
+            }
+            else if (check(TokenType::Identifier) &&
+                (peek(1).type == TokenType::Colon ||
+                    peek(1).type == TokenType::If)) {
+                Token n = advance();
+                rc.binder = n.lexeme;
+            }
+            else if (check(TokenType::LParen)) {
+                advance();
+                if (!check(TokenType::RParen)) {
+                    for (;;) {
+                        Token n = expect(TokenType::Identifier, "tuple pattern name");
+                        rc.tupleNames.push_back(n.lexeme);
+                        if (!match(TokenType::Comma)) break;
+                        if (check(TokenType::RParen)) break;
+                    }
+                }
+                expect(TokenType::RParen, "')' to close tuple pattern");
+            }
+            else {
+                rc.pattern = parseExpression();
+            }
+
+            if (match(TokenType::If)) rc.guard = parseExpression();
+
+            expect(TokenType::Colon, "':' after case pattern");
+            rc.body = parseBlock();
+            cases.push_back(std::move(rc));
+        }
+        match(TokenType::Dedent);
+
+        if (cases.empty())
+            throw ParseError("match requires at least one case", mTok.location);
+
+        std::string subjName = "__match_subject_" + std::to_string(matchCounter_++);
+        std::string doneName = "__match_done_" + std::to_string(matchCounter_++);
+
+        Block result;
+        result.stmts.push_back(std::make_unique<AssignStmt>(
+            std::make_unique<NameRefExpr>(subjName, mTok.location),
+            std::move(subject),
+            mTok.location));
+        result.stmts.push_back(std::make_unique<AssignStmt>(
+            std::make_unique<NameRefExpr>(doneName, mTok.location),
+            std::make_unique<BoolLitExpr>(false, mTok.location),
+            mTok.location));
+
+        for (auto& rc : cases) {
+            ExprPtr cond = std::make_unique<UnaryExpr>(
+                UnOp::Not,
+                std::make_unique<NameRefExpr>(doneName, rc.loc),
+                rc.loc);
+            if (rc.pattern) {
+                ExprPtr eq = std::make_unique<BinaryExpr>(
+                    BinOp::Eq,
+                    std::make_unique<NameRefExpr>(subjName, rc.loc),
+                    std::move(rc.pattern),
+                    rc.loc);
+                cond = std::make_unique<BinaryExpr>(
+                    BinOp::And,
+                    std::move(cond),
+                    std::move(eq),
+                    rc.loc);
+            }
+
+            Block caseBody;
+            if (!rc.binder.empty()) {
+                caseBody.stmts.push_back(std::make_unique<AssignStmt>(
+                    std::make_unique<NameRefExpr>(rc.binder, rc.loc),
+                    std::make_unique<NameRefExpr>(subjName, rc.loc),
+                    rc.loc));
+            }
+            for (size_t i = 0; i < rc.tupleNames.size(); ++i) {
+                caseBody.stmts.push_back(std::make_unique<AssignStmt>(
+                    std::make_unique<NameRefExpr>(rc.tupleNames[i], rc.loc),
+                    std::make_unique<IndexExpr>(
+                        std::make_unique<NameRefExpr>(subjName, rc.loc),
+                        std::make_unique<IntLitExpr>((long long)i,
+                            std::to_string(i), rc.loc),
+                        rc.loc),
+                    rc.loc));
+            }
+
+            Block marked;
+            marked.stmts.push_back(std::make_unique<AssignStmt>(
+                std::make_unique<NameRefExpr>(doneName, rc.loc),
+                std::make_unique<BoolLitExpr>(true, rc.loc),
+                rc.loc));
+            for (auto& st : rc.body.stmts) marked.stmts.push_back(std::move(st));
+
+            if (rc.guard) {
+                caseBody.stmts.push_back(std::make_unique<IfStmt>(
+                    std::move(rc.guard), std::move(marked), rc.loc));
+            }
+            else {
+                for (auto& st : marked.stmts)
+                    caseBody.stmts.push_back(std::move(st));
+            }
+
+            result.stmts.push_back(std::make_unique<IfStmt>(
+                std::move(cond), std::move(caseBody), rc.loc));
+        }
+
+        return std::make_unique<IfStmt>(
+            std::make_unique<BoolLitExpr>(true, mTok.location),
+            std::move(result),
+            mTok.location);
+    }
+
+    // =========================================================================
+    // Phase 11.1f — with statement
+    // =========================================================================
+    StmtPtr Parser::parseWith() {
+        Token wTok = advance();
+        ExprPtr res = parseExpression();
+        std::string name;
+        if (match(TokenType::As)) {
+            Token n = expect(TokenType::Identifier, "name after 'as'");
+            name = n.lexeme;
+        }
+        expect(TokenType::Colon, "':' after with");
+        Block body = parseBlock();
+
+        std::string tmp = "__with_val_" + std::to_string(matchCounter_++);
+
+        Block result;
+        result.stmts.push_back(std::make_unique<AssignStmt>(
+            std::make_unique<NameRefExpr>(tmp, wTok.location),
+            std::move(res),
+            wTok.location));
+
+        if (!name.empty()) {
+            std::vector<CallArg> noArgs;
+            auto enterCall = std::make_unique<CallExpr>(
+                std::make_unique<AttrExpr>(
+                    std::make_unique<NameRefExpr>(tmp, wTok.location),
+                    "__enter__",
+                    wTok.location),
+                std::move(noArgs),
+                wTok.location);
+            result.stmts.push_back(std::make_unique<AssignStmt>(
+                std::make_unique<NameRefExpr>(name, wTok.location),
+                std::move(enterCall),
+                wTok.location));
+        }
+
+        auto ts = std::make_unique<TryStmt>(std::move(body), wTok.location);
+        Block fin;
+        {
+            std::vector<CallArg> noArgs;
+            fin.stmts.push_back(std::make_unique<ExprStmt>(
+                std::make_unique<CallExpr>(
+                    std::make_unique<AttrExpr>(
+                        std::make_unique<NameRefExpr>(tmp, wTok.location),
+                        "__exit__",
+                        wTok.location),
+                    std::move(noArgs),
+                    wTok.location),
+                wTok.location));
+        }
+        ts->finallyBody = std::move(fin);
+        result.stmts.push_back(std::move(ts));
+
+        return std::make_unique<IfStmt>(
+            std::make_unique<BoolLitExpr>(true, wTok.location),
+            std::move(result),
+            wTok.location);
+    }
+
+    // =========================================================================
+    // Phase 11.1i — compound assign desugar
+    // =========================================================================
+    StmtPtr Parser::buildCompoundAssign(ExprPtr target, BinOp op,
+        ExprPtr rhs, SourceLocation loc) {
+        if (target->kind == ExprKind::NameRef) {
+            const auto* n = static_cast<const NameRefExpr*>(target.get());
+            std::string name = n->name;
+            auto read = std::make_unique<NameRefExpr>(name, loc);
+            auto b = std::make_unique<BinaryExpr>(op, std::move(read),
+                std::move(rhs), loc);
+            auto write = std::make_unique<NameRefExpr>(name, loc);
+            return std::make_unique<AssignStmt>(std::move(write), std::move(b), loc);
+        }
+        if (target->kind == ExprKind::Attr) {
+            auto* a = static_cast<const AttrExpr*>(target.get());
+            if (a->target->kind == ExprKind::NameRef) {
+                const auto* base = static_cast<const NameRefExpr*>(a->target.get());
+                std::string baseName = base->name;
+                std::string attrName = a->name;
+                auto read = std::make_unique<AttrExpr>(
+                    std::make_unique<NameRefExpr>(baseName, loc), attrName, loc);
+                auto b = std::make_unique<BinaryExpr>(op, std::move(read),
+                    std::move(rhs), loc);
+                auto write = std::make_unique<AttrExpr>(
+                    std::make_unique<NameRefExpr>(baseName, loc), attrName, loc);
+                return std::make_unique<AssignStmt>(std::move(write), std::move(b), loc);
+            }
+        }
+        if (target->kind == ExprKind::Index) {
+            auto* ix = static_cast<const IndexExpr*>(target.get());
+            if (ix->target->kind == ExprKind::NameRef &&
+                ix->index->kind == ExprKind::NameRef) {
+                const auto* base = static_cast<const NameRefExpr*>(ix->target.get());
+                const auto* idx = static_cast<const NameRefExpr*>(ix->index.get());
+                std::string baseName = base->name;
+                std::string idxName = idx->name;
+                auto read = std::make_unique<IndexExpr>(
+                    std::make_unique<NameRefExpr>(baseName, loc),
+                    std::make_unique<NameRefExpr>(idxName, loc), loc);
+                auto b = std::make_unique<BinaryExpr>(op, std::move(read),
+                    std::move(rhs), loc);
+                auto write = std::make_unique<IndexExpr>(
+                    std::make_unique<NameRefExpr>(baseName, loc),
+                    std::make_unique<NameRefExpr>(idxName, loc), loc);
+                return std::make_unique<AssignStmt>(std::move(write), std::move(b), loc);
+            }
+        }
+        throw ParseError(
+            "compound assign requires a simple name, `obj.field`, or `obj[i]` "
+            "where obj and i are plain names", loc);
+    }
+
     StmtPtr Parser::parseExprOrAssign() {
         SourceLocation start = peek().location;
         ExprPtr expr = parseExpression();
+
+        // Phase 11.1i — compound assigns.
+        BinOp compoundOp = BinOp::Add;
+        bool isCompound = false;
+        if (match(TokenType::PlusAssign)) { compoundOp = BinOp::Add;      isCompound = true; }
+        else if (match(TokenType::MinusAssign)) { compoundOp = BinOp::Sub;      isCompound = true; }
+        else if (match(TokenType::StarAssign)) { compoundOp = BinOp::Mul;      isCompound = true; }
+        else if (match(TokenType::SlashAssign)) { compoundOp = BinOp::Div;      isCompound = true; }
+        else if (match(TokenType::PercentAssign)) { compoundOp = BinOp::Mod;      isCompound = true; }
+        else if (match(TokenType::StarStarAssign)) { compoundOp = BinOp::Pow;      isCompound = true; }
+        else if (match(TokenType::SlashSlashAssign)) { compoundOp = BinOp::FloorDiv; isCompound = true; }
+        else if (match(TokenType::AmpAssign)) { compoundOp = BinOp::BAnd;     isCompound = true; }
+        else if (match(TokenType::PipeAssign)) { compoundOp = BinOp::BOr;      isCompound = true; }
+        else if (match(TokenType::CaretAssign)) { compoundOp = BinOp::BXor;     isCompound = true; }
+        else if (match(TokenType::ShlAssign)) { compoundOp = BinOp::Shl;      isCompound = true; }
+        else if (match(TokenType::ShrAssign)) { compoundOp = BinOp::Shr;      isCompound = true; }
+
+        if (isCompound) {
+            ExprPtr rhs = parseExpression();
+            return buildCompoundAssign(std::move(expr), compoundOp,
+                std::move(rhs), start);
+        }
+
         if (match(TokenType::Assign)) {
             ExprPtr value = parseExpression();
             return std::make_unique<AssignStmt>(std::move(expr), std::move(value), start);
         }
         return std::make_unique<ExprStmt>(std::move(expr), start);
     }
+
     StmtPtr Parser::parseAnnotatedAssign() {
         Token name = advance(); advance();
         ExprPtr type = parseTypeExpr();
@@ -129,9 +553,8 @@ namespace vayu {
         return std::make_unique<RaiseStmt>(std::move(exc), t.location);
     }
 
-    // Phase 11.1b — `const NAME [: T] = expr`
     StmtPtr Parser::parseConst() {
-        Token cTok = advance();   // 'const'
+        Token cTok = advance();
         Token name = expect(TokenType::Identifier, "constant name");
         ExprPtr type = nullptr;
         if (match(TokenType::Colon)) type = parseTypeExpr();
@@ -141,9 +564,8 @@ namespace vayu {
             std::move(value), cTok.location);
     }
 
-    // Phase 11.1d — `enum Name:\n  Red\n  Green = 5\n`
     StmtPtr Parser::parseEnum() {
-        Token eTok = advance();   // 'enum'
+        Token eTok = advance();
         Token name = expect(TokenType::Identifier, "enum name");
         expect(TokenType::Colon, "':' after enum name");
         expect(TokenType::Newline, "newline after ':'");
@@ -297,7 +719,7 @@ namespace vayu {
     }
 
     StmtPtr Parser::parseImport() {
-        Token imp = advance();   // 'import'
+        Token imp = advance();
         Token name = expect(TokenType::Identifier, "module name");
         std::string alias;
         if (match(TokenType::As)) {
@@ -308,7 +730,7 @@ namespace vayu {
     }
 
     StmtPtr Parser::parseFromImport() {
-        Token fromTok = advance();   // 'from'
+        Token fromTok = advance();
         Token module = expect(TokenType::Identifier, "module name");
         expect(TokenType::Import, "'import' after module name");
 
@@ -325,6 +747,16 @@ namespace vayu {
             if (!match(TokenType::Comma)) break;
         }
         return std::make_unique<FromImportStmt>(module.lexeme, std::move(items), fromTok.location);
+    }
+
+    // Phase 11.1j: peek for `public`/`private`/`protected` soft keywords.
+    bool Parser::consumeVisibility(Visibility& out) {
+        if (!check(TokenType::Identifier)) return false;
+        const std::string& w = peek().lexeme;
+        if (w == "public") { advance(); out = Visibility::Public;    return true; }
+        if (w == "private") { advance(); out = Visibility::Private;   return true; }
+        if (w == "protected") { advance(); out = Visibility::Protected; return true; }
+        return false;
     }
 
     FieldDef Parser::parseFieldDef() {
@@ -374,14 +806,19 @@ namespace vayu {
             skipNewlines();
             if (isAtEnd() || check(TokenType::Dedent)) break;
 
-            // Phase 11.1c: `static name [: T] [= expr]` — soft keyword.
+            // Phase 11.1j: optional visibility modifier.
+            Visibility vis = Visibility::Public;
+            consumeVisibility(vis);
+
+            // Phase 11.1c: static member.
             if (check(TokenType::Identifier) && peek().lexeme == "static" &&
                 peek(1).type == TokenType::Identifier) {
-                advance();   // consume 'static'
+                advance();
                 Token nm = expect(TokenType::Identifier, "static member name");
                 StaticFieldDef sf;
                 sf.name = nm.lexeme;
                 sf.loc = nm.location;
+                sf.vis = vis;
                 if (match(TokenType::Colon)) sf.type = parseTypeExpr();
                 if (match(TokenType::Assign)) sf.init = parseExpression();
                 if (!sf.type && !sf.init)
@@ -396,10 +833,13 @@ namespace vayu {
                 if (m->params.empty() || m->params[0].name != "self")
                     throw ParseError("method '" + m->name +
                         "' must have 'self' as its first parameter", m->loc);
+                m->vis = vis;
                 cls->methods.push_back(std::move(m));
             }
             else if (check(TokenType::Identifier) && peek(1).type == TokenType::Colon) {
-                cls->fields.push_back(parseFieldDef());
+                FieldDef f = parseFieldDef();
+                f.vis = vis;
+                cls->fields.push_back(std::move(f));
             }
             else {
                 throw ParseError("expected field or method in class body",
@@ -462,7 +902,7 @@ namespace vayu {
     }
 
     ExprPtr Parser::parseLambda() {
-        Token lamTok = advance();   // 'lambda'
+        Token lamTok = advance();
         auto node = std::make_unique<LambdaExpr>(lamTok.location);
         if (!check(TokenType::Colon)) {
             Token p = expect(TokenType::Identifier, "lambda parameter name");
@@ -503,6 +943,10 @@ namespace vayu {
             Token t = previous();
             return std::make_unique<UnaryExpr>(UnOp::Not, parseUnary(), t.location);
         }
+        if (match(TokenType::Tilde)) {
+            Token t = previous();
+            return std::make_unique<UnaryExpr>(UnOp::BNot, parseUnary(), t.location);
+        }
         return parsePostfix();
     }
     CallArg Parser::parseCallArg() {
@@ -535,6 +979,16 @@ namespace vayu {
                         name.lexeme + "'", name.location);
                 }
                 advance();
+
+                if (e->kind == ExprKind::NameRef) {
+                    auto* nre = static_cast<NameRefExpr*>(e.get());
+                    if (namespaceNames_.count(nre->name)) {
+                        std::string full = nre->name + "." + name.lexeme;
+                        e = std::make_unique<NameRefExpr>(full, nre->loc);
+                        continue;
+                    }
+                }
+
                 e = std::make_unique<AttrExpr>(std::move(e), name.lexeme, name.location);
             }
             else if (check(TokenType::LParen)) {
@@ -639,9 +1093,19 @@ namespace vayu {
         }
         case TokenType::LParen: {
             Token open = advance();
-            ExprPtr inner = parseExpression();
+            ExprPtr first = parseExpression();
+            if (check(TokenType::Comma)) {
+                auto lst = std::make_unique<ListLitExpr>(open.location);
+                lst->elements.push_back(std::move(first));
+                while (match(TokenType::Comma)) {
+                    if (check(TokenType::RParen)) break;
+                    lst->elements.push_back(parseExpression());
+                }
+                expect(TokenType::RParen, "')' to close tuple literal");
+                return lst;
+            }
             expect(TokenType::RParen, "')' to close group");
-            return std::make_unique<GroupingExpr>(std::move(inner), open.location);
+            return std::make_unique<GroupingExpr>(std::move(first), open.location);
         }
         case TokenType::LBracket: return parseListLit();
         case TokenType::LBrace:   return parseMapLit();

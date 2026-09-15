@@ -55,6 +55,7 @@ namespace vayu {
         [[noreturn]] void runtimeError(const std::string& msg);
 
         void doArithmetic(int opcode);
+        void doBitwise(int opcode);
         void doComparison(int opcode);
         void callVMFunction(const std::shared_ptr<Callable>& fn,
             const std::vector<Value>& args);

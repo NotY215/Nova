@@ -46,6 +46,10 @@ namespace vayu {
         }
     } // namespace
 
+    std::string staticGlobalName(const std::string& cls, const std::string& m) {
+        return "__static_" + cls + "__" + m;
+    }
+
     Interpreter::Interpreter() {
         current_ = this;
         globals_ = std::make_shared<Environment>(nullptr);
@@ -84,11 +88,22 @@ namespace vayu {
             if (s->kind == StmtKind::Enum)
                 registerEnum(static_cast<const EnumStmt*>(s.get()));
         }
+        // Phase 11.1c: the VM never runs the top-level Class statement, so
+        // static initializers must run here.  Statics live in globals_ under
+        // the same mangled name the VM compiler emits via DEFINE, so both
+        // storage paths agree.
+        for (auto& s : program.stmts) {
+            if (s->kind != StmtKind::Class) continue;
+            auto* n = static_cast<const ClassStmt*>(s.get());
+            for (auto& sf : n->staticFields) {
+                Value v = sf.init ? eval(sf.init.get()) : Value();
+                globals_->define(staticGlobalName(n->name, sf.name), std::move(v));
+            }
+        }
     }
 
     Value Interpreter::vmGetAttr(const Value& base, const std::string& name,
         SourceLocation loc) {
-        // super-proxy branch (mirrors evalAttr)
         if (base.isCallable() &&
             base.asCallable()->kind == Callable::Kind::SuperMethod) {
             auto sp = base.asCallable();
@@ -104,13 +119,12 @@ namespace vayu {
             bm->definingClass = dummy;
             return Value(bm);
         }
-        // Phase 11.1c: ClassName.staticName (VM path)
         if (base.isCallable() &&
             base.asCallable()->kind == Callable::Kind::ClassCtor) {
             auto cls = base.asCallable()->classObj;
             if (cls) {
-                auto sit = cls->staticFields.find(name);
-                if (sit != cls->staticFields.end()) return sit->second;
+                const std::string mangled = staticGlobalName(cls->name, name);
+                if (Value* slot = globals_->lookup(mangled)) return *slot;
             }
         }
         if (base.isModule()) {
@@ -167,6 +181,15 @@ namespace vayu {
 
     void Interpreter::vmSetAttr(const Value& base, const std::string& name,
         const Value& v, SourceLocation loc) {
+        // Phase 11.1c: ClassName.staticName = value
+        if (base.isCallable() &&
+            base.asCallable()->kind == Callable::Kind::ClassCtor) {
+            auto cls = base.asCallable()->classObj;
+            if (cls) {
+                globals_->define(staticGlobalName(cls->name, name), v);
+                return;
+            }
+        }
         if (!base.isInstance())
             throw RuntimeError("cannot set field '" + name + "' on value of type " +
                 base.typeName(), loc);
@@ -339,13 +362,12 @@ namespace vayu {
         }
 
         case StmtKind::Class: {
-            // Phase 11.1c: run static initializers at class-statement time.
+            // Phase 11.1c: statics live in globals_ under a mangled name that
+            // matches what the VM compiler emits via DEFINE.
             auto* n = static_cast<const ClassStmt*>(s);
-            auto it = classes_.find(n->name);
-            if (it == classes_.end()) return;
             for (auto& sf : n->staticFields) {
                 Value v = sf.init ? eval(sf.init.get()) : Value();
-                it->second->staticFields[sf.name] = std::move(v);
+                globals_->define(staticGlobalName(n->name, sf.name), std::move(v));
             }
             return;
         }
@@ -582,7 +604,8 @@ namespace vayu {
                 inst.asCallable()->kind == Callable::Kind::ClassCtor) {
                 auto cls = inst.asCallable()->classObj;
                 if (cls) {
-                    cls->staticFields[a->name] = std::move(v);
+                    globals_->define(staticGlobalName(cls->name, a->name),
+                        std::move(v));
                     return;
                 }
             }
@@ -700,6 +723,9 @@ namespace vayu {
             case UnOp::Pos:
                 if (v.isNumber()) return v;
                 throw RuntimeError("cannot apply unary '+' to " + v.typeName(), n->loc);
+            case UnOp::BNot:
+                if (v.isInt()) return Value(~v.asInt());
+                throw RuntimeError("cannot apply '~' to " + v.typeName(), n->loc);
             }
             return Value();
         }
@@ -779,13 +805,12 @@ namespace vayu {
     Value Interpreter::evalAttr(const AttrExpr* a) {
         Value base = eval(a->target.get());
 
-        // Phase 11.1c: ClassName.staticName — class reached via ClassCtor callable.
         if (base.isCallable() &&
             base.asCallable()->kind == Callable::Kind::ClassCtor) {
             auto cls = base.asCallable()->classObj;
             if (cls) {
-                auto sit = cls->staticFields.find(a->name);
-                if (sit != cls->staticFields.end()) return sit->second;
+                const std::string mangled = staticGlobalName(cls->name, a->name);
+                if (Value* slot = globals_->lookup(mangled)) return *slot;
             }
         }
 
@@ -1105,6 +1130,20 @@ namespace vayu {
                 }
                 return Value(std::pow(l.asDouble(), r.asDouble()));
             } numFail();
+        }
+        case BinOp::BAnd: case BinOp::BOr: case BinOp::BXor:
+        case BinOp::Shl:  case BinOp::Shr: {
+            if (!l.isInt() || !r.isInt()) numFail();
+            long long a = l.asInt(), c = r.asInt();
+            switch (b->op) {
+            case BinOp::BAnd: return Value(a & c);
+            case BinOp::BOr:  return Value(a | c);
+            case BinOp::BXor: return Value(a ^ c);
+            case BinOp::Shl:  return Value(a << c);
+            case BinOp::Shr:  return Value(a >> c);
+            default: break;
+            }
+            numFail();
         }
         case BinOp::Is:
             throw RuntimeError("'is' not yet supported", b->loc);

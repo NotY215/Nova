@@ -656,9 +656,10 @@ namespace vayu {
             auto* n = static_cast<const UnaryExpr*>(e);
             compileExpr(n->operand.get());
             switch (n->op) {
-            case UnOp::Neg: chunk_->emitOp(OpCode::NEG, line); break;
-            case UnOp::Pos: break;
-            case UnOp::Not: chunk_->emitOp(OpCode::NOT, line); break;
+            case UnOp::Neg:  chunk_->emitOp(OpCode::NEG, line);  break;
+            case UnOp::Pos:  break;
+            case UnOp::Not:  chunk_->emitOp(OpCode::NOT, line);  break;
+            case UnOp::BNot: chunk_->emitOp(OpCode::BNOT, line); break;
             }
             return;
         }
@@ -702,6 +703,11 @@ namespace vayu {
             case BinOp::LtEq:     chunk_->emitOp(OpCode::LE, line); break;
             case BinOp::GtEq:     chunk_->emitOp(OpCode::GE, line); break;
             case BinOp::In:       chunk_->emitOp(OpCode::IN, line); break;
+            case BinOp::BAnd:     chunk_->emitOp(OpCode::BAND, line); break;
+            case BinOp::BOr:      chunk_->emitOp(OpCode::BOR, line); break;
+            case BinOp::BXor:     chunk_->emitOp(OpCode::BXOR, line); break;
+            case BinOp::Shl:      chunk_->emitOp(OpCode::SHL, line); break;
+            case BinOp::Shr:      chunk_->emitOp(OpCode::SHR, line); break;
             case BinOp::Is:
                 error(e->loc, "VM mode: operator 'is' not yet implemented");
             case BinOp::And:

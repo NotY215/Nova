@@ -164,6 +164,21 @@ namespace vayu {
                     doArithmetic((int)op);
                     break;
 
+                case OpCode::BAND:
+                case OpCode::BOR:
+                case OpCode::BXOR:
+                case OpCode::SHL:
+                case OpCode::SHR:
+                    doBitwise((int)op);
+                    break;
+
+                case OpCode::BNOT: {
+                    Value v = std::move(stack_.back()); stack_.pop_back();
+                    if (v.isInt()) stack_.emplace_back(~v.asInt());
+                    else runtimeError("cannot apply '~' to " + v.typeName());
+                    break;
+                }
+
                 case OpCode::NEG: {
                     Value v = std::move(stack_.back()); stack_.pop_back();
                     if (v.isInt())        stack_.emplace_back(-v.asInt());
@@ -716,6 +731,27 @@ namespace vayu {
         }
 
         default: runtimeError("internal: not an arithmetic op");
+        }
+    }
+
+    // ===========================================================================
+    // Bitwise
+    // ===========================================================================
+
+    void VM::doBitwise(int opcode) {
+        Value r = std::move(stack_.back()); stack_.pop_back();
+        Value l = std::move(stack_.back()); stack_.pop_back();
+        if (!l.isInt() || !r.isInt())
+            runtimeError(std::string("bitwise op requires int operands (got ") +
+                l.typeName() + " and " + r.typeName() + ")");
+        long long a = l.asInt(), b = r.asInt();
+        switch (static_cast<OpCode>(opcode)) {
+        case OpCode::BAND: stack_.emplace_back(a & b); return;
+        case OpCode::BOR:  stack_.emplace_back(a | b); return;
+        case OpCode::BXOR: stack_.emplace_back(a ^ b); return;
+        case OpCode::SHL:  stack_.emplace_back(a << b); return;
+        case OpCode::SHR:  stack_.emplace_back(a >> b); return;
+        default: runtimeError("internal: not a bitwise op");
         }
     }
 

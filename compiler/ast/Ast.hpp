@@ -25,8 +25,14 @@ namespace vayu {
         Add, Sub, Mul, Div, FloorDiv, Mod, Pow,
         Eq, NotEq, Lt, Gt, LtEq, GtEq,
         And, Or, In, Is,
+        // Phase 11.1i
+        BAnd, BOr, BXor, Shl, Shr,
     };
-    enum class UnOp { Neg, Pos, Not };
+    enum class UnOp {
+        Neg, Pos, Not,
+        // Phase 11.1i
+        BNot,
+    };
 
     struct Expr {
         ExprKind       kind;
@@ -206,6 +212,8 @@ namespace vayu {
         std::vector<Param> params;
         ExprPtr            returnType;
         Block              body;
+        // Phase 11.1j
+        Visibility         vis = Visibility::Public;
         DefStmt(std::string n, std::vector<Param> p, ExprPtr rt, Block b, SourceLocation l)
             : Stmt(StmtKind::Def, l),
             name(std::move(n)), params(std::move(p)),
@@ -220,7 +228,13 @@ namespace vayu {
         }
     };
 
-    struct FieldDef { std::string name; ExprPtr type; SourceLocation loc; };
+    struct FieldDef {
+        std::string name;
+        ExprPtr type;
+        SourceLocation loc;
+        // Phase 11.1j
+        Visibility vis = Visibility::Public;
+    };
 
     struct StructStmt : Stmt {
         std::string           name;
@@ -230,19 +244,19 @@ namespace vayu {
         }
     };
 
-    // Phase 11.1c — static class member declaration.
     struct StaticFieldDef {
         std::string    name;
-        ExprPtr        type;   // optional annotation
-        ExprPtr        init;   // optional initializer
+        ExprPtr        type;
+        ExprPtr        init;
         SourceLocation loc;
+        Visibility     vis = Visibility::Public;
     };
 
     struct ClassStmt : Stmt {
         std::string                           name;
         std::string                           parentName;
         std::vector<FieldDef>                 fields;
-        std::vector<StaticFieldDef>           staticFields;   // NEW
+        std::vector<StaticFieldDef>           staticFields;
         std::vector<std::unique_ptr<DefStmt>> methods;
         ClassStmt(std::string n, std::string p, SourceLocation l)
             : Stmt(StmtKind::Class, l), name(std::move(n)), parentName(std::move(p)) {

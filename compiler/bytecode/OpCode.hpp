@@ -22,6 +22,10 @@ namespace vayu {
         ADD, SUB, MUL, DIV, FLOORDIV, MOD, POW,
         NEG,            //                unary minus
 
+        // ---- Bitwise (Phase 11.1i) ----
+        BAND, BOR, BXOR, SHL, SHR,
+        BNOT,           //                unary bitwise NOT (~x)
+
         // ---- Comparison / logic ----
         EQ, NEQ, LT, GT, LE, GE,
         NOT,

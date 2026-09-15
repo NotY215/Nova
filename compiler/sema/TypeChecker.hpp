@@ -61,6 +61,21 @@ namespace vayu {
             const std::string& name);
         void    checkMethodBody(const DefStmt* m, TypePtr cls);
 
+        // Phase 11.1j: enforce member visibility.
+        void checkVisibility(const std::string& declClass,
+            Visibility vis,
+            const std::string& member,
+            SourceLocation loc);
+        int visCode(Visibility v) {
+            switch (v) {
+            case Visibility::Public:    return 0;
+            case Visibility::Protected: return 1;
+            case Visibility::Private:   return 2;
+            }
+            return 0;
+        }
+        bool isSubclassOf(TypePtr sub, TypePtr base) const;
+
         TypePtr lookupCollectionMethod(const TypePtr& target, const std::string& name,
             SourceLocation loc);
         TypePtr commonElementType(const TypePtr& a, const TypePtr& b, SourceLocation loc);
