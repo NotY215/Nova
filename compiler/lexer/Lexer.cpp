@@ -174,6 +174,35 @@ namespace vayu {
     void Lexer::readNumber() {
         SourceLocation start = here();
         size_t begin = pos_;
+
+        // Phase 11.1i: 0b/0B, 0o/0O, 0x/0X integer prefixes.
+        if (peek() == '0') {
+            char n1 = peek(1);
+            if (n1 == 'b' || n1 == 'B' ||
+                n1 == 'o' || n1 == 'O' ||
+                n1 == 'x' || n1 == 'X') {
+                advance();  // '0'
+                advance();  // prefix letter
+                auto isDigitForBase = [&](char c) -> bool {
+                    if (n1 == 'b' || n1 == 'B') return c == '0' || c == '1';
+                    if (n1 == 'o' || n1 == 'O') return c >= '0' && c <= '7';
+                    return (c >= '0' && c <= '9') ||
+                        (c >= 'a' && c <= 'f') ||
+                        (c >= 'A' && c <= 'F');
+                    };
+                bool any = false;
+                while (!isAtEnd() && isDigitForBase(peek())) { advance(); any = true; }
+                if (!any) {
+                    addAt(TokenType::Invalid, start,
+                        std::string("expected digits after '0") + n1 + "'");
+                    return;
+                }
+                std::string text = source_.substr(begin, pos_ - begin);
+                tokens_.push_back(Token{ TokenType::Int, std::move(text), start });
+                return;
+            }
+        }
+
         bool isFloat = false;
 
         while (!isAtEnd() && std::isdigit(static_cast<unsigned char>(peek()))) advance();

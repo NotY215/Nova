@@ -1,8 +1,12 @@
 #pragma once
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -19,6 +23,7 @@ namespace vayu {
     struct ModuleValue;
     struct StructInstance;
     struct Callable;
+    struct GeneratorValue;
 
     // ===========================================================================
     // Value — hand-rolled tagged union.
@@ -34,12 +39,13 @@ namespace vayu {
         using ListPtr = std::shared_ptr<ListValue>;
         using MapPtr = std::shared_ptr<MapValue>;
         using ModulePtr = std::shared_ptr<ModuleValue>;
+        using GeneratorPtr = std::shared_ptr<GeneratorValue>;
 
     private:
         enum class Tag : uint8_t {
             None, Bool, Int, Float,           // trivial
             Str, Callable, Instance, Class,   // non-trivial (require destruction)
-            List, Map, Module
+            List, Map, Module, Generator
         };
 
         union U {
@@ -53,6 +59,7 @@ namespace vayu {
             ListPtr     list;
             MapPtr      map;
             ModulePtr   module;
+            GeneratorPtr generator;
 
             U() noexcept : i(0) {}
             ~U() {}
@@ -79,7 +86,7 @@ namespace vayu {
         Value(ClassPtr c)  noexcept;
         Value(ListPtr l)   noexcept;
         Value(MapPtr m)    noexcept;
-        Value(ModulePtr m) noexcept;
+        Value(GeneratorPtr g) noexcept;
 
         Value(const Value& other);
         Value(Value&& other) noexcept;
@@ -99,6 +106,7 @@ namespace vayu {
         bool isList()     const noexcept { return tag_ == Tag::List; }
         bool isMap()      const noexcept { return tag_ == Tag::Map; }
         bool isModule()   const noexcept { return tag_ == Tag::Module; }
+        bool isGenerator() const noexcept { return tag_ == Tag::Generator; }
 
         bool               asBool()   const { return u_.b; }
         long long          asInt()    const { return u_.i; }
@@ -110,6 +118,7 @@ namespace vayu {
         ListPtr   asList()     const { return u_.list; }
         MapPtr    asMap()      const { return u_.map; }
         ModulePtr asModule()   const { return u_.module; }
+        GeneratorPtr asGenerator() const { return u_.generator; }
 
         double asDouble() const noexcept {
             return tag_ == Tag::Int ? (double)u_.i : u_.f;
@@ -141,6 +150,23 @@ namespace vayu {
         std::string                            name;
         std::unordered_map<std::string, Value> members;
     };
+
+    // Phase 11.1k1: thread-backed coroutine.
+    enum class GenState { Fresh, Running, Suspended, Done };
+
+    struct GeneratorValue {
+        std::thread                worker;
+        std::mutex                 mtx;
+        std::condition_variable    cv;
+        GenState                   state = GenState::Fresh;
+        bool                       resume = false;
+        bool                       cancel = false;
+        Value                      yielded;
+        std::exception_ptr         pendingError;
+
+        ~GeneratorValue();
+    };
+
 
     struct ClassObject {
         std::string                  name;

@@ -381,6 +381,13 @@ namespace vayu {
             }
             break;
         }
+        case StmtKind::Yield: {
+            auto* n = static_cast<const YieldStmt*>(s);
+            putLabel(prefix, isLast, n->value ? "Yield" : "Yield (None)");
+            if (n->value)
+                prExpr(n->value.get(), childPrefix(prefix, isLast), true);
+            break;
+        }
         case StmtKind::Pass:     putLabel(prefix, isLast, "Pass"); break;
         case StmtKind::Break:    putLabel(prefix, isLast, "Break"); break;
         case StmtKind::Continue: putLabel(prefix, isLast, "Continue"); break;

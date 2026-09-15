@@ -36,6 +36,11 @@ namespace vayu {
         void registerDeclarations(const Block& program);
         bool  vmIsInstanceOf(const Value& v, const std::string& className);
         Value vmMakeException(const std::string& typeName, const std::string& msg);
+        // Phase 11.1k1: generator support.
+        Value createGenerator(const std::shared_ptr<Callable>& fn,
+            const std::vector<Value>& args);
+        Value nextGenerator(const std::shared_ptr<GeneratorValue>& gen,
+            SourceLocation loc);
 
         Value vmGetAttr(const Value& base, const std::string& name, SourceLocation loc);
         void  vmSetAttr(const Value& base, const std::string& name,
@@ -66,6 +71,7 @@ namespace vayu {
         std::vector<std::unique_ptr<Block>> moduleAsts_;
 
         std::vector<Value> activeExceptions_;
+        std::shared_ptr<GeneratorValue> generatorContext_;
 
         void  exec(const Stmt* s);
         void  execBlock(const Block& b);
@@ -80,8 +86,12 @@ namespace vayu {
         void  execFor(const ForStmt* n);
         void  execTry(const TryStmt* t);
         void  execRaise(const RaiseStmt* r);
+        void  execYield(const YieldStmt* y);
         void  execImport(const ImportStmt* n);
         void  execFromImport(const FromImportStmt* n);
+        // Thrown inside a generator worker thread when the generator is
+        // cancelled by the owner (i.e. its shared_ptr died mid-suspension).
+        struct GeneratorCancelled {};
         VMFunctionRunner vmRunner_;
 
         Value loadModule(const std::string& name, SourceLocation loc);

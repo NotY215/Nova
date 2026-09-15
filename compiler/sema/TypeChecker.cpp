@@ -811,6 +811,12 @@ namespace vayu {
             // Enum items are type-level; no runtime work here.
             return;
 
+        case StmtKind::Yield: {
+            auto* n = static_cast<const YieldStmt*>(s);
+            if (n->value) checkExpr(n->value.get());
+            return;
+        }
+
         case StmtKind::Pass:
             return;
 

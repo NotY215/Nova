@@ -8,6 +8,9 @@
 #include "lexer/Lexer.hpp"
 #include "parser/Parser.hpp"
 #include <fstream>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 namespace vayu {
 
@@ -342,6 +345,7 @@ namespace vayu {
         case StmtKind::For:   execFor(static_cast<const ForStmt*>(s));  return;
         case StmtKind::Try:   execTry(static_cast<const TryStmt*>(s));  return;
         case StmtKind::Raise: execRaise(static_cast<const RaiseStmt*>(s));return;
+        case StmtKind::Yield: execYield(static_cast<const YieldStmt*>(s));return;
         case StmtKind::Import:     execImport(static_cast<const ImportStmt*>(s));     return;
         case StmtKind::FromImport: execFromImport(static_cast<const FromImportStmt*>(s)); return;
         case StmtKind::Def: {
@@ -378,6 +382,117 @@ namespace vayu {
         case StmtKind::Break:    throw BreakSignal{};
         case StmtKind::Continue: throw ContinueSignal{};
         }
+    }
+    // ===========================================================================
+// Phase 11.1k1 — generators
+// ===========================================================================
+
+    void Interpreter::execYield(const YieldStmt* y) {
+        if (!generatorContext_)
+            throw RuntimeError("'yield' outside a generator function", y->loc);
+        Value v = y->value ? eval(y->value.get()) : Value();
+        auto gen = generatorContext_;
+        std::unique_lock<std::mutex> lk(gen->mtx);
+        gen->yielded = std::move(v);
+        gen->state = GenState::Suspended;
+        gen->cv.notify_all();
+        gen->cv.wait(lk, [&] { return gen->resume || gen->cancel; });
+        if (gen->cancel) throw GeneratorCancelled{};
+        gen->resume = false;
+        gen->state = GenState::Running;
+    }
+
+    Value Interpreter::createGenerator(const std::shared_ptr<Callable>& fn,
+        const std::vector<Value>& args) {
+        const DefStmt* d = fn->decl;
+        if (args.size() != d->params.size())
+            throw RuntimeError("function '" + fn->name + "' expects " +
+                std::to_string(d->params.size()) + " argument(s), got " +
+                std::to_string(args.size()), SourceLocation{});
+
+        auto gen = std::make_shared<GeneratorValue>();
+        auto callEnv = std::make_shared<Environment>(
+            fn->closure ? fn->closure : globals_);
+        for (size_t i = 0; i < args.size(); ++i)
+            callEnv->define(d->params[i].name, args[i]);
+        if (fn->definingClass)
+            callEnv->define("__class__", Value(fn->definingClass));
+
+        Interpreter* self = this;
+        gen->worker = std::thread([self, gen, callEnv, d]() {
+            Interpreter::current_ = self;
+
+            // Wait for the first resume() call from the owner.
+            {
+                std::unique_lock<std::mutex> lk(gen->mtx);
+                gen->cv.wait(lk, [&] { return gen->resume || gen->cancel; });
+                if (gen->cancel) {
+                    gen->state = GenState::Done;
+                    gen->cv.notify_all();
+                    return;
+                }
+                gen->resume = false;
+            }
+
+            auto savedEnv = self->env_;
+            auto savedGen = self->generatorContext_;
+            self->env_ = callEnv;
+            self->generatorContext_ = gen;
+
+            try {
+                try {
+                    for (auto& st : d->body.stmts) self->exec(st.get());
+                }
+                catch (ReturnSignal&) {
+                    // Normal generator exit.
+                }
+            }
+            catch (GeneratorCancelled&) {
+                // Owner cancelled — drop out.
+            }
+            catch (...) {
+                std::lock_guard<std::mutex> lk(gen->mtx);
+                gen->pendingError = std::current_exception();
+            }
+
+            self->env_ = savedEnv;
+            self->generatorContext_ = savedGen;
+
+            std::lock_guard<std::mutex> lk(gen->mtx);
+            gen->state = GenState::Done;
+            gen->cv.notify_all();
+            });
+
+        return Value(gen);
+    }
+
+    Value Interpreter::nextGenerator(const std::shared_ptr<GeneratorValue>& gen,
+        SourceLocation loc) {
+        std::unique_lock<std::mutex> lk(gen->mtx);
+        if (gen->state == GenState::Done)
+            throw RuntimeError("generator exhausted", loc);
+        if (gen->state == GenState::Running)
+            throw RuntimeError("generator already running", loc);
+
+        gen->resume = true;
+        gen->state = GenState::Running;
+        gen->cv.notify_all();
+        gen->cv.wait(lk, [&] {
+            return gen->state == GenState::Suspended ||
+                gen->state == GenState::Done;
+            });
+
+        if (gen->state == GenState::Done) {
+            if (gen->pendingError) {
+                auto err = gen->pendingError;
+                gen->pendingError = nullptr;
+                lk.unlock();
+                std::rethrow_exception(err);
+            }
+            throw RuntimeError("generator exhausted", loc);
+        }
+        Value v = std::move(gen->yielded);
+        return v;
     }
 
     void Interpreter::execRaise(const RaiseStmt* r) {
@@ -675,6 +790,21 @@ namespace vayu {
             const std::string& s = iterable.asString();
             for (size_t i = 0; i < s.size(); ++i) {
                 bindVar(Value(std::string(1, s[i])));
+                if (!runBody()) break;
+            }
+            return;
+        }
+        if (iterable.isGenerator()) {
+            auto gen = iterable.asGenerator();
+            for (;;) {
+                Value v;
+                try {
+                    v = nextGenerator(gen, n->loc);
+                }
+                catch (const RuntimeError&) {
+                    break;   // exhausted
+                }
+                bindVar(v);
                 if (!runBody()) break;
             }
             return;
@@ -1443,6 +1573,7 @@ namespace vayu {
         const std::vector<Value>& args,
         SourceLocation loc) {
         const DefStmt* d = fn->decl;
+        if (d->isGenerator) return createGenerator(fn, args);
         if (args.size() != d->params.size())
             throw RuntimeError("function '" + fn->name + "' expects " +
                 std::to_string(d->params.size()) + " argument(s), got " +
@@ -1781,6 +1912,15 @@ namespace vayu {
         }
     } // namespace
 
+    namespace {
+        Value bi_next(const std::vector<Value>& a) {
+            if (a.size() != 1 || !a[0].isGenerator())
+                throw std::runtime_error("next() takes a generator argument");
+            return Interpreter::current_->nextGenerator(
+                a[0].asGenerator(), SourceLocation{});
+        }
+    }
+
     void Interpreter::installBuiltins() {
         auto add = [&](const char* name, NativeFnPtr fn) {
             auto c = std::make_shared<Callable>();
@@ -1812,6 +1952,7 @@ namespace vayu {
         add("any", bi_any);
         add("all", bi_all);
         add("sum", bi_sum);
+        add("next", bi_next);
     }
 
     void Interpreter::installMathModule() {

@@ -19,6 +19,7 @@ namespace vayu {
         case Tag::List:     u_.list.~shared_ptr();     break;
         case Tag::Map:      u_.map.~shared_ptr();      break;
         case Tag::Module:   u_.module.~shared_ptr();   break;
+        case Tag::Generator: u_.generator.~shared_ptr(); break;
         default: break;
         }
     }
@@ -37,6 +38,7 @@ namespace vayu {
         case Tag::List:     new (&u_.list) ListPtr(other.u_.list);       break;
         case Tag::Map:      new (&u_.map) MapPtr(other.u_.map);          break;
         case Tag::Module:   new (&u_.module) ModulePtr(other.u_.module); break;
+        case Tag::Generator: new (&u_.generator) GeneratorPtr(other.u_.generator); break;
         }
     }
 
@@ -54,6 +56,7 @@ namespace vayu {
         case Tag::List:     new (&u_.list) ListPtr(std::move(other.u_.list));       break;
         case Tag::Map:      new (&u_.map) MapPtr(std::move(other.u_.map));          break;
         case Tag::Module:   new (&u_.module) ModulePtr(std::move(other.u_.module)); break;
+        case Tag::Generator: new (&u_.generator) GeneratorPtr(std::move(other.u_.generator)); break;
         }
         // Deliberately do NOT reset other.tag_.  Moved-from strings and
         // shared_ptrs remain valid objects whose destructors must run.
@@ -73,6 +76,9 @@ namespace vayu {
     Value::Value(ListPtr l) noexcept : tag_(Tag::List) { new (&u_.list) ListPtr(std::move(l)); }
     Value::Value(MapPtr m) noexcept : tag_(Tag::Map) { new (&u_.map) MapPtr(std::move(m)); }
     Value::Value(ModulePtr m) noexcept : tag_(Tag::Module) { new (&u_.module) ModulePtr(std::move(m)); }
+    Value::Value(GeneratorPtr g) noexcept : tag_(Tag::Generator) {
+        new (&u_.generator) GeneratorPtr(std::move(g));
+    }
 
     Value::Value(const Value& other) { copyFrom(other); }
     Value::Value(Value&& other) noexcept { moveFrom(std::move(other)); }
@@ -123,6 +129,7 @@ namespace vayu {
         case Tag::Callable: return "<function " + u_.callable->name + ">";
         case Tag::Class:  return "<class " + u_.cls->name + ">";
         case Tag::Module: return "<module " + u_.module->name + ">";
+        case Tag::Generator: return "<generator>";
 
         case Tag::List: {
             std::string out = "[";
@@ -194,8 +201,20 @@ namespace vayu {
         case Tag::List:     return "list";
         case Tag::Map:      return "map";
         case Tag::Module:   return "module";
+        case Tag::Generator: return "generator";
         }
         return "?";
+    }
+    // Defined out-of-line so GeneratorValue is complete.
+    GeneratorValue::~GeneratorValue() {
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            if (state != GenState::Done) {
+                cancel = true;
+                cv.notify_all();
+            }
+        }
+        if (worker.joinable()) worker.join();
     }
 
 } // namespace vayu

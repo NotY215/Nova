@@ -1311,10 +1311,14 @@ namespace vayu {
                         }
                         throw std::runtime_error("native: 'in' unsupported on these types");
                     }
+                    case BinOp::Pow: {
+                        std::string t = newTemp();
+                        line(t + " =l call $vayu_pow_int(l " + a.ssa +
+                            ", l " + b.ssa + ")");
+                        r.ssa = t; r.type = VType::Int; return r;
+                    }
                     case BinOp::Is:
                         throw std::runtime_error("native: 'is' not supported");
-                    case BinOp::Pow:
-                        throw std::runtime_error("native: '**' not yet lowered");
                     default: break;
                     }
                     throw std::runtime_error("native: unsupported binary op");
@@ -3452,6 +3456,10 @@ namespace vayu {
             void emitFunction(const DefStmt* def, const ClassInfo* cls,
                 const std::string& prefix) {
                 std::string sym;
+                if (def->isGenerator)
+                    throw std::runtime_error(
+                        "native: generators are not supported in the native "
+                        "backend; use --run");
                 if (cls)
                     sym = "$vayu_mth_" + mangle(cls->name) + "_" + mangle(def->name);
                 else
@@ -4317,13 +4325,18 @@ long long vayu_floordiv(long long a, long long b) {
     if ((a ^ b) < 0 && q * b != a) q--;
     return q;
 }
-long long vayu_mod(long long a, long long b) {
-    if (b == 0) {
-        vayu_raise_str(vayu_mkstr_c("ZeroDivisionError"),
-                       vayu_mkstr_c("modulo by zero"));
+long long vayu_pow_int(long long a, long long b) {
+    if (b < 0) {
+        if (a == 1)  return 1;
+        if (a == -1) return (b & 1) ? -1 : 1;
+        return 0;
     }
-    long long r = a % b;
-    if (r != 0 && ((r < 0) != (b < 0))) r += b;
+    long long r = 1;
+    while (b > 0) {
+        if (b & 1) r *= a;
+        b >>= 1;
+        if (b) a *= a;
+    }
     return r;
 }
 

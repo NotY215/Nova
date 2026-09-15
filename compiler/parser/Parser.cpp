@@ -1,5 +1,6 @@
 #include "Parser.hpp"
 #include <cstdlib>
+#include <functional>
 
 namespace vayu {
 
@@ -33,6 +34,22 @@ namespace vayu {
         default: return -1;
         }
     }
+    // Phase 11.1i: parse integer literal text with base prefix.
+    static long long parseIntLiteralText(const std::string& s, SourceLocation loc) {
+        try {
+            if (s.size() >= 2 && s[0] == '0') {
+                char c = s[1];
+                if (c == 'b' || c == 'B') return std::stoll(s.substr(2), nullptr, 2);
+                if (c == 'o' || c == 'O') return std::stoll(s.substr(2), nullptr, 8);
+                if (c == 'x' || c == 'X') return std::stoll(s.substr(2), nullptr, 16);
+            }
+            return std::stoll(s, nullptr, 10);
+        }
+        catch (...) {
+            throw ParseError("integer literal out of range", loc);
+        }
+    }
+
     static BinOp tokenToBinOp(TokenType t) {
         switch (t) {
         case TokenType::Plus: return BinOp::Add; case TokenType::Minus: return BinOp::Sub;
@@ -205,6 +222,7 @@ namespace vayu {
         if (check(TokenType::Const))  return parseConst();
         if (check(TokenType::Enum))   return parseEnum();
         if (check(TokenType::With))   return parseWith();
+        if (check(TokenType::Yield))  return parseYield();
 
         // Soft keyword `match`, with rollback if parse fails.
         if (check(TokenType::Identifier) && peek().lexeme == "match" &&
@@ -382,6 +400,16 @@ namespace vayu {
             std::make_unique<BoolLitExpr>(true, mTok.location),
             std::move(result),
             mTok.location);
+    }
+    // =========================================================================
+    // Phase 11.1k1 — yield
+    // =========================================================================
+    StmtPtr Parser::parseYield() {
+        Token yTok = advance();   // 'yield'
+        ExprPtr value = nullptr;
+        if (!check(TokenType::Newline) && !check(TokenType::Dedent) && !isAtEnd())
+            value = parseExpression();
+        return std::make_unique<YieldStmt>(std::move(value), yTok.location);
     }
 
     // =========================================================================
@@ -713,9 +741,48 @@ namespace vayu {
         if (match(TokenType::Arrow)) retType = parseTypeExpr();
         expect(TokenType::Colon, "':' before function body");
         Block body = parseBlock();
-        return std::make_unique<DefStmt>(name.lexeme, std::move(params),
+        auto def = std::make_unique<DefStmt>(name.lexeme, std::move(params),
             std::move(retType), std::move(body),
             defTok.location);
+
+        // Phase 11.1k1: walk the body for a top-level `yield`.  If found,
+        // this function is a generator.
+        std::function<bool(const Block&)> blockHasYield =
+            [&](const Block& b) -> bool {
+            for (auto& s : b.stmts) {
+                switch (s->kind) {
+                case StmtKind::Yield: return true;
+                case StmtKind::If: {
+                    auto* n = static_cast<const IfStmt*>(s.get());
+                    if (blockHasYield(n->thenBody)) return true;
+                    for (auto& ec : n->elifs)
+                        if (blockHasYield(ec.body)) return true;
+                    if (n->elseBody && blockHasYield(*n->elseBody)) return true;
+                    break;
+                }
+                case StmtKind::While:
+                    if (blockHasYield(static_cast<const WhileStmt*>(s.get())->body))
+                        return true;
+                    break;
+                case StmtKind::For:
+                    if (blockHasYield(static_cast<const ForStmt*>(s.get())->body))
+                        return true;
+                    break;
+                case StmtKind::Try: {
+                    auto* n = static_cast<const TryStmt*>(s.get());
+                    if (blockHasYield(n->tryBody)) return true;
+                    for (auto& h : n->handlers)
+                        if (blockHasYield(h.body)) return true;
+                    if (n->finallyBody && blockHasYield(*n->finallyBody)) return true;
+                    break;
+                }
+                default: break;
+                }
+            }
+            return false;
+            };
+        def->isGenerator = blockHasYield(def->body);
+        return def;
     }
 
     StmtPtr Parser::parseImport() {
@@ -1051,9 +1118,7 @@ namespace vayu {
         switch (t.type) {
         case TokenType::Int: {
             Token tok = advance();
-            long long v = 0;
-            try { v = std::stoll(tok.lexeme); }
-            catch (...) { throw ParseError("integer literal out of range", tok.location); }
+            long long v = parseIntLiteralText(tok.lexeme, tok.location);
             return std::make_unique<IntLitExpr>(v, tok.lexeme, tok.location);
         }
         case TokenType::Float: {

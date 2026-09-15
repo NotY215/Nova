@@ -162,6 +162,7 @@ namespace vayu {
         Pass, Break, Continue,
         Const,
         Enum,
+        Yield,
     };
 
     struct Stmt {
@@ -214,6 +215,8 @@ namespace vayu {
         Block              body;
         // Phase 11.1j
         Visibility         vis = Visibility::Public;
+        // Phase 11.1k: true if the body contains a top-level `yield`.
+        bool               isGenerator = false;
         DefStmt(std::string n, std::vector<Param> p, ExprPtr rt, Block b, SourceLocation l)
             : Stmt(StmtKind::Def, l),
             name(std::move(n)), params(std::move(p)),
@@ -318,6 +321,14 @@ namespace vayu {
     struct PassStmt : Stmt { PassStmt(SourceLocation l) : Stmt(StmtKind::Pass, l) {} };
     struct BreakStmt : Stmt { BreakStmt(SourceLocation l) : Stmt(StmtKind::Break, l) {} };
     struct ContinueStmt : Stmt { ContinueStmt(SourceLocation l) : Stmt(StmtKind::Continue, l) {} };
+
+    // Phase 11.1k1: `yield expr` / `yield`
+    struct YieldStmt : Stmt {
+        ExprPtr value;   // may be null
+        YieldStmt(ExprPtr v, SourceLocation l)
+            : Stmt(StmtKind::Yield, l), value(std::move(v)) {
+        }
+    };
 
     struct ConstStmt : Stmt {
         std::string name;

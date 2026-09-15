@@ -315,6 +315,8 @@ namespace vayu {
 
     void Compiler::compileDef(const DefStmt* n) {
         int line = n->loc.line;
+        if (n->isGenerator)
+            error(n->loc, "VM mode: generators are not supported; use --run");
         auto fnChunk = std::make_shared<Chunk>();
         for (auto& p : n->params) fnChunk->paramNames.push_back(p.name);
 
