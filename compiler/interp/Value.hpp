@@ -27,9 +27,6 @@ namespace vayu {
 
     // ===========================================================================
     // Value — hand-rolled tagged union.
-    // Drop-in replacement for the previous std::variant-based implementation.
-    // The trivial alternatives (None/Bool/Int/Float) are the fast path: destroy()
-    // and truthy() take a single comparison before the switch.
     // ===========================================================================
     class Value {
     public:
@@ -43,15 +40,15 @@ namespace vayu {
 
     private:
         enum class Tag : uint8_t {
-            None, Bool, Int, Float,           // trivial
-            Str, Callable, Instance, Class,   // non-trivial (require destruction)
+            None, Bool, Int, Float,
+            Str, Callable, Instance, Class,
             List, Map, Module, Generator
         };
 
         union U {
-            bool      b;
-            long long i;
-            double    f;
+            bool        b;
+            long long   i;
+            double      f;
             std::string s;
             FnPtr       callable;
             InstPtr     inst;
@@ -81,11 +78,12 @@ namespace vayu {
         Value(double f) noexcept : tag_(Tag::Float) { u_.f = f; }
         Value(std::string s);
         Value(const char* s);
-        Value(FnPtr c)     noexcept;
-        Value(InstPtr s)   noexcept;
-        Value(ClassPtr c)  noexcept;
-        Value(ListPtr l)   noexcept;
-        Value(MapPtr m)    noexcept;
+        Value(FnPtr c)        noexcept;
+        Value(InstPtr s)      noexcept;
+        Value(ClassPtr c)     noexcept;
+        Value(ListPtr l)      noexcept;
+        Value(MapPtr m)       noexcept;
+        Value(ModulePtr m)    noexcept;
         Value(GeneratorPtr g) noexcept;
 
         Value(const Value& other);
@@ -94,30 +92,30 @@ namespace vayu {
         Value& operator=(const Value& other);
         Value& operator=(Value&& other) noexcept;
 
-        bool isNone()     const noexcept { return tag_ == Tag::None; }
-        bool isBool()     const noexcept { return tag_ == Tag::Bool; }
-        bool isInt()      const noexcept { return tag_ == Tag::Int; }
-        bool isFloat()    const noexcept { return tag_ == Tag::Float; }
-        bool isNumber()   const noexcept { return tag_ == Tag::Int || tag_ == Tag::Float; }
-        bool isString()   const noexcept { return tag_ == Tag::Str; }
-        bool isCallable() const noexcept { return tag_ == Tag::Callable; }
-        bool isInstance() const noexcept { return tag_ == Tag::Instance; }
-        bool isClass()    const noexcept { return tag_ == Tag::Class; }
-        bool isList()     const noexcept { return tag_ == Tag::List; }
-        bool isMap()      const noexcept { return tag_ == Tag::Map; }
-        bool isModule()   const noexcept { return tag_ == Tag::Module; }
+        bool isNone()      const noexcept { return tag_ == Tag::None; }
+        bool isBool()      const noexcept { return tag_ == Tag::Bool; }
+        bool isInt()       const noexcept { return tag_ == Tag::Int; }
+        bool isFloat()     const noexcept { return tag_ == Tag::Float; }
+        bool isNumber()    const noexcept { return tag_ == Tag::Int || tag_ == Tag::Float; }
+        bool isString()    const noexcept { return tag_ == Tag::Str; }
+        bool isCallable()  const noexcept { return tag_ == Tag::Callable; }
+        bool isInstance()  const noexcept { return tag_ == Tag::Instance; }
+        bool isClass()     const noexcept { return tag_ == Tag::Class; }
+        bool isList()      const noexcept { return tag_ == Tag::List; }
+        bool isMap()       const noexcept { return tag_ == Tag::Map; }
+        bool isModule()    const noexcept { return tag_ == Tag::Module; }
         bool isGenerator() const noexcept { return tag_ == Tag::Generator; }
 
-        bool               asBool()   const { return u_.b; }
-        long long          asInt()    const { return u_.i; }
-        double             asFloat()  const { return u_.f; }
-        const std::string& asString() const { return u_.s; }
-        FnPtr     asCallable() const { return u_.callable; }
-        InstPtr   asInstance() const { return u_.inst; }
-        ClassPtr  asClass()    const { return u_.cls; }
-        ListPtr   asList()     const { return u_.list; }
-        MapPtr    asMap()      const { return u_.map; }
-        ModulePtr asModule()   const { return u_.module; }
+        bool               asBool()    const { return u_.b; }
+        long long          asInt()     const { return u_.i; }
+        double             asFloat()   const { return u_.f; }
+        const std::string& asString()  const { return u_.s; }
+        FnPtr        asCallable()  const { return u_.callable; }
+        InstPtr      asInstance()  const { return u_.inst; }
+        ClassPtr     asClass()     const { return u_.cls; }
+        ListPtr      asList()      const { return u_.list; }
+        MapPtr       asMap()       const { return u_.map; }
+        ModulePtr    asModule()    const { return u_.module; }
         GeneratorPtr asGenerator() const { return u_.generator; }
 
         double asDouble() const noexcept {
@@ -151,30 +149,11 @@ namespace vayu {
         std::unordered_map<std::string, Value> members;
     };
 
-    // Phase 11.1k1: thread-backed coroutine.
-    enum class GenState { Fresh, Running, Suspended, Done };
-
-    struct GeneratorValue {
-        std::thread                worker;
-        std::mutex                 mtx;
-        std::condition_variable    cv;
-        GenState                   state = GenState::Fresh;
-        bool                       resume = false;
-        bool                       cancel = false;
-        Value                      yielded;
-        std::exception_ptr         pendingError;
-
-        ~GeneratorValue();
-    };
-
-
     struct ClassObject {
-        std::string                  name;
-        std::vector<std::string>     fieldOrder;
-        std::shared_ptr<ClassObject> parent;
-
-        // Phase 11.1c: class-level (shared) storage, populated when the
-        // `class` statement executes.  Accessed as `ClassName.name`.
+        std::string                            name;
+        std::vector<std::string>               fieldOrder;
+        std::shared_ptr<ClassObject>           parent;
+        // Phase 11.1c
         std::unordered_map<std::string, Value> staticFields;
     };
 
@@ -224,6 +203,25 @@ namespace vayu {
         std::shared_ptr<ListValue> boundList;
         std::shared_ptr<MapValue>  boundMap;
         std::string                boundStr;
+    };
+
+    // ===========================================================================
+    // Phase 11.1k1: Generator (thread-backed coroutine)
+    // ===========================================================================
+
+    enum class GenState { Fresh, Running, Suspended, Done };
+
+    struct GeneratorValue {
+        std::thread             worker;
+        std::mutex              mtx;
+        std::condition_variable cv;
+        GenState                state = GenState::Fresh;
+        bool                    resume = false;
+        bool                    cancel = false;
+        Value                   yielded;
+        std::exception_ptr      pendingError;
+
+        ~GeneratorValue();
     };
 
 } // namespace vayu
